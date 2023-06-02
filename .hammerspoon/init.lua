@@ -11,11 +11,16 @@ function toggle_application(name)
 		hs.application.launchOrFocus(name)
 	end
 end
+
 hs.application.enableSpotlightForNameSearches(true)
 hs.pathwatcher.new(os.getenv("HOME") .. "/.hammerspoon/", hs.reload):start()
 
 hs.hotkey.bind({ "alt" }, "t", function()
 	toggle_application("iTerm")
+end)
+
+hs.hotkey.bind({ "alt" }, "o", function()
+	toggle_application("Obsidian")
 end)
 
 hs.hotkey.bind({ "alt" }, "a", function()
@@ -24,4 +29,8 @@ end)
 
 hs.hotkey.bind({ "alt" }, "m", function()
 	toggle_application("Messages")
+end)
+
+hs.hotkey.bind({ "alt" }, "s", function()
+	toggle_application("Spotify")
 end)
