@@ -2,16 +2,32 @@ return {
   "jackMort/ChatGPT.nvim",
   event = "VeryLazy",
   config = function()
-    require("chatgpt").setup({
+    local chatgpt = require("chatgpt")
+    chatgpt.setup({
       api_key_cmd = "op read op://private/OpenAI/credential --no-newline",
-      openai_params = {
-        model = "gpt-4",
-        frequency_penalty = 0,
-        presence_penalty = 0,
-        max_tokens = 300,
-        temperature = 0,
-        top_p = 1,
-        n = 1,
+      edit_with_instructions = {
+        diff = false,
+        keymaps = {
+          accept = "<M-l>",
+          toggle_diff = "<C-d>",
+          toggle_settings = "<C-o>",
+          cycle_windows = "<Tab>",
+          use_output_as_input = "<C-i>",
+        },
+      },
+      chat = {
+        keymaps = {
+          close = "<C-G>",
+          yank_last = "<C-y>",
+          scroll_up = "<C-u>",
+          scroll_down = "<C-d>",
+          toggle_settings = "<C-o>",
+          new_session = "<C-n>",
+          cycle_windows = "<Tab>",
+        },
+      },
+      popup_input = {
+        submit = "<CR>",
       },
     })
   end,

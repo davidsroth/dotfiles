@@ -18,6 +18,7 @@ return {
     },
     { "<leader>e", "<leader>fe", desc = "Explorer NeoTree (root dir)", remap = true },
     { "<leader>E", "<leader>fE", desc = "Explorer NeoTree (cwd)", remap = true },
+    { "<leader>o", "<cmd>Neotree focus<cr>", desc = "Explorer NeoTree (cwd)", remap = true },
   },
   deactivate = function()
     vim.cmd([[Neotree close]])
@@ -38,6 +39,7 @@ return {
       },
     },
     window = {
+      position = "float",
       mappings = {
         ["<space>"] = "none",
       },

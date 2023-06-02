@@ -52,10 +52,12 @@ return {
           end,
         },
         mapping = cmp.mapping.preset.insert({
-          ["<C-k>"] = cmp.mapping.select_prev_item(),
           ["<C-j>"] = cmp.mapping.select_next_item(),
+          ["<C-k>"] = cmp.mapping.select_prev_item(),
           ["<C-d>"] = cmp.mapping.scroll_docs(-4),
           ["<C-f>"] = cmp.mapping.scroll_docs(4),
+          ["<M-Space>"] = cmp.mapping.complete(),
+          ["<M-e>"] = cmp.mapping.close(),
           ["<CR>"] = cmp.mapping.confirm({
             behavior = cmp.ConfirmBehavior.Replace,
             select = false,
@@ -102,4 +104,20 @@ return {
       })
     end,
   },
+  -- {
+  --   "zbirenbaum/copilot-cmp",
+  --   dependencies = "copilot.lua",
+  --   opts = {},
+  --   config = function(_, opts)
+  --     local copilot_cmp = require("copilot_cmp")
+  --     copilot_cmp.setup(opts)
+  --     -- attach cmp source whenever copilot attaches
+  --     -- fixes lazy-loading issues with the copilot cmp source
+  --     require("lazyvim.util").on_attach(function(client)
+  --       if client.name == "copilot" then
+  --         copilot_cmp._on_insert_enter({})
+  --       end
+  --     end)
+  --   end,
+  -- },
 }

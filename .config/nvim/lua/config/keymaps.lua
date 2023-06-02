@@ -12,10 +12,13 @@ local function map(mode, lhs, rhs, opts)
   end
 end
 
+-- remap jj to esc
 map("i", "jj", "<esc>")
 
 map("n", "<leader>ws", "<cmd>w<cr>", { desc = "Save File" })
 map("n", "<leader>wq", "<cmd>wq<cr>", { desc = "Save and Quit" })
+map("n", "<c-x>", "<cmd>q<cr>", { desc = "Quit" })
+map("i", "<c-x>", "<cmd>q<cr>", { desc = "Quit" })
 
 map("n", "<M-h>", "^", { desc = "Go to beginning of line" })
 map("n", "<M-l>", "$", { desc = "Go to end of line" })
@@ -26,3 +29,8 @@ map("v", ">", ">gv")
 
 map("n", "<leader>ga", "<cmd>Git add %<cr>", { desc = "Stage the current file" })
 map("n", "<leader>gb", "<cmd>Git blame<cr>", { desc = "Show the blame" })
+
+map("n", "<M-/>", "<cmd>ToggleTerm size=20 direction=float<cr>", { desc = "Toggle terminal" })
+map("t", "<M-/>", "<cmd>ToggleTerm<cr>", { desc = "Toggle terminal" })
+
+map("v", "<leader>gp", "<cmd>ChatGPTEditWithInstructions<cr>", { desc = "ChatGPT" })
