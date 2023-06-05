@@ -5,6 +5,7 @@ return {
       colorscheme = "catppuccin",
     },
   },
+  { "ellisonleao/gruvbox.nvim" },
   {
     "NumToStr/Navigator.nvim",
     config = function()
@@ -31,7 +32,6 @@ return {
       },
     },
   },
-  { "ellisonleao/gruvbox.nvim" },
   {
     "folke/todo-comments.nvim",
     event = "BufRead",
