@@ -1,13 +1,13 @@
 {
-  "title": "Backtick plus",
+  "title": "Tab plus",
   "rules": [
     {
-      "description": "Backtick if alone, else fn",
+      "description": "Tab if alone, else fn",
       "manipulators": [
         {
           "type": "basic",
           "from": {
-            "key_code": "grave_accent_and_tilde",
+            "key_code": "tab",
             "modifiers": {
               "optional": [
                 "any"
@@ -22,7 +22,7 @@
           ],
           "to_if_alone": [
             {
-              "key_code": "grave_accent_and_tilde"
+              "key_code": "tab"
             }
           ]
         }
