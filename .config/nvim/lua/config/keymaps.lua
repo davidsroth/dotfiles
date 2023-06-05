@@ -15,11 +15,13 @@ end
 -- remap jj to esc
 map("i", "jj", "<esc>")
 
+-- Save and quit
 map("n", "<leader>ws", "<cmd>w<cr>", { desc = "Save File" })
 map("n", "<leader>wq", "<cmd>wq<cr>", { desc = "Save and Quit" })
 map("n", "<c-x>", "<cmd>q<cr>", { desc = "Quit" })
 map("i", "<c-x>", "<cmd>q<cr>", { desc = "Quit" })
 
+-- Move to beginning and end of line
 map("n", "<M-h>", "^", { desc = "Go to beginning of line" })
 map("n", "<M-l>", "$", { desc = "Go to end of line" })
 
@@ -27,10 +29,16 @@ map("n", "<M-l>", "$", { desc = "Go to end of line" })
 map("v", "<", "<gv")
 map("v", ">", ">gv")
 
+-- Git
 map("n", "<leader>ga", "<cmd>Git add %<cr>", { desc = "Stage the current file" })
 map("n", "<leader>gb", "<cmd>Git blame<cr>", { desc = "Show the blame" })
 
+-- Terminal
 map("n", "<M-/>", "<cmd>ToggleTerm size=20 direction=float<cr>", { desc = "Toggle terminal" })
 map("t", "<M-/>", "<cmd>ToggleTerm<cr>", { desc = "Toggle terminal" })
 
+-- ChatGPT
 map("v", "<leader>gp", "<cmd>ChatGPTEditWithInstructions<cr>", { desc = "ChatGPT" })
+
+-- Alpha Dashboard
+map("n", "<leader>;", "<cmd>Alpha<cr>", { desc = "Alpha" })
