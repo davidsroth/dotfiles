@@ -33,6 +33,13 @@ return {
   },
   { "ellisonleao/gruvbox.nvim" },
   {
+    "folke/todo-comments.nvim",
+    event = "BufRead",
+    config = function()
+      require("todo-comments").setup({})
+    end,
+  },
+  {
     "zbirenbaum/copilot.lua",
     cmd = "Copilot",
     event = "InsertEnter",
