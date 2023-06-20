@@ -12,25 +12,38 @@ function toggle_application(name)
 	end
 end
 
+-- launch, focus or rotate application
+local function launchOrFocusOrRotate(app)
+	local focusedWindow = hs.window.focusedWindow()
+	-- If already focused, try to find the next window
+	if focusedWindow and focusedWindow:application():name() == app then
+		local appWindows = hs.application.get(app):allWindows()
+		if #appWindows > 0 then
+			-- It seems that this list order changes after one window get focused,
+			-- let's directly bring the last one to focus every time
+			appWindows[#appWindows]:focus()
+		else -- this should not happen, but just in case
+			hs.application.launchOrFocus(app)
+		end
+	else -- if not focused
+		hs.application.launchOrFocus(app)
+	end
+end
+
+hs.pathwatcher.new(os.getenv("HOME") .. "/dotfiles/.hammerspoon/", hs.reload):start()
 hs.application.enableSpotlightForNameSearches(true)
-hs.pathwatcher.new(os.getenv("HOME") .. "/.hammerspoon/", hs.reload):start()
 
-hs.hotkey.bind({ "alt" }, "t", function()
-	toggle_application("iTerm")
-end)
+launchKeys = {
+	{ "o", "Obsidian" },
+	{ "t", "iTerm" },
+	{ "b", "Arc" },
+	{ "m", "Messages" },
+	{ "s", "Spotify" },
+	{ "c", "Visual Studio Code" },
+}
 
-hs.hotkey.bind({ "alt" }, "o", function()
-	toggle_application("Obsidian")
-end)
-
-hs.hotkey.bind({ "alt" }, "a", function()
-	toggle_application("Arc")
-end)
-
-hs.hotkey.bind({ "alt" }, "m", function()
-	toggle_application("Messages")
-end)
-
-hs.hotkey.bind({ "alt" }, "s", function()
-	toggle_application("Spotify")
-end)
+for i, app in ipairs(launchKeys) do
+	hs.hotkey.bind({ "alt" }, app[1], function()
+		launchOrFocusOrRotate(app[2])
+	end)
+end
