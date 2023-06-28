@@ -18,28 +18,29 @@ local function launchOrFocusOrRotate(app)
 	-- If already focused, try to find the next window
 	if focusedWindow and focusedWindow:application():name() == app then
 		local appWindows = hs.application.get(app):allWindows()
-		if #appWindows > 0 then
+		if #appWindows > 1 then
 			-- It seems that this list order changes after one window get focused,
 			-- let's directly bring the last one to focus every time
 			appWindows[#appWindows]:focus()
 		else -- this should not happen, but just in case
-			hs.application.launchOrFocus(app)
+			-- hs.application.launchOrFocus(app)
+			hs.application.get(app):hide()
 		end
 	else -- if not focused
 		hs.application.launchOrFocus(app)
 	end
 end
 
-hs.pathwatcher.new(os.getenv("HOME") .. "/dotfiles/.hammerspoon/", hs.reload):start()
+hs.pathwatcher.new(os.getenv("HOME") .. "~/dotfiles/.hammerspoon/", hs.reload):start()
 hs.application.enableSpotlightForNameSearches(true)
 
-launchKeys = {
+local launchKeys = {
 	{ "o", "Obsidian" },
 	{ "t", "iTerm" },
 	{ "b", "Arc" },
 	{ "m", "Messages" },
 	{ "s", "Spotify" },
-	{ "c", "Visual Studio Code" },
+	{ "c", "Cron" },
 }
 
 for i, app in ipairs(launchKeys) do
