@@ -32,6 +32,8 @@ return {
       },
     },
   },
+  { "echasnovski/mini.ai", version = false },
+  { "echasnovski/mini.bufremove", version = false },
   {
     "folke/todo-comments.nvim",
     event = "BufRead",
