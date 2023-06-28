@@ -33,12 +33,13 @@ map("v", ">", ">gv")
 map("n", "<leader>ga", "<cmd>Git add %<cr>", { desc = "Stage the current file" })
 map("n", "<leader>gb", "<cmd>Git blame<cr>", { desc = "Show the blame" })
 
--- Terminal
-map("n", "<M-/>", "<cmd>ToggleTerm size=20 direction=float<cr>", { desc = "Toggle terminal" })
-map("t", "<M-/>", "<cmd>ToggleTerm<cr>", { desc = "Toggle terminal" })
-
 -- ChatGPT
 map("v", "<leader>gp", "<cmd>ChatGPTEditWithInstructions<cr>", { desc = "ChatGPT" })
 
 -- Alpha Dashboard
 map("n", "<leader>;", "<cmd>Alpha<cr>", { desc = "Alpha" })
+
+map("n", "x", '"_x', { noremap = true, silent = true })
+
+-- Map 'r' to redo
+map("n", "<leader>r", "<c-r>", { desc = "Redo" })
