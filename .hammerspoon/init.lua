@@ -35,13 +35,14 @@ hs.pathwatcher.new(os.getenv("HOME") .. "~/dotfiles/.hammerspoon/", hs.reload):s
 hs.application.enableSpotlightForNameSearches(true)
 
 local launchKeys = {
-	{ "o", "Obsidian" },
 	{ "i", "iTerm" },
-	{ "b", "Arc" },
+	{ "o", "Obsidian" },
 	{ "m", "Messages" },
 	{ "s", "Spotify" },
-	{ "c", "Morgen" },
+	{ "c", "Calendar" },
 	{ "f", "Finder" },
+	{ "b", "Bitwarden" },
+	{ "u", "Arc" },
 }
 
 for _, app in ipairs(launchKeys) do

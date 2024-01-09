@@ -8,5 +8,5 @@ alias gc="git checkout"
 alias ll='ls -alF'
 alias la='ls -A'
 alias l='ls -CF'
-alias brewu='brew update && brew upgrade && brew cleanup'
+alias brwu='brew update && brew upgrade && brew cleanup'
 alias config='/usr/bin/git --git-dir=$HOME/.cfg/ --work-tree=$HOME'

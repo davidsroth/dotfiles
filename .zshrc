@@ -1,5 +1,9 @@
 # Path to your oh-my-zsh installation.
 export ZSH="$HOME/.oh-my-zsh"
+# Load .env file for local sessions only in zsh
+if [[ -z "$SSH_CLIENT" && -z "$SSH_TTY" ]]; then
+  source ~/.env
+fi
 
 ZSH_THEME="spaceship"
 
