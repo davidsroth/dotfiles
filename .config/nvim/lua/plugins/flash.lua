@@ -5,7 +5,7 @@ return {
   opts = {},
   keys = {
     {
-      "s",
+      "f",
       mode = { "n", "x", "o" },
       function()
         -- default options: exact mode, multi window, all directions, with a backdrop
@@ -14,7 +14,7 @@ return {
       desc = "Flash",
     },
     {
-      "S",
+      "F",
       mode = { "n", "o", "x" },
       function()
         -- show labeled treesitter nodes around the cursor

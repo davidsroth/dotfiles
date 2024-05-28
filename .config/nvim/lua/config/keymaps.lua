@@ -36,17 +36,13 @@ map("v", ">", ">gv")
 map("n", "<leader>ga", "<cmd>Git add %<cr>", { desc = "Stage the current file" })
 map("n", "<leader>gb", "<cmd>Git blame<cr>", { desc = "Show the blame" })
 
--- ChatGPT
-map("v", "<leader>gpe", "<cmd>ChatGPTEditWithInstructions<cr>", { desc = "ChatGPT" })
-map("n", "<leader>gpt", "<cmd>ChatGPT<cr>", { desc = "ChatGPT" })
-
 -- Alpha Dashboard
 map("n", "<leader>;", "<cmd>Alpha<cr>", { desc = "Alpha" })
 
 map("n", "x", '"_x', { noremap = true, silent = true })
 
--- Map 'r' to redo
-map("n", "<leader>r", "<c-r>", { desc = "Redo" })
+-- Map 'r' to rename
+map("n", "<leader>r", vim.lsp.buf.rename, { desc = "Rename symbol" })
 
 -- Map Shift+[J/K] to move five lines up and down
 map("n", "J", "<c-d>", { desc = "Page down" })
