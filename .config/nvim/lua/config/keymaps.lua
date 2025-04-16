@@ -19,10 +19,6 @@ map("n", "<leader>wr", "<cmd> set wrap!<cr>", { desc = "Toggle wrap" })
 -- Save and quit
 map("n", "<leader>ww", "<cmd>w<cr>", { desc = "Save File" })
 map("n", "<leader>wq", "<cmd>wq<cr>", { desc = "Save and Quit" })
-map("n", "<c-x>", "<cmd>q<cr>", { desc = "Quit" })
-map("i", "<c-x>", "<cmd>q<cr>", { desc = "Quit" })
-map("n", "<m-x>", "<cmd>q<cr>", { desc = "Quit" })
-map("i", "<m-x>", "<cmd>q<cr>", { desc = "Quit" })
 
 -- Move to beginning and end of line
 map("n", "<M-h>", "^", { desc = "Go to beginning of line" })
@@ -51,3 +47,10 @@ map("n", "K", "<c-u>", { desc = "Page up" })
 -- Set H and L to move to the beginning and end of the line
 map("n", "H", "^", { desc = "Move to the beginning of the line" })
 map("n", "L", "$", { desc = "Move to the end of the line" })
+
+map("n", "<m-Down>", ":m .+1<CR>==", { desc = "Swap current line with above" })
+map("n", "<m-Up>", ":m .-2<CR>==", { desc = "Swap current line with above" })
+map("i", "<m-Down>", "<Esc>:m .+1<CR>==gi", { desc = "Swap current line with above" })
+map("i", "<m-Up>", "<Esc>:m .-2<CR>==gi", { desc = "Swap current line with above" })
+map("v", "<m-Down>", ":m '>+1<CR>gv=gv", { desc = "Swap current line with above" })
+map("v", "<m-Up>", ":m '<-2<CR>gv=gv", { desc = "Swap current line with above" })
