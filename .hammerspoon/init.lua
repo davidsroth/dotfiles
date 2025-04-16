@@ -35,18 +35,30 @@ hs.pathwatcher.new(os.getenv("HOME") .. "~/dotfiles/.hammerspoon/", hs.reload):s
 hs.application.enableSpotlightForNameSearches(true)
 
 local launchKeys = {
-	{ "i", "iTerm" },
-	{ "o", "Obsidian" },
-	{ "m", "Messages" },
-	{ "s", "Spotify" },
-	{ "c", "Calendar" },
-	{ "f", "Finder" },
-	{ "b", "Bitwarden" },
-	{ "u", "Arc" },
+	i = "iTerm",
+	m = "Slack",
+	s = "Spotify",
+	c = "Sunsama",
+	f = "Finder",
+	b = "1Password",
+	u = "Arc",
+	v = "Cursor",
+	d = "DataGrip",
+	t = "Microsoft Teams",
 }
 
-for _, app in ipairs(launchKeys) do
-	hs.hotkey.bind({ "alt" }, app[1], function()
-		launchOrFocusOrRotate(app[2])
+local alts = {
+	m = "Messages",
+}
+
+for key, app in pairs(launchKeys) do
+	hs.hotkey.bind({ "alt" }, key, function()
+		launchOrFocusOrRotate(app)
+	end)
+end
+
+for key, app in pairs(alts) do
+	hs.hotkey.bind({ "alt", "ctrl" }, key, function()
+		launchOrFocusOrRotate(app)
 	end)
 end
