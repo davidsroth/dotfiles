@@ -8,17 +8,18 @@
 ZSH_THEME="spaceship"
 
 plugins=(
-  git
-  zsh-syntax-highlighting
+    git
+    zsh-syntax-highlighting
 )
 
 # source $ZSH/oh-my-zsh.sh
-
 
 eval "$(zoxide init zsh)"
 
 [ -f ~/.fzf.zsh ] && source ~/.fzf.zsh
 [ -f ~/.bash_aliases ] && source ~/.bash_aliases
+[ -f ~/.sh_snippets ] && source ~/.sh_snippets
+[ -f ~/.env ] && source ~/.env
 
 # # ~/.tmux/plugins
 # export PATH=$HOME/.tmux/plugins/t-smart-tmux-session-manager/bin:$PATH
@@ -40,8 +41,8 @@ eval "$(pyenv virtualenv-init -)"
 export JAVA_HOME="/Library/Java/JavaVirtualMachines/zulu-17.jdk/Contents/Home"
 
 export NVM_DIR="$HOME/.nvm"
-[ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"  # This loads nvm
-[ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"  # This loads nvm bash_completion
+[ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"                   # This loads nvm
+[ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion" # This loads nvm bash_completion
 if [ -n "$NVIM_LISTEN_ADDRESS" ]; then
     alias nvim=nvr -cc split --remote-wait +'set bufhidden=wipe'
 fi
@@ -59,3 +60,5 @@ eval "$(starship init zsh)"
 source ~/.env
 eval "$(fzf --zsh)"
 source $(brew --prefix)/share/zsh-autosuggestions/zsh-autosuggestions.zsh
+
+export XDG_CONFIG_HOME="$HOME/.config"
