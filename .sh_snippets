@@ -1,3 +1,18 @@
+# Shell Snippets - Daily Logging & Temporary File Management
+# ==========================================================
+# All files are organized under /tmp/YYYYMMDD/ for automatic cleanup
+#
+# Quick Reference:
+#   pblog    - Log clipboard contents to daily markdown file
+#   tdump    - Dump command output to timestamped file
+#   gtt      - Go to today's temp directory
+#   fls      - Find latest file in current directory
+#   flstd    - Find latest file in today's directory
+#   today    - Get today's date (YYYYMMDD)
+#   datetime - Get current datetime (YYYYMMDD_HH-MM-SS)
+#
+# See docs/shell-snippets-guide.md for detailed documentation
+
 # Output the current datetime in your desired format
 datetime() {
   date +"%Y%m%d_%H-%M-%S"

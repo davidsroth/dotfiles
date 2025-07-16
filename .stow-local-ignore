@@ -1,0 +1,29 @@
+# Stow ignore file
+# Files and patterns listed here will be ignored by GNU Stow
+
+# Documentation files
+CLAUDE.md
+README.md
+README.*
+
+# Version control
+\.git
+\.gitignore
+\.gitmodules
+
+# macOS system files
+\.DS_Store
+
+# Editor temporary files
+.*\.swp
+.*\.swo
+.*~
+
+# Stow metadata
+\.stow-local-ignore
+\.stowrc
+
+# Other common files to ignore
+LICENSE
+LICENSE.*
+CONTRIBUTING.*

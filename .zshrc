@@ -1,3 +1,4 @@
+source ~/zsh-defer/zsh-defer.plugin.zsh
 # Path to your oh-my-zsh installation.
 # export ZSH="$HOME/.oh-my-zsh"
 # Load .env file for local sessions only in zsh
@@ -14,12 +15,14 @@ plugins=(
 
 # source $ZSH/oh-my-zsh.sh
 
+# Critical - load immediately
 eval "$(zoxide init zsh)"
-
-[ -f ~/.fzf.zsh ] && source ~/.fzf.zsh
 [ -f ~/.bash_aliases ] && source ~/.bash_aliases
 [ -f ~/.sh_snippets ] && source ~/.sh_snippets
 [ -f ~/.env ] && source ~/.env
+
+# Defer non-critical loads
+zsh-defer -c '[ -f ~/.fzf.zsh ] && source ~/.fzf.zsh'
 
 # # ~/.tmux/plugins
 # export PATH=$HOME/.tmux/plugins/t-smart-tmux-session-manager/bin:$PATH
@@ -34,9 +37,14 @@ setopt INC_APPEND_HISTORY
 setopt HIST_FIND_NO_DUPS
 setopt HIST_IGNORE_ALL_DUPS
 
+# Lazy load pyenv
 export PYENV_VIRTUALENV_DISABLE_PROMPT=1
-eval "$(pyenv init -)"
-eval "$(pyenv virtualenv-init -)"
+pyenv() {
+    unfunction pyenv
+    eval "$(command pyenv init -)"
+    eval "$(command pyenv virtualenv-init -)"
+    pyenv "$@"
+}
 # eval "$(rbenv init - zsh)"
 export JAVA_HOME="/Library/Java/JavaVirtualMachines/zulu-17.jdk/Contents/Home"
 
@@ -56,10 +64,13 @@ fi
 # Created by `pipx` on 2024-04-15 15:01:04
 export PATH="$PATH:/Users/davidroth/.local/bin"
 
+# Critical - starship prompt
 eval "$(starship init zsh)"
-source ~/.env
-eval "$(fzf --zsh)"
-source $(brew --prefix)/share/zsh-autosuggestions/zsh-autosuggestions.zsh
+
+# Defer other initializations
+zsh-defer source ~/.env
+zsh-defer eval "$(fzf --zsh)"
+zsh-defer source $(brew --prefix)/share/zsh-autosuggestions/zsh-autosuggestions.zsh
 
 autoload -U add-zsh-hook
                load_nvm() {
