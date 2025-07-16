@@ -41,8 +41,8 @@ eval "$(pyenv virtualenv-init -)"
 export JAVA_HOME="/Library/Java/JavaVirtualMachines/zulu-17.jdk/Contents/Home"
 
 export NVM_DIR="$HOME/.nvm"
-[ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"                   # This loads nvm
-[ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion" # This loads nvm bash_completion
+# [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"                   # This loads nvm
+# [ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion" # This loads nvm bash_completion
 if [ -n "$NVIM_LISTEN_ADDRESS" ]; then
     alias nvim=nvr -cc split --remote-wait +'set bufhidden=wipe'
 fi
@@ -61,4 +61,13 @@ source ~/.env
 eval "$(fzf --zsh)"
 source $(brew --prefix)/share/zsh-autosuggestions/zsh-autosuggestions.zsh
 
+autoload -U add-zsh-hook
+               load_nvm() {
+                 export NVM_DIR="$HOME/.nvm"
+                 [ -s "$NVM_DIR/nvm.sh"       ] && . "$NVM_DIR/nvm.sh"
+                 [ -s "$NVM_DIR/bash_completion" ] && . "$NVM_DIR/bash_completion"
+                 unfunction load_nvm
+               }
+               add-zsh-hook preexec load_nvm
 export XDG_CONFIG_HOME="$HOME/.config"
+alias claude="~/.claude/local/claude"
