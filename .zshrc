@@ -81,4 +81,4 @@ autoload -U add-zsh-hook
                }
                add-zsh-hook preexec load_nvm
 export XDG_CONFIG_HOME="$HOME/.config"
-alias claude="~/.claude/local/claude"
+alias claude="/Users/davidroth/.claude/local/claude"
