@@ -1,0 +1,33 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(sw_vers)",
+      "Bash(system_profiler:*)",
+      "Bash(vm_stat:*)",
+      "Bash(ping:*)",
+      "Bash(nslookup:*)",
+      "Bash(top:*)",
+      "Bash(ls:*)",
+      "Bash(brew:*)",
+      "Bash(node:*)",
+      "Bash(git --version)",
+      "Bash(docker:*)",
+      "Bash(java:*)",
+      "Bash(pmset:*)",
+      "Bash(find:*)",
+      "Bash(mkdir:*)",
+      "Bash(mv:*)",
+      "Bash(comm:*)",
+      "Bash(md5sum:*)",
+      "Bash(cp:*)",
+      "mcp__linear__list_teams",
+      "mcp__linear__list_my_issues",
+      "mcp__linear__list_projects",
+      "Bash(codex:*)",
+      "mcp__zen__chat",
+      "Bash(cursor:*)",
+      "WebFetch(domain:dlvhdr.github.io)"
+    ],
+    "deny": []
+  }
+}
