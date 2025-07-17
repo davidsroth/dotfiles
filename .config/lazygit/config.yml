@@ -3,6 +3,90 @@ customCommands:
     command: "git fetch --prune"
     context: "localBranches"
     output: log
+    description: "Fetch and prune branches"
+  # Open commit in browser (system default)
+  - key: "<c-o>"
+    context: "commits"
+    command: "open $(git remote get-url origin | sed 's/\\.git$//' | sed 's/git@github.com:/https:\\/\\/github.com\\//')/commit/{{.SelectedLocalCommit.Hash}}"
+    description: "Open commit in GitHub"
+  # Toggle file staging with 'a'
+  - key: 'a'
+    context: 'files'
+    command: "git {{if .SelectedFile.HasUnstagedChanges}} add {{else}} reset {{end}} {{.SelectedFile.Name | quote}}"
+    description: 'Toggle file staged'
+  # Interactive rebase from selected commit
+  - key: "E"
+    context: "commits"
+    command: "git rebase -i {{.SelectedLocalCommit.Hash}}^"
+    description: "Interactive rebase from commit"
+    output: terminal
+  # Copy commit hash to clipboard
+  - key: "y"
+    context: "commits"
+    command: "echo -n {{.SelectedLocalCommit.Hash}} | pbcopy"
+    description: "Copy commit hash"
+  # Show file history
+  - key: "H"
+    context: "files"
+    command: "lazygit log --follow -- {{.SelectedFile.Name}}"
+    description: "Show file history"
+    output: terminal
 gui:
   # If true, do not show a warning when discarding changes in the staging view.
   skipDiscardChangeWarning: true
+  # Show list view headers
+  showListFooter: true
+  # Show random tip in command log
+  showRandomTip: false
+  # Show command log
+  showCommandLog: true
+  # Show bottom line
+  showBottomLine: true
+  # Show file icons
+  showFileTree: true
+  # Mouse support
+  mouseEvents: true
+  # Diff context size
+  commandLogSize: 8
+  # Highlight active search
+  activeBorderColor:
+    - cyan
+    - bold
+  # Author colors
+  authorColors:
+    '*': '#999999' # default color for unknown authors
+os:
+  edit: "cursor {{filename}}"
+  editAtLine: "cursor --goto {{filename}}:{{line}}"
+  editAtLineAndWait: "cursor --wait --goto {{filename}}:{{line}}"
+  openDirInEditor: "cursor {{dir}}"
+git:
+  # Pull mode options: 'auto', 'merge', 'rebase', 'ff-only'
+  pull:
+    mode: 'rebase'
+  # Automatically fetch
+  autoFetch: true
+  # Automatically fetch interval in seconds
+  autoFetchInterval: 60
+  # Staging mode: 'all' or 'split'
+  staging:
+    splitDiff: 'auto'
+  # Don't show untracked files in file tree by default
+  showUntrackedFiles: true
+keybinding:
+  universal:
+    # Quick navigation
+    scrollUpMain-alt1: 'K'
+    scrollDownMain-alt1: 'J'
+    # Improved undo/redo
+    undo: 'u'
+    redo: '<c-r>'
+  commits:
+    # Easier fixup commit
+    createFixupCommit: 'F'
+  branches:
+    # Push with tracking
+    pushTag: 'P'
+  files:
+    # Stage/unstage all
+    stageAll: 'A'
