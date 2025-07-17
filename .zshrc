@@ -58,8 +58,8 @@ if [ -n "$NVIM_LISTEN_ADDRESS" ]; then
     export VISUAL="nvr -cc split --remote-wait +'set bufhidden=wipe'"
     export EDITOR="nvr -cc split --remote-wait +'set bufhidden=wipe'"
 else
-    export VISUAL="nvim"
-    export EDITOR="nvim"
+    export VISUAL="cursor"
+    export EDITOR="cursor"
 fi
 # Created by `pipx` on 2024-04-15 15:01:04
 export PATH="$PATH:/Users/davidroth/.local/bin"
