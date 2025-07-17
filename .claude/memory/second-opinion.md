@@ -53,9 +53,12 @@ The following checklist from the former `problem_solving.md` has been consolidat
 
 ## Research-First Approach
 
-- Search for current best-practice before acting.
-- Evaluate multiple solution paths with clear pros/cons.
-- Capture the rationale for the path chosen.
+When encountering new problems or configuration needs:
+1. Search online for established patterns and best practices
+2. Look for how the community typically handles similar situations
+3. Evaluate multiple solution paths with clear pros/cons
+4. Prefer standard conventions over custom solutions
+5. Capture the rationale for the path chosen
 
 ## Session Resumption Checklist
 
