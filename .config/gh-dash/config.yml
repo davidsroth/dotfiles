@@ -1,0 +1,82 @@
+# yaml-language-server: $schema=https://dlvhdr.github.io/gh-dash/configuration/gh-dash/schema.json
+
+prSections:
+  - title: Review Requested
+    filters: is:open review-requested:@me
+  - title: Tower
+    filters: is:open label:tower
+  - title: Nectar
+    filters: is:open label:nectar
+  - title: Ready to Merge
+    filters: is:open review:approved status:success -label:wip,do-not-merge
+  - title: My Pull Requests
+    filters: is:open author:@me
+  - title: Assigned to Me
+    filters: is:open assignee:@me
+  - title: Recently Updated
+    filters: is:open sort:updated-desc
+
+issuesSections:
+  - title: My Issues
+    filters: is:open author:@me
+  - title: Assigned to Me
+    filters: is:open assignee:@me
+
+defaults:
+  preview:
+    open: true
+    width: 50
+  prsLimit: 20
+  issuesLimit: 20
+  view: prs
+
+repoPaths:
+  DistylAI/distillery: /Volumes/git/distillery
+
+keybindings:
+  universal:
+    - key: "esc"
+      command: ""  # Disable ESC from quitting
+  prs:
+    - key: "o"
+      name: "Open in browser"
+      command: "open 'https://github.com/{{.RepoName}}/pull/{{.PrNumber}}'"
+    - key: "c"
+      name: "Checkout PR"
+      command: "cd {{.RepoPath}} && gh pr checkout {{.PrNumber}}"
+    - key: "y"
+      name: "Copy PR URL"
+      command: "echo 'https://github.com/{{.RepoName}}/pull/{{.PrNumber}}' | pbcopy && echo 'PR URL copied!'"
+    - key: "d"
+      name: "View diff"
+      command: "cd {{.RepoPath}} && gh pr diff {{.PrNumber}}"
+    - key: "g"
+      name: "Lazygit (new window)"
+      command: "tmux new-window -c {{.RepoPath}} 'gh pr checkout {{.PrNumber}} && lazygit'"
+    - key: "G"
+      name: "Lazygit (popup)"
+      command: "tmux display-popup -d {{.RepoPath}} -xC -yC -w 80% -h 80% 'gh pr checkout {{.PrNumber}} && lazygit'"
+    - key: "v"
+      name: "Cursor (new window)"
+      command: "tmux new-window -c {{.RepoPath}} 'gh pr checkout {{.PrNumber}} && first_file=$(gh pr diff {{.PrNumber}} --name-only | head -1) && cursor . ${first_file:-.}'"
+  issues:
+    - key: "o"
+      name: "Open in browser"
+      command: "open 'https://github.com/{{.RepoName}}/issues/{{.IssueNumber}}'"
+    - key: "y"
+      name: "Copy issue URL"
+      command: "echo 'https://github.com/{{.RepoName}}/issues/{{.IssueNumber}}' | pbcopy && echo 'Issue URL copied!'"
+
+theme:
+  ui:
+    sectionsShowCount: true
+  colors:
+    text:
+      primary: "#F7F1FF"
+      secondary: "#5AD4E6"
+      faint: "#948AE3"
+    background:
+      selected: "#3E3A42"
+    border:
+      primary: "#948AE3"
+      faint: "#535155"
