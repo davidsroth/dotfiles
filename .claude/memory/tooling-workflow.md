@@ -2,7 +2,6 @@
 created: 2025-07-10
 updated: 2025-07-10
 tags: [tooling, editing, cursor, link, browser, shortcuts, workflow]
-category: process
 ---
 
 # Tooling Workflow Guidelines

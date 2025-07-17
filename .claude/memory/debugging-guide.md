@@ -2,7 +2,6 @@
 created: 2025-07-11
 updated: 2025-07-11
 tags: [debugging, troubleshooting, guide]
-category: reference
 ---
 
 # Debugging Guide
@@ -47,4 +46,4 @@ tail -F logs/app.log | grep --line-buffered -E "ERROR|WARN" | sed $'s/ERROR/\e[3
 
 - @./service-management.md – Starting & stopping background services
 - @./background-processes.md – Managing long-running commands
-- @./o3-consultation-pattern.md – Escalating to O3 for deep root-cause analysis
+- @./second-opinion.md – Escalating to O3 for deep root-cause analysis

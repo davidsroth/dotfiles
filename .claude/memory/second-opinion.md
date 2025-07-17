@@ -2,7 +2,6 @@
 created: 2025-07-10
 updated: 2025-07-11
 tags: [pattern, consultation, reasoning, analysis]
-category: methodology
 ---
 
 # O3 Consultation Pattern
