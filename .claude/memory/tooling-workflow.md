@@ -7,9 +7,10 @@ updated: 2025-07-18
 
 ## File Editing
 
-After writing files, launch in cursor for inspection:
+After writing files, open in editor for inspection:
 ```bash
-cursor "/path/to/file"
+# Use $EDITOR if set, otherwise use system default
+${EDITOR:-open} "/path/to/file"
 ```
 
 ## Link Handling
