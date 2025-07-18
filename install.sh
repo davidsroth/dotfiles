@@ -2,7 +2,7 @@
 
 # Dotfiles Bootstrap Script v2.0
 # ==============================
-# Modern bootstrap script with improved error handling and idempotency
+# Bootstrap script with error handling and idempotency
 # Tested on macOS 15.5 (2025)
 
 # Strict mode - exit on error, undefined variables, and pipe failures
