@@ -1,14 +1,14 @@
 # Neovim Configuration
 
-Modern Neovim configuration based on LazyVim with performance optimizations and XDG compliance.
+Neovim configuration based on LazyVim with lazy loading and XDG compliance.
 
 ## Overview
 
-This configuration follows 2024/2025 best practices using:
-- **LazyVim**: Community-maintained distribution for ease of use
-- **lazy.nvim**: Modern plugin manager with lazy loading
+This configuration uses:
+- **LazyVim**: Community-maintained distribution
+- **lazy.nvim**: Plugin manager with lazy loading
 - **XDG Base Directory**: Compliant file organization
-- **Performance optimizations**: Reduced startup time and better responsiveness
+- **Performance**: Reduced startup time via lazy loading
 
 ## Structure
 
@@ -30,7 +30,7 @@ This configuration follows 2024/2025 best practices using:
 └── stylua.toml              # Lua formatter configuration
 ```
 
-## Key Features
+## Features
 
 ### Performance Optimizations
 - **Startup time**: ~30-40ms with lazy loading
@@ -45,7 +45,7 @@ This configuration follows 2024/2025 best practices using:
 - **Cache**: `~/.cache/nvim/`
 
 ### Language Support
-- **Markdown**: Enhanced editing with headlines and preview
+- **Markdown**: Editing with headlines and preview
 - **LaTeX**: VimTeX integration with Skim viewer
 - **Python**: Pyenv integration with dedicated environment
 - **LSP**: Full language server support via Mason
@@ -93,7 +93,7 @@ Language servers are managed via Mason. Install new ones with:
 Current performance metrics:
 - **Startup time**: ~30-40ms (empty file)
 - **Plugin count**: ~50+ plugins with lazy loading
-- **Memory usage**: Optimized for low resource consumption
+- **Memory usage**: Managed through lazy loading
 
 ## Maintenance
 
@@ -131,7 +131,7 @@ Current performance metrics:
 
 Currently enabled extras:
 - `dap.core` - Debug adapter protocol
-- `lang.markdown` - Enhanced markdown support
+- `lang.markdown` - Markdown support
 - `ui.mini-animate` - Smooth animations
 - `ui.alpha` - Dashboard
 - `linting.eslint` - ESLint integration
@@ -139,7 +139,7 @@ Currently enabled extras:
 
 ## Dependencies
 
-- **Neovim**: v0.9.0+ (v0.10.0+ recommended)
+- **Neovim**: v0.9.0+ (v0.10.0+ for all features)
 - **Python**: Pyenv with `py3nvim` environment
 - **Node.js**: For LSP servers and formatters
 - **Git**: For plugin management

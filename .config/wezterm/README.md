@@ -1,35 +1,35 @@
 # WezTerm Configuration
 
-Modern WezTerm terminal emulator configuration optimized for performance, productivity, and visual appeal.
+WezTerm terminal emulator configuration.
 
 ## Overview
 
-This configuration follows 2024/2025 best practices using:
+This configuration uses:
 - **WebGPU rendering**: Hardware-accelerated performance
 - **Dynamic themes**: Automatic light/dark mode switching
 - **Leader key bindings**: tmux-like workflow
-- **macOS optimization**: Platform-specific enhancements
+- **macOS settings**: Platform-specific configuration
 
-## Key Features
+## Features
 
 ### Performance Optimizations
 - **WebGPU front-end**: GPU-accelerated rendering
-- **60 FPS**: Smooth terminal operations
+- **60 FPS**: Frame rate target
 - **Font rendering**: Subpixel antialiasing and hinting
-- **Efficient scrollback**: 10,000 lines without performance impact
+- **Scrollback**: 10,000 lines
 
-### Visual Enhancements
+### Visual Settings
 - **Dynamic theming**: Switches between Gruvbox Dark/Light based on system appearance
-- **Font**: Inconsolata Nerd Font Mono with optimal rendering
+- **Font**: Inconsolata Nerd Font Mono
 - **Transparency**: 95% opacity with macOS background blur
-- **Clean interface**: Hidden tab bar when only one tab, no scroll bar
+- **Interface**: Hidden tab bar when single tab, no scroll bar
 
-### Modern Terminal Features
-- **Leader key**: `Ctrl+A` for advanced operations
+### Terminal Features
+- **Leader key**: `Ctrl+A`
 - **Pane management**: Split, navigate, and close panes
 - **Copy mode**: Vim-like text selection and copying
 - **Quick select**: Fast URL/path selection
-- **Command palette**: `Cmd+Shift+P` for discoverable commands
+- **Command palette**: `Cmd+Shift+P`
 
 ## Key Bindings
 
@@ -63,10 +63,10 @@ The leader key is `Ctrl+A` (similar to tmux):
 - **Size**: 16pt
 - **Features**: Built-in Nerd Font symbols, ligatures disabled
 
-### Rendering Optimizations
+### Rendering Settings
 - **Antialiasing**: Subpixel for crisp text
-- **Hinting**: Full for better character definition
-- **Load target**: Light for optimal clarity
+- **Hinting**: Full
+- **Load target**: Light
 - **Render target**: HorizontalLcd for macOS
 
 ## Theme System
@@ -77,35 +77,34 @@ Automatically switches between themes based on macOS system appearance:
 - **Light mode**: Gruvbox Light (Hard)
 
 ### Color Scheme Features
-- **High contrast**: Excellent readability
-- **Consistent**: Matches your Neovim configuration
-- **Eye-friendly**: Reduced strain during long sessions
+- **High contrast**: Gruvbox theme characteristics
+- **Consistent**: Matches Neovim configuration
 
 ## Performance
 
 ### Benchmarks
 - **Startup time**: <100ms cold start
 - **Rendering**: 60 FPS with WebGPU
-- **Memory usage**: Efficient scrollback buffer management
-- **GPU acceleration**: Full hardware utilization
+- **Memory usage**: 10,000 line scrollback buffer
+- **GPU acceleration**: WebGPU enabled
 
 ### Optimization Features
-- **WebGPU backend**: Better than OpenGL translation
+- **WebGPU backend**: Hardware accelerated rendering
 - **Disabled features**: No update checks, minimal UI chrome
-- **Efficient font handling**: Cached glyph rendering
+- **Font caching**: Glyph rendering cache
 
 ## macOS Integration
 
 ### Platform-Specific Features
 - **Background blur**: 20-point blur effect with transparency
-- **Alt key handling**: Proper composed key support
+- **Alt key handling**: Composed key support
 - **Window decorations**: Minimal resize-only borders
 - **System integration**: Respects system appearance settings
 
 ### Security & Privacy
 - **Update checks disabled**: No network calls for updates
 - **Local operation**: All configuration stored locally
-- **Secure scrollback**: In-memory buffer protection
+- **Scrollback storage**: In-memory buffer
 
 ## Usage Patterns
 
@@ -119,7 +118,7 @@ Automatically switches between themes based on macOS system appearance:
 - **Tmux compatibility**: Can run tmux inside WezTerm if needed
 - **Neovim integration**: Seamless terminal buffer switching
 - **Shell integration**: Works with zsh, starship prompt
-- **Git workflow**: Excellent with lazygit and git operations
+- **Git workflow**: Compatible with lazygit and git operations
 
 ## Configuration Management
 

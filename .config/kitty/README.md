@@ -21,7 +21,7 @@ All your WezTerm keybindings have been recreated:
 
 ### 2. GPU Rendering
 - WezTerm uses WebGPU frontend
-- Kitty uses OpenGL by default (equally performant)
+- Kitty uses OpenGL by default
 
 ### 3. Copy Mode
 - WezTerm has built-in copy mode
