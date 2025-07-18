@@ -1,0 +1,28 @@
+# macOS
+.DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# Tmux plugins (managed by TPM)
+.config/tmux/plugins/*
+!.config/tmux/plugins/.gitkeep
+
+# Hammerspoon
+.hammerspoon/bin/*
+!.hammerspoon/bin/.gitkeep
+.hammerspoon/Spoons/*
+!.hammerspoon/Spoons/.gitkeep
+
+# Editor temporary files
+*.swp
+*.swo
+*~
+.netrwhist
+
+# Local overrides
+*.local
+!*.local.example
