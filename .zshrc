@@ -61,10 +61,6 @@ eval "$(zoxide init zsh)"
 [ -f ~/.config/shell/aliases.sh ] && source ~/.config/shell/aliases.sh
 [ -f ~/.config/shell/functions.sh ] && source ~/.config/shell/functions.sh
 
-# Load legacy files for compatibility (can be removed after migration)
-[ -f ~/.bash_aliases ] && source ~/.bash_aliases
-[ -f ~/.sh_snippets ] && source ~/.sh_snippets
-
 # ============================================================================
 # Deferred Loads (Performance Optimization)
 # ============================================================================
