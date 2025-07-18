@@ -73,6 +73,9 @@ alias pip='pip3'
 # Navigation
 alias j='z'  # zoxide jump
 
+# Claude Code
+alias claudec='claude --continue'
+
 # ============================================================================
 # Utility Aliases
 # ============================================================================
