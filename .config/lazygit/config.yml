@@ -1,37 +1,96 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/jesseduffield/lazygit/master/schema/config.json
+# ============================================================================
+# Lazygit Configuration - Modern Setup (2024/2025)
+# ============================================================================
+# This configuration follows current best practices for performance, 
+# usability, and modern Git workflows.
+# ============================================================================
+
 customCommands:
+  # ============================================================================
+  # Branch Operations
+  # ============================================================================
+  
   - key: "F"
     command: "git fetch --prune"
     context: "localBranches"
     output: log
     description: "Fetch and prune branches"
+  
+  # ============================================================================
+  # GitHub Integration
+  # ============================================================================
+  
   # Open commit in browser (system default)
   - key: "<c-o>"
     context: "commits"
     command: "open $(git remote get-url origin | sed 's/\\.git$//' | sed 's/git@github.com:/https:\\/\\/github.com\\//')/commit/{{.SelectedLocalCommit.Hash}}"
     description: "Open commit in GitHub"
+  
+  # ============================================================================
+  # File Operations
+  # ============================================================================
+  
   # Toggle file staging with 'a'
   - key: 'a'
     context: 'files'
     command: "git {{if .SelectedFile.HasUnstagedChanges}} add {{else}} reset {{end}} {{.SelectedFile.Name | quote}}"
     description: 'Toggle file staged'
-  # Interactive rebase from selected commit
-  - key: "E"
-    context: "commits"
-    command: "git rebase -i {{.SelectedLocalCommit.Hash}}^"
-    description: "Interactive rebase from commit"
-    output: terminal
-  # Copy commit hash to clipboard
-  - key: "y"
-    context: "commits"
-    command: "echo -n {{.SelectedLocalCommit.Hash}} | pbcopy"
-    description: "Copy commit hash"
+    
   # Show file history
   - key: "H"
     context: "files"
     command: "lazygit log --follow -- {{.SelectedFile.Name}}"
     description: "Show file history"
     output: terminal
+    
+  # Show file in HEAD
+  - key: "W"
+    context: "files"
+    command: "git show HEAD:{{.SelectedFile.Name}}"
+    description: "Show file in HEAD"
+    output: terminal
+  
+  # ============================================================================
+  # Commit Operations
+  # ============================================================================
+  
+  # Interactive rebase from selected commit
+  - key: "E"
+    context: "commits"
+    command: "git rebase -i {{.SelectedLocalCommit.Hash}}^"
+    description: "Interactive rebase from commit"
+    output: terminal
+    
+  # Copy commit hash to clipboard
+  - key: "y"
+    context: "commits"
+    command: "echo -n {{.SelectedLocalCommit.Hash}} | pbcopy"
+    description: "Copy commit hash"
+    
+  # Revert commit
+  - key: "R"
+    context: "commits"
+    command: "git revert {{.SelectedLocalCommit.Hash}}"
+    description: "Revert commit"
+    
+  # Cherry-pick commit
+  - key: "C"
+    context: "commits"
+    command: "git cherry-pick {{.SelectedLocalCommit.Hash}}"
+    description: "Cherry-pick commit"
+    
+  # Show changed files in commit
+  - key: "D"
+    context: "commits"
+    command: "git show --name-only {{.SelectedLocalCommit.Hash}}"
+    description: "Show changed files"
+    output: terminal
 gui:
+  # ============================================================================
+  # UI/UX Settings
+  # ============================================================================
+  
   # If true, do not show a warning when discarding changes in the staging view.
   skipDiscardChangeWarning: true
   # Show list view headers
@@ -42,16 +101,47 @@ gui:
   showCommandLog: true
   # Show bottom line
   showBottomLine: true
-  # Show file icons
+  # Show file icons in tree view
   showFileTree: true
-  # Mouse support
+  # Enable mouse support
   mouseEvents: true
-  # Diff context size
+  # Command log size
   commandLogSize: 8
-  # Highlight active search
+  
+  # ============================================================================
+  # Modern UI Enhancements (2024/2025)
+  # ============================================================================
+  
+  # Use Nerd Fonts v3 for better icon support
+  nerdFontsVersion: "3"
+  # Show file icons for better visual experience
+  showFileIcons: true
+  
+  # ============================================================================
+  # Theme Configuration
+  # ============================================================================
+  
+  # Active border highlighting
   activeBorderColor:
-    - cyan
+    - blue
     - bold
+  # Inactive border color
+  inactiveBorderColor:
+    - white
+  # Selected line background
+  selectedLineBgColor:
+    - blue
+  # Cherry-picked commit colors
+  cherryPickedCommitFgColor:
+    - blue
+  cherryPickedCommitBgColor:
+    - cyan
+  # Unstaged changes color
+  unstagedChangesColor:
+    - red
+  # Default foreground color
+  defaultFgColor:
+    - white
   # Author colors
   authorColors:
     '*': '#999999' # default color for unknown authors
@@ -61,32 +151,79 @@ os:
   editAtLineAndWait: "cursor --wait --goto {{filename}}:{{line}}"
   openDirInEditor: "cursor {{dir}}"
 git:
+  # ============================================================================
+  # Git Behavior Configuration
+  # ============================================================================
+  
   # Pull mode options: 'auto', 'merge', 'rebase', 'ff-only'
   pull:
     mode: 'rebase'
-  # Automatically fetch
+  
+  # ============================================================================
+  # Performance & Auto-refresh Settings (2024/2025)
+  # ============================================================================
+  
+  # Automatically fetch from remote
   autoFetch: true
   # Automatically fetch interval in seconds
   autoFetchInterval: 60
+  # Periodic refresh of files and submodules
+  autoRefresh: true
+  # Pass --all to git fetch for all remotes
+  fetchAll: true
+  # Auto fast-forward local branches when possible
+  autoForwardBranches: allBranches
+  
+  # ============================================================================
+  # Staging & Diff Configuration
+  # ============================================================================
+  
   # Staging mode: 'all' or 'split'
   staging:
     splitDiff: 'auto'
-  # Don't show untracked files in file tree by default
+  # Show untracked files in file tree
   showUntrackedFiles: true
+  
+  # ============================================================================
+  # Security & Commit Settings
+  # ============================================================================
+  
+  # Commit configuration
+  commit:
+    signOff: true  # Add signed-off-by line automatically
 keybinding:
+  # ============================================================================
+  # Key Binding Configuration
+  # ============================================================================
+  
   universal:
-    # Quick navigation
+    # Quick navigation (vim-like)
     scrollUpMain-alt1: 'K'
     scrollDownMain-alt1: 'J'
+    # Additional vim-style navigation
+    scrollUpMain-alt2: '<c-u>'
+    scrollDownMain-alt2: '<c-d>'
+    # Screen mode cycling
+    nextScreenMode: '+'
+    prevScreenMode: '_'
     # Improved undo/redo
     undo: 'u'
     redo: '<c-r>'
+    
   commits:
     # Easier fixup commit
     createFixupCommit: 'F'
+    # Advanced commit operations
+    amendToCommit: 'A'
+    tagCommit: 'T'
+    
   branches:
     # Push with tracking
     pushTag: 'P'
+    # Advanced branch operations
+    setUpstream: 'U'
+    fetchRemote: 'f'
+    
   files:
     # Stage/unstage all
     stageAll: 'A'

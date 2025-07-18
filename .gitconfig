@@ -1,9 +1,214 @@
+# ============================================================================
+# Git Configuration - Following Best Practices
+# ============================================================================
+
+[core]
+	# Default editor for commit messages and interactive commands
+	editor = cursor --wait
+	
+	# Better diff algorithm
+	algorithm = histogram
+	
+	# Prevent issues with file permissions on macOS
+	filemode = false
+	
+	# Handle line endings properly
+	autocrlf = input
+	
+	# Enable parallel index operations
+	preloadindex = true
+	
+	# Faster operations on macOS
+	untrackedcache = true
+	fsmonitor = true
+
+[init]
+	# Set default branch name for new repositories
+	defaultBranch = main
+
+[user]
+	# User information is in ~/.gitconfig.local (not tracked)
+	# This keeps personal information private
+
+[include]
+	# Include local configuration for user-specific settings
+	path = ~/.gitconfig.local
+
+[credential]
+	# Use macOS keychain for storing credentials securely
+	helper = osxkeychain
+
+[push]
+	# Only push the current branch to its upstream branch
+	default = current
+	
+	# Automatically set up remote tracking
+	autoSetupRemote = true
+	
+	# Verify commits are GPG signed before pushing (when using signing)
+	# gpgSign = if-asked
+
+[pull]
+	# Rebase local commits on top of the fetched branch
+	rebase = true
+
+[fetch]
+	# Remove remote tracking branches that no longer exist
+	prune = true
+	
+	# Fetch all tags
+	tags = true
+
+[merge]
+	# Include summary of commits being merged
+	log = true
+	
+	# Better conflict markers
+	conflictStyle = zdiff3
+
+[rebase]
+	# Automatically squash fixup commits
+	autosquash = true
+	
+	# Automatically stash before rebasing
+	autostash = true
+
+[diff]
+	# Better diff algorithm
+	algorithm = histogram
+	
+	# Show moved lines in different color
+	colorMoved = zebra
+	
+	# Use more descriptive diff headers
+	mnemonicprefix = true
+
+[status]
+	# Show status of submodules
+	submoduleSummary = true
+	
+	# Show branch and tracking info
+	branch = true
+	short = true
+
+[log]
+	# Abbreviate commit hashes
+	abbrevCommit = true
+	
+	# Use relative dates
+	date = relative
+
+[color]
+	# Enable colors in Git output
+	ui = auto
+
+[color "branch"]
+	current = yellow reverse
+	local = yellow
+	remote = green
+
+[color "diff"]
+	meta = yellow bold
+	frag = magenta bold
+	old = red
+	new = green
+
+[color "status"]
+	added = green
+	changed = yellow
+	untracked = cyan
+
+[alias]
+	# Status and information
+	st = status --short --branch
+	s = status
+	
+	# Committing
+	c = commit
+	cm = commit -m
+	ca = commit --amend
+	can = commit --amend --no-edit
+	
+	# Branching
+	b = branch
+	bd = branch -d
+	bD = branch -D
+	co = checkout
+	cob = checkout -b
+	
+	# History viewing
+	l = log --oneline --graph --decorate
+	lg = log --graph --pretty=format:'%Cred%h%Creset -%C(yellow)%d%Creset %s %Cgreen(%cr) %C(bold blue)<%an>%Creset'
+	lga = log --graph --all --pretty=format:'%Cred%h%Creset -%C(yellow)%d%Creset %s %Cgreen(%cr) %C(bold blue)<%an>%Creset'
+	
+	# Working with changes
+	d = diff
+	ds = diff --staged
+	dt = difftool
+	
+	# Stashing
+	sl = stash list
+	sp = stash pop
+	ss = stash save
+	
+	# Remote operations
+	f = fetch
+	pl = pull
+	ps = push
+	psu = push -u origin HEAD
+	
+	# Undoing
+	unstage = reset HEAD --
+	undo = reset --soft HEAD~1
+	
+	# Utilities
+	aliases = config --get-regexp alias
+	ignored = !git ls-files -v | grep "^[[:lower:]]"
+	
+	# Maintenance
+	cleanup = !git remote prune origin && git gc
+
 [filter "lfs"]
+	# Git LFS configuration
+	clean = git-lfs clean -- %f
 	smudge = git-lfs smudge -- %f
 	process = git-lfs filter-process
 	required = true
-	clean = git-lfs clean -- %f
-[core]
-	editor = cursor --wait
-[include]
-	path = ~/.gitconfig.local
+
+[pack]
+	# Performance optimizations for large repositories
+	threads = 0  # Use all CPU cores
+	windowMemory = 256m
+
+[gc]
+	# Garbage collection settings
+	auto = 256
+	autopacklimit = 50
+
+[help]
+	# Automatically correct mistyped commands
+	autocorrect = 20  # 2 second delay
+
+[rerere]
+	# Remember conflict resolutions
+	enabled = true
+
+[column]
+	# Use columns for branch/tag listings
+	ui = auto
+
+[commit]
+	# Show diff in commit message editor
+	verbose = true
+	
+	# GPG signing (uncomment to enable)
+	# gpgSign = true
+
+[tag]
+	# Sort tags as version numbers
+	sort = version:refname
+
+# Platform-specific settings
+[includeIf "gitdir:~/work/"]
+	# Include work-specific config when in work directories
+	path = ~/.gitconfig.work
