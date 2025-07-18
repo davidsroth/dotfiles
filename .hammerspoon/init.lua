@@ -35,7 +35,7 @@ hs.pathwatcher.new(os.getenv("HOME") .. "~/dotfiles/.hammerspoon/", hs.reload):s
 hs.application.enableSpotlightForNameSearches(true)
 
 local launchKeys = {
-	i = "iTerm",
+	i = "WezTerm",
 	m = "Slack",
 	s = "Spotify",
 	c = "Sunsama",
