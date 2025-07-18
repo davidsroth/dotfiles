@@ -1,16 +1,11 @@
 ---
 created: 2025-07-18
 updated: 2025-07-18
-tags: [git, workflow, commands]
 ---
 
 # Git Commit Organization Workflow
 
-When organizing git changes into commits, follow this systematic approach.
-
-## Command Trigger
-
-When user says "organize git changes into neat commits" or similar, execute the git-organize-commits workflow.
+Execute when user says "organize git changes into neat commits" or similar.
 
 ## Workflow Steps
 
@@ -22,16 +17,13 @@ git diff --cached   # Staged changes
 git log --oneline -5  # Recent commit style
 ```
 
-### 2. Commit Organization Principles
-
-- **Atomic Commits**: Each commit should represent one logical change
-- **Type Grouping**: Group by conventional commit type (feat, fix, chore, etc.)
-- **Dependency Order**: Commit prerequisites before dependent changes
-- **File Proximity**: Keep related file changes together
+### 2. Organization Principles
+- Atomic commits: One logical change per commit
+- Type grouping: Group by conventional type (feat, fix, chore)
+- Dependency order: Prerequisites before dependent changes
+- File proximity: Keep related files together
 
 ### 3. Commit Message Format
-
-Follow repository conventions, typically:
 ```
 type(scope): description
 
@@ -44,16 +36,13 @@ Co-Authored-By: Claude <noreply@anthropic.com>
 ```
 
 ### 4. Common Groupings
-
-1. **Infrastructure First**: .gitignore, build configs, tooling
-2. **Refactoring Second**: Code cleanup, file reorganization  
-3. **Features Third**: New functionality
-4. **Documentation Last**: README updates, docs
+1. Infrastructure first: .gitignore, build configs, tooling
+2. Refactoring second: Code cleanup, file reorganization  
+3. Features third: New functionality
+4. Documentation last: README updates, docs
 
 ### 5. Execution Pattern
-
 ```bash
-# For each logical group:
 git add <specific files>
 git commit -m "$(cat <<'EOF'
 type(scope): clear description
@@ -70,19 +59,18 @@ EOF
 
 ## Example Scenarios
 
-### Scenario: Mixed Changes
-- Deleted old files → `chore: remove deprecated files`
+Mixed changes:
+- Deleted files → `chore: remove deprecated files`
 - Updated config → `refactor(config): consolidate settings`
 - Added .gitignore → `chore: add .gitignore`
 - Fixed bugs → `fix: correct specific issue`
 
-### Scenario: Feature Development
-- Add dependencies → `chore(deps): add required packages`
-- Core implementation → `feat(module): implement new feature`
+Feature development:
+- Dependencies → `chore(deps): add required packages`
+- Implementation → `feat(module): implement new feature`
 - Tests → `test(module): add feature tests`
 - Documentation → `docs: document new feature`
 
 ## See Also
-
 - @/git-organize-commits.md - The executable command
 - @./code-review-process.md - Related git workflows

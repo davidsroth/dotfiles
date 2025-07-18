@@ -1,62 +1,54 @@
 ---
 created: 2025-07-10
-updated: 2025-07-11
-tags: [process, review, collaboration]
+updated: 2025-07-18
 ---
 
-# Collaborative Code Review Process
+# Code Review Process
 
 ## Process Steps
 
 ### 1. Initial Discovery
-
-- **Switch to PR branch first**: `git checkout <branch-name>`
-- **Verify current state**: Use `git status` to confirm branch and working directory
-- **Use pagination for GitHub MCP operations**: Always use `page` and `perPage` parameters to prevent token limit errors
-- Fetch PR details and examine changed files/diffs
-- Check existing review comments and feedback
-- Understand scope and purpose of changes
+- Switch to PR branch: `git checkout <branch-name>`
+- Verify state with `git status`
+- Use pagination for GitHub MCP operations (page/perPage parameters)
+- Fetch PR details and examine diffs
+- Check existing review comments
+- Understand scope and purpose
 
 ### 2. Structured Analysis
-
-- Use TodoWrite to create review checklist:
-  - Implementation details and changed files
-  - Testing coverage and missing tests
-  - Security and compliance aspects
-  - Code quality and standards
-- Work systematically through each area
+Use TodoWrite for review checklist:
+- Implementation details and changed files
+- Testing coverage and missing tests
+- Security and compliance aspects
+- Code quality and standards
 
 ### 3. Technical Investigation
-
-- Read file contents to understand implementation
-- Search for related patterns/examples in codebase
+- Read files to understand implementation
+- Search for related patterns in codebase
 - Identify missing components (especially tests)
 - Verify adherence to project standards
 
 ### 4. Collaborative Commenting
-
 - Create pending review to batch comments
-- AI adds technical context with code examples
-- Build multiple actionable comments before submitting
-- **AI must get explicit confirmation before submitting pending review**
+- Add technical context with code examples
+- Build multiple actionable comments
+- Get explicit confirmation before submitting
 
 ## Review Criteria
 
-**Critical (Must Fix):** Security issues, breaking changes, missing tests, standard violations
-**Important (Should Fix):** Code quality, error handling, documentation gaps
-**Nice-to-Have:** Organization suggestions, optimizations, future enhancements
+**Critical**: Security issues, breaking changes, missing tests, standard violations  
+**Important**: Code quality, error handling, documentation gaps  
+**Nice-to-Have**: Organization suggestions, optimizations, future enhancements
 
 ## Best Practices
 
-### What Works
-
+What works:
 - Systematic todo tracking for completeness
 - Contextual comments linking to existing patterns
 - Batch reviews vs individual comments
 - Mix of human judgment + technical analysis
 
-### Comment Guidelines
-
+Comment guidelines:
 - Link to existing code examples
 - Be specific about what needs changing and why
 - Provide concrete suggestions with examples

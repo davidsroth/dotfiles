@@ -1,73 +1,61 @@
 ---
 created: 2025-07-10
-updated: 2025-07-11
-tags: [pattern, consultation, reasoning, analysis]
+updated: 2025-07-18
 ---
 
 # O3 Consultation Pattern
 
 ## When to Consult O3
 
-When uncertain about technical details, implementation patterns, or need deeper analysis, leverage O3's reasoning capabilities through the Zen chat tool instead of making assumptions or giving incomplete answers.
+When uncertain about technical details, implementation patterns, or need deeper analysis, leverage O3's reasoning capabilities through the Zen chat tool.
 
-## Use Cases for O3 Consultation
+## Use Cases
+- Analyze complex code implementations
+- Get perspective on architectural decisions  
+- Systematic problem-solving for debugging
+- Plan complex tasks
+- Verify technical assumptions
+- Deep analysis of unfamiliar codebases
 
-- Analyze code when needing to understand complex implementations
-- Get perspective on architectural decisions or trade-offs  
-- Use for systematic problem-solving when debugging issues
-- Leverage reasoning for planning complex tasks
-- Verify technical assumptions before proceeding
-- Deep analysis of unfamiliar codebases or patterns
-
-## Key Capabilities Discovered
-
-- O3 can read local files directly when provided file paths in Zen tools
-- Provides detailed line-by-line analysis and understanding
-- Offers structured reasoning and alternative approaches
-- Can continue conversations with context preservation
+## Key Capabilities
+- Reads local files directly when provided file paths
+- Provides line-by-line analysis
+- Offers structured reasoning and alternatives
+- Context preservation in conversations
 
 ## Pattern
 
 Instead of guessing or providing uncertain answers:
 
 1. Use `mcp__zen__chat` with O3 model
-2. **ALWAYS provide relevant file paths in `files` parameter** - O3 needs access to the actual code/files being discussed
+2. Always provide relevant file paths in `files` parameter
 3. Ask specific questions about the uncertainty
-4. **NEVER use continuation_id** - Each request must be self-contained with full context
+4. Never use continuation_id - each request must be self-contained
 
 ## Critical Reminder
 
-**ALWAYS include relevant files when working with O3**. The model performs significantly better when it has direct access to the files being discussed rather than relying on descriptions or snippets. This enables:
-
-- More accurate analysis of code structure and dependencies
+Always include relevant files when working with O3. Direct file access enables:
+- Accurate analysis of code structure and dependencies
 - Better understanding of context and relationships
-- More precise recommendations based on actual implementation
+- Precise recommendations based on actual implementation
 
-You should aim to include as much context as is necessary, including related files to those being discussed or files that reference the files being discussed.
-
----
-
-# Technical Problem-Solving Quick Reference (merged)
-
-The following checklist from the former `problem_solving.md` has been consolidated here so that the entire methodology for **when** and **how** to escalate to O3 sits in a single document.
+Include related files and files that reference the discussed code.
 
 ## Research-First Approach
 
-When encountering new problems or configuration needs:
-1. Search online for established patterns and best practices
-2. Look for how the community typically handles similar situations
-3. Evaluate multiple solution paths with clear pros/cons
-4. Prefer standard conventions over custom solutions
-5. Capture the rationale for the path chosen
+When encountering new problems:
+1. Search online for established patterns
+2. Look for community solutions
+3. Evaluate multiple paths with pros/cons
+4. Prefer standard conventions
+5. Capture rationale for chosen path
 
-## Session Resumption Checklist
-
-- Confirm current Git branch & working directory.
-- Review recent commits or uncommitted changes.
-- Re-validate assumptions about work in progress.
+## Session Resumption
+- Confirm current Git branch & working directory
+- Review recent commits or uncommitted changes
+- Re-validate assumptions about work in progress
 
 ## Collaborative Correction
-
-- If there is conflicting information, verify together via direct checks (tests, `grep`, etc.).
-- Prefer real-time tools over cached or assumed knowledge.
-- Acknowledge and rectify outdated information promptly.
+- Verify conflicting information via direct checks (tests, grep)
+- Prefer real-time tools over cached knowledge
+- Acknowledge and rectify outdated information promptly

@@ -1,41 +1,27 @@
 ---
 created: 2025-07-10
-updated: 2025-07-10
-tags: [tooling, editing, cursor, link, browser, shortcuts, workflow]
+updated: 2025-07-18
 ---
 
-# Tooling Workflow Guidelines
-
-Quick reference for editor and browser tooling integrations.
+# Tooling Workflow
 
 ## File Editing
 
-After writing to a file, launch it in cursor for David to inspect using:
-
+After writing files, launch in cursor for inspection:
 ```bash
 cursor "/path/to/file"
 ```
 
 ## Link Handling
 
-### Browser Preference
+Browser: Always use Zen browser with `open -a "Zen" "<URL>"`
 
-- Always open links in Zen browser using: `open -a "Zen" "<URL>"`
+Issue: Terminal wraps long URLs making them unclickable
 
-### Link Display Issue
+Solution: Proactively open links instead of just displaying them
+- Always offer to open immediately
+- Use Bash tool with `open -a "Zen" "<URL>"`
+- Don't wait for user to ask
 
-- Terminal wraps long URLs making them unclickable
-- User cannot command-click wrapped URLs
-
-### Solution
-
-When providing URLs:
-
-1. Always offer to open the link immediately
-2. Use the Bash tool with `open -a "Zen" "<URL>"` command
-3. Don't wait for user to ask - proactively open links
-
-### Example
-
-Instead of just showing: https://example.com/very/long/url
-Immediately run: `open -a "Zen" "https://example.com/very/long/url"`
+Example: Instead of showing URL, immediately run:
+`open -a "Zen" "https://example.com/very/long/url"`

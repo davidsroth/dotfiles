@@ -1,38 +1,31 @@
 ---
 created: 2025-07-18
 updated: 2025-07-18
-tags: [documentation, writing, style]
 ---
 
-# Documentation Style Guidelines
+# Documentation Style
 
-When creating or updating documentation files, use factual and non-hyperbolic language.
+Use factual, non-hyperbolic language in documentation.
 
-## Language to Avoid
+## Avoid
+- Quality descriptors: enhanced, improved, better, powerful, modern
+- Marketing language: comprehensive, extensive, advanced, robust
+- Value judgments: best practices, optimal, superior
+- Superlatives: most, fastest, easiest
 
-- Subjective quality descriptors: "enhanced", "improved", "better", "powerful", "modern"
-- Marketing language: "comprehensive", "extensive", "advanced", "robust"
-- Value judgments: "best practices", "optimal", "superior"
-- Superlatives: "most", "fastest", "easiest"
-
-## Language to Use
-
-- Direct descriptions of functionality
+## Use Instead
+- Direct functionality descriptions
 - Specific technical details
 - Concrete feature lists
-- Factual statements about what exists or what something does
+- Factual statements
 
 ## Examples
 
-### Avoid
-- "Enhanced Git configuration with modern best practices"
-- "Powerful terminal multiplexer with advanced features"
-- "Comprehensive development environment"
+Bad: "Enhanced Git configuration with modern best practices"  
+Good: "Git configuration with aliases and custom settings"
 
-### Prefer
-- "Git configuration with aliases and custom settings"
-- "Terminal multiplexer with session management"
-- "Development environment configuration"
+Bad: "Powerful terminal multiplexer with advanced features"  
+Good: "Terminal multiplexer with session management"
 
 ## Principle
 
