@@ -1,0 +1,2 @@
+# This file ensures the plugins directory structure is preserved in git
+# Actual plugins are installed by TPM and ignored by git
