@@ -1,8 +1,6 @@
 ---
 created: 2025-07-10
-updated: 2025-07-11
-tags: [index, guidelines, overview]
-category: reference
+updated: 2025-07-18
 ---
 
 # Claude Code Configuration
@@ -11,57 +9,60 @@ This directory contains persistent knowledge and behavioral guidelines for Claud
 
 ## Behavioral Guidelines
 
-### Memory Creation Triggers (see Memory Overview)
+### Memory Management
 
-@./memory/memory-file-overview.md  
-*Immediate action patterns for memory creation and critical behaviors*
-
-### Memory File Management
-
-@./memory/memory-file-overview.md  
-*When to create memory files and thresholds for persistent knowledge*
+@./memory/memory-management.md  
+*Complete lifecycle from creation triggers to archiving*
 
 @./memory/memory-file-templates.md  
 *File types, naming patterns, and content guidelines*
 
-@./memory/memory-maintenance-process.md  
-*Lifecycle management and maintenance procedures*
+### Documentation Style
+
+@./memory/documentation-style.md  
+*Guidelines for factual, non-hyperbolic documentation*
 
 ## Methodologies
 
-### Problem Solving & O3 Consultation
+### Problem Solving & Second Opinion
 
-@./memory/o3-consultation-pattern.md  
+@./memory/second-opinion.md  
 *Research-first approach and when to leverage O3 for deep analysis*
-
-### O3 Consultation Pattern
 
 ## Operational Processes
 
 ### Tooling Workflow
 
 @./memory/tooling-workflow.md  
-*Editor and browser tooling integrations (Cursor, Zen)*
+*Editor and browser tooling integrations*
+
+### Claude Directory Pattern
+
+@./memory/claude-directory-pattern.md  
+*Project-specific .claude directories for helper tools*
+
+@./memory/claude-directory-linking.md  
+*Linking .claude contents into CLAUDE.local.md*
 
 ### Code Review Process
 
 @./memory/code-review-process.md  
 *Systematic PR review workflow with GitHub integration*
 
-### Background Process Management
+### Git Commit Organization
 
-@./memory/background-processes.md  
-*Handling long-running operations and timeout management*
+@./memory/git-commit-organization.md  
+*Workflow for organizing changes into logical commits*
 
-### Service Management
+### Process Management
 
-@./memory/service-management.md  
-*Starting and managing background services professionally*
+@./memory/process-management.md  
+*Background processes, services, and debugging procedures*
 
-### Debugging Guide
+### System Defaults Preference
 
-@./memory/debugging-guide.md  
-*Common issues, solutions, and troubleshooting procedures*
+@./memory/system-defaults-preference.md  
+*Use system defaults for commands rather than specific applications*
 
 
 
