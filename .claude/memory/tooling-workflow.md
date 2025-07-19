@@ -24,3 +24,25 @@ Solution: Proactively open links instead of just displaying them
 
 Example: Instead of showing URL, immediately run:
 `open "https://example.com/very/long/url"`
+
+## Authentication Scripts Pattern
+
+When creating auth token scripts:
+1. Support JSON output with `--json` flag for automation
+2. Save tokens to file for reuse (e.g., `tower_tokens.json`)
+3. Check multiple env var names for flexibility
+4. Provide structured error responses:
+
+```python
+if json_output:
+    print(json.dumps({
+        "success": False,
+        "error": "ERROR_CODE",
+        "message": "Human readable message"
+    }))
+```
+
+Token security pattern:
+- NEVER save tokens to disk - output to stdout only
+- Claude parses token and passes via --token argument
+- Tokens exist in session memory only
