@@ -28,6 +28,7 @@ require("lazy").setup({
     
     -- Language support
     { import = "lazyvim.plugins.extras.lang.markdown" },
+    { import = "lazyvim.plugins.extras.lang.python" },
     
     -- UI enhancements
     { import = "lazyvim.plugins.extras.ui.mini-animate" },
