@@ -17,9 +17,20 @@ Create or update memory files when the user says:
 - "Make sure you remember..."
 
 When triggered:
-1. Update existing file or create new one
-2. Apply privacy rules
-3. Update CLAUDE.md index
+1. Determine correct location (see Placement Guidelines)
+2. Update existing file or create new one
+3. Apply privacy rules
+4. Update CLAUDE.md or CLAUDE.local.md index
+
+## Placement Guidelines
+
+Memory files belong locally to the things they describe:
+
+- **Global `~/.claude/memory/`**: Cross-project methodologies, personal workflows, general patterns
+- **Project `.claude/memory/`**: API patterns, implementation details, project-specific knowledge
+- **Personal indexes**: Use CLAUDE.local.md for directory-scoped personal memories (gitignored)
+
+Example: Platform API patterns belong in the platform project's `.claude/`, not global memory.
 
 ## Privacy Guidelines
 
@@ -34,7 +45,7 @@ Information types:
 ## Quality Standards
 
 - Related files cross-referenced
-- Reachable from CLAUDE.md index
+- Reachable from CLAUDE.md or CLAUDE.local.md index
 - Clear file names indicating content
 - Under 200 lines for maintainability
 
@@ -45,6 +56,7 @@ Information types:
 - Process significantly changed
 - Technology replaced
 - Business context invalidated
+- Content moved to project-specific location
 
 ### Consolidation Guidelines
 

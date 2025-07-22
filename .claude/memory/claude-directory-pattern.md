@@ -20,3 +20,10 @@ project/.claude/
 - **Subdirectory `.claude/`**: For module-specific tools (e.g., `impls/tower/.claude/`)
 - Keep tools close to the code they operate on
 - Never commit sensitive data (tokens, credentials)
+
+## Memory Discovery Behavior
+Claude discovers memory files based on working directory:
+- Searches upward from current directory through parents
+- Loads all CLAUDE.md files encountered
+- Subdirectory CLAUDE.md files only loaded when working in those subtrees
+- Creates natural scoping without explicit root linking

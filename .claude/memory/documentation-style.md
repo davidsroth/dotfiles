@@ -33,3 +33,7 @@ Good: "Terminal multiplexer with session management"
 
 State what something is and does, not how good it is at doing it.
 Write with affirmative language: state what things are, not what they aren't.
+
+## Line Counting
+
+When counting lines for budgets, blank lines don't count toward the total - only content lines.

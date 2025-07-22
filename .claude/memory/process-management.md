@@ -51,17 +51,20 @@ lsof -i :3000
 ## Timeout Strategies
 
 **Use Extended Timeout When:**
+
 - Operation takes 2-5 minutes predictably
 - Need immediate completion feedback
 - Process is well-behaved
 
 **Use Background When:**
+
 - Operation may exceed 5 minutes
 - Process might hang
 - Need incremental progress monitoring
 - Multiple people need status access
 
 Timeout values:
+
 - Short: 120000ms (2 min) - default
 - Medium: 300000ms (5 min) - builds, exports
 - Long: Use background approach
@@ -69,6 +72,7 @@ Timeout values:
 ## Service Management
 
 ### When to Start Services
+
 - Test suites requiring dependencies (Postgres, Redis)
 - E2E testing requiring full stack
 - Development servers for manual testing
@@ -87,6 +91,7 @@ docker logs -f postgres
 ```
 
 ### Service Checklist
+
 - Check for existing instances: `lsof -i :<port>`
 - Set required env vars: `.env.local`
 - Ensure log directory exists: `mkdir -p logs`
@@ -95,6 +100,7 @@ docker logs -f postgres
 ## Progress Monitoring
 
 ### File-Based Detection
+
 ```bash
 while [ ! -f "output.json" ]; do
     echo "Waiting..."
@@ -103,11 +109,13 @@ done
 ```
 
 ### Log Pattern Matching
+
 ```bash
 tail -f process.log | grep -E "(complete|error|failed)"
 ```
 
 ### Combined Monitor Script
+
 ```bash
 while ps -p $PID > /dev/null; do
     [ -f "$OUTPUT" ] && break

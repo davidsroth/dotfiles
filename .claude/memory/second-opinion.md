@@ -44,6 +44,8 @@ Include related files and files that reference the discussed code.
 ## Research-First Approach
 
 When encountering new problems:
+1. Investigate actual implementation before making claims about purpose
+2. Read READMEs, tool configs, and service definitions first
 1. Search online for established patterns
 2. Look for community solutions
 3. Evaluate multiple paths with pros/cons
