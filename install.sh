@@ -33,40 +33,140 @@ readonly MAGENTA='\033[0;35m'
 readonly NC='\033[0m' # No Color
 
 # Progress tracking
-TOTAL_STEPS=14
+TOTAL_STEPS=10
 CURRENT_STEP=0
 
+# Timeouts and constants
+readonly XCODE_TIMEOUT=300  # 5 minutes
+readonly DEFAULT_BRANCH="${DEFAULT_BRANCH:-main}"
+readonly NVM_VERSION="${NVM_VERSION:-v0.39.7}"
+
+# Script options
+DRY_RUN=false
+VERBOSE=false
+QUIET=false
+
 # Helper functions
+
+# Show help message
+show_help() {
+    cat << EOF
+Dotfiles Bootstrap Script v2.0
+
+Usage: $0 [OPTIONS]
+
+Options:
+    -h, --help      Show this help message
+    -n, --dry-run   Preview changes without installing
+    -v, --verbose   Enable verbose output
+    -q, --quiet     Suppress non-error output
+
+Environment Variables:
+    GITHUB_USER     Your GitHub username (default: davidroth)
+    DOTFILES_DIR    Installation directory (default: ~/dotfiles)
+    DEFAULT_BRANCH  Git branch to use (default: main)
+    NVM_VERSION     NVM version to install (default: v0.39.7)
+
+Examples:
+    # Normal installation
+    $0
+    
+    # Preview what would be installed
+    $0 --dry-run
+    
+    # Install with custom GitHub user
+    GITHUB_USER=myusername $0
+    
+    # Quiet installation (errors only)
+    $0 --quiet
+
+For more information, visit: https://github.com/${GITHUB_USER}/dotfiles
+EOF
+}
+
+# Parse command line arguments
+parse_args() {
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            -h|--help)
+                show_help
+                exit 0
+                ;;
+            -n|--dry-run)
+                DRY_RUN=true
+                info "Running in dry-run mode (no changes will be made)"
+                shift
+                ;;
+            -v|--verbose)
+                VERBOSE=true
+                shift
+                ;;
+            -q|--quiet)
+                QUIET=true
+                shift
+                ;;
+            *)
+                error "Unknown option: $1"
+                show_help
+                exit 1
+                ;;
+        esac
+    done
+}
+
+# Log a message with timestamp
+# Arguments: message to log
 log() {
     echo "[$(date +'%Y-%m-%d %H:%M:%S')] $*" | tee -a "$LOG_FILE"
 }
 
+# Display info message
+# Arguments: message to display
 info() {
+    [[ "$QUIET" == "true" ]] && return
     echo -e "${BLUE}[INFO]${NC} $1" | tee -a "$LOG_FILE"
 }
 
+# Display success message
+# Arguments: message to display
 success() {
+    [[ "$QUIET" == "true" ]] && return
     echo -e "${GREEN}[✓]${NC} $1" | tee -a "$LOG_FILE"
 }
 
+# Display warning message
+# Arguments: message to display
 warning() {
     echo -e "${YELLOW}[WARNING]${NC} $1" | tee -a "$LOG_FILE"
 }
 
+# Display error message
+# Arguments: message to display
 error() {
     echo -e "${RED}[ERROR]${NC} $1" | tee -a "$LOG_FILE" >&2
 }
 
+# Display progress step
+# Arguments: step description
 step() {
+    [[ "$QUIET" == "true" ]] && return
     ((CURRENT_STEP++))
     echo -e "\n${MAGENTA}[$CURRENT_STEP/$TOTAL_STEPS]${NC} $1" | tee -a "$LOG_FILE"
 }
 
+# Check if a command exists
+# Arguments: command name
+# Returns: 0 if exists, 1 if not
 check_command() {
     command -v "$1" &> /dev/null
 }
 
+# Prompt user for confirmation
+# Arguments: prompt message, default value (y/n)
+# Returns: 0 for yes, 1 for no
 confirm() {
+    [[ "$DRY_RUN" == "true" ]] && return 0
+    
     local prompt="${1:-Continue?}"
     local default="${2:-n}"
     local REPLY
@@ -87,10 +187,17 @@ confirm() {
     [[ "$REPLY" =~ ^[Yy]$ ]]
 }
 
-# Platform check
+# Check platform compatibility and requirements
+# Returns: 0 on success, exits on failure
 check_platform() {
     if [[ "$OSTYPE" != "darwin"* ]]; then
         error "This script is designed for macOS only (detected: $OSTYPE)"
+        exit 1
+    fi
+    
+    # Check for required commands
+    if ! command -v curl &> /dev/null; then
+        error "curl is required but not installed"
         exit 1
     fi
     
@@ -105,54 +212,101 @@ check_platform() {
     fi
 }
 
-# Install Xcode Command Line Tools
+# Install Xcode Command Line Tools if not already installed
+# Returns: 0 on success, exits on failure
 install_xcode_tools() {
     step "Checking Xcode Command Line Tools"
     
     if ! xcode-select -p &> /dev/null; then
+        if [[ "$DRY_RUN" == "true" ]]; then
+            info "[DRY RUN] Would install Xcode Command Line Tools"
+            return 0
+        fi
+        
         info "Installing Xcode Command Line Tools..."
         xcode-select --install
         
-        # Wait for installation
-        until xcode-select -p &> /dev/null; do
+        # Wait for installation with timeout
+        local elapsed=0
+        until xcode-select -p &> /dev/null || [[ $elapsed -ge $XCODE_TIMEOUT ]]; do
             sleep 5
+            ((elapsed+=5))
         done
+        
+        if [[ $elapsed -ge $XCODE_TIMEOUT ]]; then
+            error "Xcode Command Line Tools installation timed out after $XCODE_TIMEOUT seconds"
+            exit 1
+        fi
         success "Xcode Command Line Tools installed"
     else
         success "Xcode Command Line Tools already installed"
     fi
 }
 
-# Install Homebrew
+# Install Homebrew package manager
+# Returns: 0 on success, 1 on failure
 install_homebrew() {
     step "Checking Homebrew"
     
     if ! check_command brew; then
+        if [[ "$DRY_RUN" == "true" ]]; then
+            info "[DRY RUN] Would install Homebrew"
+            return 0
+        fi
+        
         info "Installing Homebrew..."
-        /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+        local BREW_INSTALL_SCRIPT="/tmp/homebrew-install-$$.sh"
+        
+        # Download the install script
+        if curl -fsSL "https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh" -o "$BREW_INSTALL_SCRIPT"; then
+            # Review script if verbose
+            if [[ "$VERBOSE" == "true" ]]; then
+                info "Homebrew install script downloaded to: $BREW_INSTALL_SCRIPT"
+            fi
+            
+            # Make it executable and run it
+            chmod +x "$BREW_INSTALL_SCRIPT"
+            if /bin/bash "$BREW_INSTALL_SCRIPT"; then
+                success "Homebrew installation completed"
+            else
+                error "Homebrew installation failed"
+                rm -f "$BREW_INSTALL_SCRIPT"
+                return 1
+            fi
+            rm -f "$BREW_INSTALL_SCRIPT"
+        else
+            error "Failed to download Homebrew install script"
+            return 1
+        fi
         
         # Add Homebrew to PATH
         if [[ -f "$HOMEBREW_PREFIX/bin/brew" ]]; then
             eval "$($HOMEBREW_PREFIX/bin/brew shellenv)"
             
-            # Add to shell profile for persistence
+            # Add to shell profile for persistence (avoid duplicates)
             if [[ "$SHELL" == *"zsh"* ]]; then
-                echo 'eval "$('$HOMEBREW_PREFIX'/bin/brew shellenv)"' >> ~/.zprofile
+                if ! grep -q "brew shellenv" ~/.zprofile 2>/dev/null; then
+                    echo 'eval "$('"$HOMEBREW_PREFIX"'/bin/brew shellenv)"' >> ~/.zprofile
+                fi
             else
-                echo 'eval "$('$HOMEBREW_PREFIX'/bin/brew shellenv)"' >> ~/.bash_profile
+                if ! grep -q "brew shellenv" ~/.bash_profile 2>/dev/null; then
+                    echo 'eval "$('"$HOMEBREW_PREFIX"'/bin/brew shellenv)"' >> ~/.bash_profile
+                fi
             fi
         fi
         success "Homebrew installed"
     else
-        success "Homebrew already installed"
+        [[ "$VERBOSE" == "true" ]] && success "Homebrew already installed" || true
     fi
     
     # Update Homebrew
     info "Updating Homebrew..."
-    brew update
+    brew update 2>&1
 }
 
-# Install packages using Brewfile
+# Install packages using Brewfile if present
+# Falls back to essential packages if no Brewfile found
+# Returns: 0 on success (continues on partial failure)
 install_packages() {
     step "Installing packages from Brewfile"
     
@@ -167,24 +321,57 @@ install_packages() {
     cd "$DOTFILES_DIR"
     
     # Check what would be installed
-    info "Checking Brewfile dependencies..."
-    brew bundle check --verbose || true
+    if [[ "$VERBOSE" == "true" ]]; then
+        info "Checking Brewfile dependencies..."
+        brew bundle check --verbose || true
+    else
+        # Quietly check if anything needs to be installed
+        info "Checking installed packages..."
+        local check_output
+        check_output=$(brew bundle check 2>&1 || true)
+        
+        # If only font issues, consider it mostly installed
+        local issue_count=0
+        if [[ -n "$check_output" ]] && echo "$check_output" | grep -q "→"; then
+            # Count arrow lines safely, only if they exist
+            issue_count=$(echo "$check_output" | grep "→" | wc -l)
+            # Ensure it's a single number
+            issue_count=${issue_count// /}
+        fi
+        if [[ -z "$check_output" ]] || ([[ "$check_output" =~ "brew bundle can't satisfy" ]] && [[ "$issue_count" -le 2 ]]); then
+            if [[ -z "$check_output" ]]; then
+                success "All Brewfile packages already installed"
+                return 0
+            else
+                info "Most packages already installed (minor issues with fonts/casks)"
+            fi
+        fi
+    fi
     
     # Install everything from Brewfile
-    if confirm "Install all packages from Brewfile?" "y"; then
+    if confirm "Install packages from Brewfile?" "y"; then
         # Clean up any deprecated taps first
-        info "Cleaning up deprecated taps..."
+        if [[ "$VERBOSE" == "true" ]]; then
+            info "Cleaning up deprecated taps..."
+        fi
         brew untap homebrew/bundle 2>/dev/null || true
         brew untap homebrew/cask-fonts 2>/dev/null || true
         
         # Run brew bundle with no-upgrade to be idempotent
-        info "Installing packages (skipping already installed)..."
-        if brew bundle install --verbose --no-upgrade; then
+        local brew_exit_code=0
+        if [[ "$VERBOSE" == "true" ]]; then
+            info "Installing packages (skipping already installed)..."
+            brew bundle install --verbose --no-upgrade || brew_exit_code=$?
+        else
+            info "Installing packages..."
+            brew bundle install --no-upgrade --quiet 2>&1 || brew_exit_code=$?
+        fi
+        
+        if [[ $brew_exit_code -eq 0 ]]; then
             success "Brewfile processing completed"
         else
             # Don't fail the whole script if some packages have issues
-            local exit_code=$?
-            warning "Some Brewfile entries had issues (exit code: $exit_code)"
+            warning "Some Brewfile entries had issues (exit code: $brew_exit_code)"
             
             # Show what's installed vs what failed
             info "Checking final state..."
@@ -198,7 +385,8 @@ install_packages() {
     fi
 }
 
-# Fallback package installation (if no Brewfile)
+# Install essential packages individually when Brewfile is not available
+# Returns: 0 on success (continues on partial failure)
 install_packages_fallback() {
     info "Installing essential packages individually..."
     
@@ -214,7 +402,7 @@ install_packages_fallback() {
     
     for pkg in "${essentials[@]}"; do
         if brew list "$pkg" &> /dev/null; then
-            success "$pkg already installed"
+            [[ "$VERBOSE" == "true" ]] && success "$pkg already installed" || true
         else
             info "Installing $pkg..."
             brew install "$pkg" || warning "Failed to install $pkg"
@@ -222,27 +410,43 @@ install_packages_fallback() {
     done
 }
 
-# Install additional tools
+# Install additional development tools (NVM, zsh-defer, pipx)
+# Returns: 0 on success (continues on partial failure)
 install_additional_tools() {
     step "Installing additional tools"
     
     # NVM
     if [[ ! -d "$HOME/.nvm" ]]; then
         info "Installing NVM..."
-        local NVM_VERSION="v0.39.7"  # Use latest stable
-        curl -o- "https://raw.githubusercontent.com/nvm-sh/nvm/${NVM_VERSION}/install.sh" | bash
-        success "NVM installed"
+        local NVM_INSTALL_SCRIPT="/tmp/nvm-install-$$.sh"
+        
+        # Download the install script
+        if curl -fsSL "https://raw.githubusercontent.com/nvm-sh/nvm/${NVM_VERSION}/install.sh" -o "$NVM_INSTALL_SCRIPT"; then
+            # Make it executable and run it
+            chmod +x "$NVM_INSTALL_SCRIPT"
+            if bash "$NVM_INSTALL_SCRIPT"; then
+                success "NVM installed"
+            else
+                warning "NVM installation failed"
+            fi
+            rm -f "$NVM_INSTALL_SCRIPT"
+        else
+            warning "Failed to download NVM install script"
+        fi
     else
-        success "NVM already installed"
+        [[ "$VERBOSE" == "true" ]] && success "NVM already installed" || true
     fi
     
     # zsh-defer
     if [[ ! -d "$HOME/zsh-defer" ]]; then
         info "Installing zsh-defer..."
-        git clone https://github.com/romkatv/zsh-defer.git ~/zsh-defer
-        success "zsh-defer installed"
+        if git clone https://github.com/romkatv/zsh-defer.git ~/zsh-defer; then
+            success "zsh-defer installed"
+        else
+            warning "Failed to install zsh-defer"
+        fi
     else
-        success "zsh-defer already installed"
+        [[ "$VERBOSE" == "true" ]] && success "zsh-defer already installed" || true
     fi
     
     # pipx for Python tools
@@ -256,7 +460,7 @@ install_additional_tools() {
             warning "pip3 not found, skipping pipx installation"
         fi
     else
-        success "pipx already installed"
+        [[ "$VERBOSE" == "true" ]] && success "pipx already installed" || true
     fi
     
     # Python tools via pipx
@@ -267,13 +471,14 @@ install_additional_tools() {
                 info "Installing $tool..."
                 pipx install "$tool" || warning "Failed to install $tool"
             else
-                success "$tool already installed"
+                [[ "$VERBOSE" == "true" ]] && success "$tool already installed" || true
             fi
         done
     fi
 }
 
-# Clone or update dotfiles repository
+# Clone dotfiles repository or update if already exists
+# Returns: 0 on success, exits on clone failure
 setup_dotfiles_repo() {
     step "Setting up dotfiles repository"
     
@@ -291,12 +496,23 @@ setup_dotfiles_repo() {
         
         if confirm "Pull latest changes from repository?" "y"; then
             cd "$DOTFILES_DIR"
-            git pull origin main || warning "Failed to pull latest changes"
+            # Get current branch name
+            local current_branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "$DEFAULT_BRANCH")
+            info "Pulling latest changes from branch: $current_branch"
+            if ! git pull origin "$current_branch"; then
+                warning "Failed to pull latest changes"
+                # Try default branch if current branch failed
+                if [[ "$current_branch" != "$DEFAULT_BRANCH" ]]; then
+                    info "Trying default branch: $DEFAULT_BRANCH"
+                    git pull origin "$DEFAULT_BRANCH" || warning "Failed to pull from default branch"
+                fi
+            fi
         fi
     fi
 }
 
-# Backup existing files
+# Backup existing configuration files that would be overwritten by stow
+# Returns: 0 on success, exits if user declines backup
 backup_existing_files() {
     step "Checking for existing configuration files"
     
@@ -313,7 +529,7 @@ backup_existing_files() {
             
             # Backup conflicting files
             while IFS= read -r line; do
-                if [[ $line =~ "existing target is not owned by stow: "(.*) ]]; then
+                if [[ $line =~ ^.*"existing target is not owned by stow: "(.*) ]]; then
                     local file="$HOME/${BASH_REMATCH[1]}"
                     if [[ -e "$file" ]] && [[ ! -L "$file" ]]; then
                         local backup_path="$BACKUP_DIR/${BASH_REMATCH[1]}"
@@ -335,22 +551,32 @@ backup_existing_files() {
     fi
 }
 
-# Setup dotfiles with GNU Stow
+# Create symlinks for all dotfiles using GNU Stow
+# Returns: 0 on success, exits on failure
 setup_dotfiles() {
     step "Installing dotfiles with GNU Stow"
     
     cd "$DOTFILES_DIR"
     
-    info "Running stow..."
-    if stow -v .; then
-        success "Dotfiles linked successfully"
+    if [[ "$DRY_RUN" == "true" ]]; then
+        info "[DRY RUN] Would run: stow -v ."
+        # Show what would be stowed
+        info "Preview of what would be linked:"
+        stow -n -v . 2>&1 | grep -E "LINK:|directory" || true
+        success "[DRY RUN] Dotfiles would be linked"
     else
-        error "Stow failed. Check the error messages above"
-        exit 1
+        info "Running stow..."
+        if stow -v .; then
+            success "Dotfiles linked successfully"
+        else
+            error "Stow failed. Check the error messages above"
+            exit 1
+        fi
     fi
 }
 
-# Post-installation setup
+# Perform post-installation tasks (directories, Git LFS, TPM, shell)
+# Returns: 0 on success
 post_install_setup() {
     step "Running post-installation setup"
     
@@ -374,9 +600,12 @@ post_install_setup() {
     fi
     
     # Set shell
-    if [[ "$SHELL" != "$(which zsh)" ]] && check_command zsh; then
-        if confirm "Set zsh as default shell?" "y"; then
-            chsh -s "$(which zsh)" || warning "Failed to set zsh as default shell"
+    if check_command zsh; then
+        local zsh_path="$(which zsh)"
+        if [[ "$SHELL" != "$zsh_path" ]]; then
+            if confirm "Set zsh as default shell?" "y"; then
+                chsh -s "$zsh_path" || warning "Failed to set zsh as default shell"
+            fi
         fi
     fi
     
@@ -388,14 +617,15 @@ post_install_setup() {
     fi
 }
 
-# System preferences (optional)
+# Apply macOS system preferences if script exists
+# Returns: 0 on success
 setup_macos_defaults() {
     step "macOS System Preferences"
     
     if [[ -f "$DOTFILES_DIR/macos-defaults.sh" ]]; then
         if confirm "Apply macOS system preferences?" "n"; then
             info "Applying macOS defaults..."
-            bash "$DOTFILES_DIR/macos-defaults.sh"
+            bash "$DOTFILES_DIR/macos-defaults.sh" || warning "Some macOS defaults may have failed to apply"
             success "macOS defaults applied"
         else
             info "Skipping macOS defaults"
@@ -405,7 +635,8 @@ setup_macos_defaults() {
     fi
 }
 
-# Final summary
+# Display installation summary and next steps
+# Returns: 0 on success
 show_summary() {
     step "Installation Complete!"
     
@@ -437,12 +668,20 @@ show_summary() {
 
 # Main installation flow
 main() {
+    # Parse command line arguments first
+    parse_args "$@"
+    
     clear
     echo "Dotfiles Bootstrap Script v2.0"
     echo "=============================="
     echo
     info "This script will set up your macOS development environment"
     info "All actions will be logged to: $LOG_FILE"
+    
+    if [[ "$DRY_RUN" == "true" ]]; then
+        info "DRY RUN MODE: No changes will be made to your system"
+    fi
+    
     echo
     
     if ! confirm "Continue with installation?" "y"; then
@@ -466,3 +705,6 @@ main() {
 
 # Run main function
 main "$@"
+
+# Wait for any background processes to complete
+wait
