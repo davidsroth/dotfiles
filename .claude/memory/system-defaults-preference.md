@@ -10,6 +10,7 @@ Use system defaults for commands rather than hardcoding specific applications.
 ## Opening Files and URLs
 
 Use system commands that respect user defaults:
+
 - macOS: `open` command
 - Linux: `xdg-open` command
 - Cross-platform: Detect OS and use appropriate command
@@ -27,6 +28,7 @@ open -a "SpecificBrowser" "https://example.com"
 ## Editor Configuration
 
 Respect standard environment variables:
+
 - `$EDITOR`: Default text editor (terminal)
 - `$VISUAL`: Visual/GUI editor
 

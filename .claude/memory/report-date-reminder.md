@@ -8,6 +8,7 @@ updated: 2025-07-18
 Always include the current date at the top of any report, right after the title.
 
 Format:
+
 ```markdown
 # Report Title
 
@@ -17,6 +18,7 @@ Format:
 ```
 
 Example:
+
 ```markdown
 # Model Usage Analysis Report
 

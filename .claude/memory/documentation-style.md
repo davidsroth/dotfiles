@@ -8,6 +8,7 @@ updated: 2025-07-18
 Use factual, non-hyperbolic language in documentation.
 
 ## Avoid
+
 - Quality descriptors: enhanced, improved, better, powerful, modern
 - Marketing language: comprehensive, extensive, advanced, robust
 - Value judgments: best practices, optimal, superior
@@ -16,6 +17,7 @@ Use factual, non-hyperbolic language in documentation.
 - Negative framing: "not X" when you can state what it is
 
 ## Use Instead
+
 - Direct functionality descriptions
 - Specific technical details
 - Concrete feature lists

@@ -11,12 +11,14 @@ Complete lifecycle for memory files from creation to archiving.
 ## Creation Triggers
 
 Create or update memory files when the user says:
+
 - "I want you to remember..."
 - "When we... I want you to..."
 - "Remember to..." / "Don't forget..."
 - "Make sure you remember..."
 
 When triggered:
+
 1. Determine correct location (see Placement Guidelines)
 2. Update existing file or create new one
 3. Apply privacy rules
@@ -38,6 +40,7 @@ Example: Platform API patterns belong in the platform project's `.claude/`, not 
 **Mask when needed**: Replace values with placeholders (e.g., `SERIAL_REDACTED`)
 
 Information types:
+
 - **Public**: General patterns, methodologies, technical details
 - **Internal**: Project implementation, business context
 - **Restricted**: Personal identifiers, credentials, proprietary algorithms
@@ -52,6 +55,7 @@ Information types:
 ## Maintenance Lifecycle
 
 ### Active → Archive Triggers
+
 - Component deprecated/removed
 - Process significantly changed
 - Technology replaced
@@ -61,6 +65,7 @@ Information types:
 ### Consolidation Guidelines
 
 When at capacity, evaluate for:
+
 - **Merge**: Related small files into existing ones
 - **Archive**: Outdated or replaced content
 - **Split**: Files exceeding 200 lines
@@ -75,6 +80,7 @@ mv .claude/outdated-memory.md .claude/archive/$(date +%Y-%m)/
 ```
 
 Archive file header:
+
 ```yaml
 archived: 2025-07-18
 archive_reason: "Brief explanation"
@@ -82,6 +88,7 @@ superseded_by: "@~/.claude/new-file.md"
 ```
 
 ### What to Archive
+
 - Deprecated system documentation
 - Obsolete process guides
 - Technology-specific files for removed tech

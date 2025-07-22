@@ -9,20 +9,24 @@ tags: [claude, tools, organization]
 Project-specific `.claude/` directories for Claude helper tools.
 
 ## Structure
-```
+
+```text
 project/.claude/
 ├── scripts/    # Helper scripts for Claude operations
 └── docs/       # Claude-specific documentation
 ```
 
 ## Placement Guidelines
+
 - **Root `.claude/`**: For project-wide tools (e.g., git helpers)
 - **Subdirectory `.claude/`**: For module-specific tools (e.g., `impls/tower/.claude/`)
 - Keep tools close to the code they operate on
 - Never commit sensitive data (tokens, credentials)
 
 ## Memory Discovery Behavior
+
 Claude discovers memory files based on working directory:
+
 - Searches upward from current directory through parents
 - Loads all CLAUDE.md files encountered
 - Subdirectory CLAUDE.md files only loaded when working in those subtrees
