@@ -15,6 +15,11 @@ alias l='lsd -CF'
 alias la='lsd -A'
 alias ll='lsd -alF'
 
+# Alternative: eza with git integration
+alias lt='eza --tree --level=2'
+alias lla='eza -la --git'
+alias llt='eza -la --git --tree --level=2'
+
 # Better cat with syntax highlighting
 alias cat='bat --theme=ansi'
 
@@ -61,6 +66,15 @@ alias brewup='brew update && brew upgrade && brew cleanup'
 alias cl='clear'
 alias cls='clear'
 
+# Modern replacements
+alias du='dust'
+alias df='duf'
+alias ps='procs'
+alias sed='sd'
+alias ping='gping'
+alias dig='doggo'
+alias top='btop'
+
 # ============================================================================
 # Development Tools
 # ============================================================================
@@ -92,6 +106,15 @@ alias etmux='${EDITOR:-nvim} ~/.config/tmux/tmux.conf'
 # System info
 alias ports='lsof -i -P -n'
 alias myip='curl -s https://ipinfo.io/ip'
+
+# HTTP requests
+alias GET='http'
+alias POST='http POST'
+alias PUT='http PUT'
+alias DELETE='http DELETE'
+
+# JSON viewing
+alias json='jless'
 
 # ============================================================================
 # Platform-specific Aliases
