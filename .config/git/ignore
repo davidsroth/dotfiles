@@ -1,2 +1,47 @@
+# ============================================================================
+# Personal Global Git Ignore
+# ============================================================================
+
+# Claude configuration
 **/CLAUDE.local.md
 **/.claude/settings.local.json
+
+# macOS
+.DS_Store
+._*
+.AppleDouble
+.LSOverride
+
+# Editors I use
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+*.sublime-*
+
+# Personal workflow
+.env
+.env.local
+*.log
+node_modules/
+__pycache__/
+*.pyc
+.pytest_cache/
+.coverage
+
+# Build artifacts
+dist/
+build/
+*.egg-info/
+
+# Security
+*.pem
+*.key
+credentials/
+.netrc
+
+# Temporary files
+*.tmp
+*.bak
+.tmp/

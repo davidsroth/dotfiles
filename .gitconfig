@@ -21,6 +21,7 @@
 	# Faster operations on macOS
 	untrackedcache = true
 	fsmonitor = true
+	excludesfile = /Users/davidroth/.config/git/ignore
 
 [init]
 	# Set default branch name for new repositories
