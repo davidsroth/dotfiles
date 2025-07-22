@@ -16,10 +16,6 @@ project/.claude/
 └── docs/        # Claude-specific documentation
 ```
 
-## Example
-
-Tower implementation: `impls/tower/.claude/scripts/fetch_tower_token.py`
-
 ## Security
 
 Never save tokens/credentials to disk. Use stdout → parse → pass via args.

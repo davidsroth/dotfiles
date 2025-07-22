@@ -180,7 +180,3 @@ nohup <command> --resume > retry.log 2>&1 &
 - Container builds: 2-8 minutes
 - API syncs: variable
 - Test suites: 1-5 minutes
-
-## See Also
-
-- @./second-opinion.md - Deep debugging with O3

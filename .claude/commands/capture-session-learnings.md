@@ -5,7 +5,6 @@ Review session work and update documentation with discovered patterns, correctio
 Work from the beginning of the conversation through to the end noting:
 
 - Mistakes and assumptions made
-- Problem-solution pairs encountered
 - Gaps in existing documentation
 - Reusable patterns and solutions
 - API patterns and behaviors discovered  
@@ -19,7 +18,7 @@ Work from the beginning of the conversation through to the end noting:
 - **New memory files**: For new concepts/patterns
 - **Local notes**: Project-specific findings (CLAUDE.local.md)
 
-Prioritize supplementing existing documentation, and prioritize updating documentation nearer to your current working dir.
+Prioritize supplementing existing documentation, and prioritize updating documentation nearer to the relevant code.
 
 You may add/change up to {{lines|150}} lines.
 

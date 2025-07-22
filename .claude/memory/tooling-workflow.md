@@ -32,7 +32,7 @@ Example: Instead of showing URL, immediately run:
 When creating auth token scripts:
 
 1. Support JSON output with `--json` flag for automation
-2. Save tokens to file for reuse (e.g., `tower_tokens.json`)
+2. Save tokens to file for reuse (e.g., `token.json`)
 3. Check multiple env var names for flexibility
 4. Provide structured error responses:
 

@@ -14,7 +14,6 @@ Patterns and learnings for working with GitHub MCP tools effectively.
 
 - User's GitHub username may differ from local username
 - Always verify username before PR operations
-- Example: `davidroth` locally vs `davidroth-distyl` on GitHub
 
 ## Pull Request Management
 
@@ -50,11 +49,6 @@ state: "closed"
 - `list_pull_requests` often returns too much data
 - Solution: Use `search_pull_requests` with specific filters
 - Start with small `perPage` values (5-10)
-
-### Repository Names
-
-- Format: `Owner/repo` (e.g., `DistylAI/distillery`)
-- Owner may be organization, not individual
 
 ## Workflow Patterns
 

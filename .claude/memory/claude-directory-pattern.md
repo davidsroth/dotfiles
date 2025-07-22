@@ -19,7 +19,7 @@ project/.claude/
 ## Placement Guidelines
 
 - **Root `.claude/`**: For project-wide tools (e.g., git helpers)
-- **Subdirectory `.claude/`**: For module-specific tools (e.g., `impls/tower/.claude/`)
+- **Subdirectory `.claude/`**: For module-specific tools (e.g., `project/subdir/.claude/`)
 - Keep tools close to the code they operate on
 - Never commit sensitive data (tokens, credentials)
 
