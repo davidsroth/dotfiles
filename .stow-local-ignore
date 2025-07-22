@@ -2,7 +2,7 @@
 # Files and patterns listed here will be ignored by GNU Stow
 
 # Documentation files
-CLAUDE.md
+^CLAUDE\.md$
 README.md
 README.*
 
