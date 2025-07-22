@@ -69,7 +69,10 @@ This directory contains persistent knowledge and behavioral guidelines for Claud
 @./memory/report-date-reminder.md  
 *Date handling in reports and documentation*
 
+### Automation
 
+@./memory/linting-hooks.md  
+*Automated formatting and linting via hooks*
 
 ## System Information
 

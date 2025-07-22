@@ -35,5 +35,29 @@
       "WebFetch(domain:docs.anthropic.com)"
     ],
     "deny": []
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash -c 'file=\"$CLAUDE_FILE_PATH\"; ext=\"${file##*.}\"; case \"$ext\" in py) black \"$file\" 2>/dev/null || true ;; js|jsx|ts|tsx|json) prettier --write \"$file\" 2>/dev/null || true ;; go) gofmt -w \"$file\" 2>/dev/null || true ;; rs) rustfmt \"$file\" 2>/dev/null || true ;; sh|bash) shfmt -w \"$file\" 2>/dev/null || true ;; md) prettier --write \"$file\" 2>/dev/null || true ;; esac'"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash -c 'echo \"$CLAUDE_TOOL_INPUT\" | grep -qE \"\\b(grep|find)\\b\" && echo \"⚠️  Consider using ripgrep (rg) or fd for better performance\" >&2 || true'"
+          }
+        ]
+      }
+    ]
   }
 }
