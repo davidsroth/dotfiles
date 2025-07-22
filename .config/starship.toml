@@ -1,1 +1,125 @@
+# ============================================================================
+# Starship Prompt Configuration - Minimal & Fast
+# ============================================================================
+
+# Global settings
 command_timeout = 1500  # ms
+scan_timeout = 30       # ms for scanning files
+add_newline = true
+
+# Format - only show essential modules
+format = """
+$username\
+$hostname\
+$directory\
+$git_branch\
+$git_state\
+$git_status\
+$python\
+$nodejs\
+$rust\
+$golang\
+$docker_context\
+$line_break\
+$character"""
+
+# ============================================================================
+# Module Configurations
+# ============================================================================
+
+[character]
+success_symbol = "[❯](bold green)"
+error_symbol = "[❯](bold red)"
+vimcmd_symbol = "[❮](bold green)"
+
+[directory]
+truncation_length = 3
+truncate_to_repo = true
+format = "[$path]($style)[$read_only]($read_only_style) "
+style = "cyan bold"
+read_only = " 🔒"
+read_only_style = "red"
+home_symbol = "~"
+
+[git_branch]
+format = "[$symbol$branch(:$remote_branch)]($style) "
+symbol = " "
+style = "purple"
+truncation_length = 20
+
+[git_status]
+format = '([\[$all_status$ahead_behind\]]($style) )'
+style = "red"
+conflicted = "="
+ahead = "⇡${count}"
+behind = "⇣${count}"
+diverged = "⇕⇡${ahead_count}⇣${behind_count}"
+untracked = "?"
+stashed = "\\$"
+modified = "!"
+staged = "+"
+renamed = "»"
+deleted = "✘"
+
+[git_state]
+format = '\([$state( $progress_current/$progress_total)]($style)\) '
+style = "yellow"
+
+[python]
+format = '[${symbol}${pyenv_prefix}(${version} )(\($virtualenv\) )]($style)'
+symbol = " "
+style = "yellow"
+detect_extensions = ["py"]
+detect_files = ["requirements.txt", "setup.py", "pyproject.toml"]
+
+[nodejs]
+format = "[$symbol($version )]($style)"
+symbol = " "
+style = "green"
+detect_extensions = ["js", "mjs", "cjs", "ts", "mts", "cts"]
+detect_files = ["package.json"]
+
+[rust]
+format = "[$symbol($version )]($style)"
+symbol = " "
+style = "red"
+
+[golang]
+format = "[$symbol($version )]($style)"
+symbol = " "
+style = "cyan"
+
+[docker_context]
+format = "[$symbol$context]($style) "
+symbol = " "
+style = "blue"
+only_with_files = true
+detect_files = ["docker-compose.yml", "docker-compose.yaml", "Dockerfile"]
+
+# ============================================================================
+# Disabled Modules (for performance)
+# ============================================================================
+
+[aws]
+disabled = true
+
+[gcloud]
+disabled = true
+
+[cmd_duration]
+disabled = true
+
+[hostname]
+disabled = true
+
+[username]
+disabled = true
+
+[package]
+disabled = true
+
+[memory_usage]
+disabled = true
+
+[battery]
+disabled = true
