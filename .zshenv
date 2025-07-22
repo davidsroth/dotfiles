@@ -31,6 +31,7 @@ export APPLICATION_CONFIG_PROFILE="local"
 export HISTFILE="$XDG_STATE_HOME/zsh/history"
 export HISTSIZE=100000
 export SAVEHIST=100000
+export HISTDUP=erase  # More aggressive deduplication
 
 # Performance optimizations
 export DISABLE_MAGIC_FUNCTIONS="true"

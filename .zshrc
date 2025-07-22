@@ -2,6 +2,9 @@
 # ZSH Configuration - Performance Optimized
 # ============================================================================
 
+# Performance profiling - uncomment to enable
+# zmodload zsh/zprof
+
 # Performance: Load zsh-defer first for lazy loading capabilities
 if [[ -f ~/zsh-defer/zsh-defer.plugin.zsh ]]; then
     source ~/zsh-defer/zsh-defer.plugin.zsh
@@ -19,6 +22,11 @@ fi
 # ============================================================================
 # Completion System
 # ============================================================================
+
+# Add zsh-completions to fpath before compinit
+if type brew &>/dev/null; then
+    FPATH=$(brew --prefix)/share/zsh-completions:$FPATH
+fi
 
 # Ensure cache directory exists
 [[ ! -d "${XDG_CACHE_HOME:-$HOME/.cache}/zsh" ]] && mkdir -p "${XDG_CACHE_HOME:-$HOME/.cache}/zsh"
@@ -154,3 +162,30 @@ zsh-defer source $(brew --prefix)/share/zsh-syntax-highlighting/zsh-syntax-highl
 # ============================================================================
 
 alias claude="/Users/davidroth/.claude/local/claude"
+
+# ============================================================================
+# History Substring Search Configuration
+# ============================================================================
+
+# Load history substring search after syntax highlighting
+if [ -f /opt/homebrew/share/zsh-history-substring-search/zsh-history-substring-search.zsh ]; then
+    source /opt/homebrew/share/zsh-history-substring-search/zsh-history-substring-search.zsh
+    
+    # Bind arrow keys for history search
+    bindkey '^[[A' history-substring-search-up
+    bindkey '^[[B' history-substring-search-down
+    
+    # Also bind in vi mode
+    bindkey -M vicmd 'k' history-substring-search-up
+    bindkey -M vicmd 'j' history-substring-search-down
+    
+    # Bind for Emacs mode (default)
+    bindkey '^P' history-substring-search-up
+    bindkey '^N' history-substring-search-down
+fi
+
+# ============================================================================
+# Performance Profiling Output
+# ============================================================================
+# Uncomment the line below to see startup performance report
+# zprof
