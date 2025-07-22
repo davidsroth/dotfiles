@@ -13,13 +13,65 @@ This repository contains personal dotfiles for macOS, organized following the XD
 ## Quick Start
 
 ```bash
-# Clone the repository
-git clone https://github.com/yourusername/dotfiles.git ~/dotfiles
+# Clone and run the automated installer
+git clone https://github.com/davidroth/dotfiles.git ~/dotfiles
+cd ~/dotfiles
+./install.sh
 
-# Create symlinks (example)
-ln -s ~/dotfiles/.zshrc ~/.zshrc
-ln -s ~/dotfiles/.config ~/.config
-ln -s ~/dotfiles/.hammerspoon ~/.hammerspoon
+# Or install with a single command
+curl -fsSL https://raw.githubusercontent.com/davidroth/dotfiles/main/install.sh | bash -s -- --help
+```
+
+## Installation
+
+### Automated Installation (Recommended)
+
+The `install.sh` script provides a fully automated setup:
+
+```bash
+# Standard installation
+./install.sh
+
+# Preview what will be installed (dry run)
+./install.sh --dry-run
+
+# Quiet installation (errors only)
+./install.sh --quiet
+
+# Show all available options
+./install.sh --help
+```
+
+Environment variables:
+- `GITHUB_USER`: Your GitHub username (default: davidroth)
+- `DOTFILES_DIR`: Installation directory (default: ~/dotfiles)
+- `DEFAULT_BRANCH`: Git branch to use (default: main)
+- `NVM_VERSION`: NVM version to install (default: v0.39.7)
+
+The installer will:
+- Install Xcode Command Line Tools
+- Install Homebrew (if not present)
+- Install packages from Brewfile
+- Clone/update the dotfiles repository
+- Create backups of existing configs
+- Set up all symlinks using GNU Stow
+- Configure additional tools (NVM, Git LFS, tmux plugins)
+- Optionally apply macOS system preferences
+
+### Manual Installation
+
+If you prefer manual setup:
+
+```bash
+# Clone the repository
+git clone https://github.com/davidroth/dotfiles.git ~/dotfiles
+
+# Install GNU Stow
+brew install stow
+
+# Create symlinks
+cd ~/dotfiles
+stow .
 ```
 
 ## Key Features
@@ -100,7 +152,19 @@ Component documentation:
 - [Shell Configuration](.config/shell/README.md)
 - [Kitty Configuration](.config/kitty/README.md)
 
+## Requirements
+
+- macOS (tested on Sequoia 15.5)
+- `curl` (pre-installed on macOS)
+- Internet connection for downloading packages
+
 ## Recent Updates
+
+### 2025-07-22
+
+- **Enhanced install.sh**: Added security improvements, dry-run mode, verbose/quiet options
+- **Better error handling**: Timeouts, branch detection, improved git operations
+- **Documentation**: Added comprehensive help system and function documentation
 
 ### 2025-07-18
 
