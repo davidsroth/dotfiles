@@ -14,9 +14,6 @@ This directory contains persistent knowledge and behavioral guidelines for Claud
 @./memory/memory-management.md  
 *Complete lifecycle from creation triggers to archiving*
 
-@./memory/memory-file-templates.md  
-*File types, naming patterns, and content guidelines*
-
 ### Documentation Style
 
 @./memory/documentation-style.md  
@@ -28,6 +25,9 @@ This directory contains persistent knowledge and behavioral guidelines for Claud
 
 @./memory/second-opinion.md  
 *Research-first approach and when to leverage O3 for deep analysis*
+
+@./memory/interactive-refinement.md  
+*Iterative improvement through user feedback*
 
 ## Operational Processes
 
@@ -43,6 +43,9 @@ This directory contains persistent knowledge and behavioral guidelines for Claud
 
 @./memory/claude-directory-linking.md  
 *Linking .claude contents into CLAUDE.local.md*
+
+@./memory/claude-project-tools.md  
+*Managing project-specific Claude tooling*
 
 ### Code Review Process
 
@@ -63,6 +66,11 @@ This directory contains persistent knowledge and behavioral guidelines for Claud
 
 @./memory/system-defaults-preference.md  
 *Use system defaults for commands rather than specific applications*
+
+### Documentation Practices
+
+@./memory/report-date-reminder.md  
+*Date handling in reports and documentation*
 
 
 

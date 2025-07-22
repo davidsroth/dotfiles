@@ -152,6 +152,13 @@ All dotfiles are managed via symlinks from home directory to this repository:
 - **Neovim plugins**: Edit files under `.config/nvim/lua/`
 - **Git config**: Edit `.gitconfig` or `.config/git/ignore`
 
+### Claude Configuration
+
+- **Memory files**: Located in `.claude/memory/`
+- **Commands**: Custom slash commands in `.claude/commands/`
+- **Settings**: `.claude/settings.json` and `.claude/settings.local.json`
+- **Note**: CLAUDE.md is excluded from stow to allow machine-specific overrides
+
 ### Repository Maintenance
 
 - Keep configs version control friendly (no secrets)

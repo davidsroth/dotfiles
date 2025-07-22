@@ -29,7 +29,10 @@
       "WebFetch(domain:dlvhdr.github.io)",
       "Bash(tmux source-file:*)",
       "Bash(git stash:*)",
-      "Bash(git checkout:*)"
+      "Bash(git checkout:*)",
+      "Bash(git add:*)",
+      "Bash(diff:*)",
+      "WebFetch(domain:docs.anthropic.com)"
     ],
     "deny": []
   }
