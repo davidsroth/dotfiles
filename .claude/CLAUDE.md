@@ -21,10 +21,7 @@ This directory contains persistent knowledge and behavioral guidelines for Claud
 
 ## Methodologies
 
-### Problem Solving & Second Opinion
-
-@./memory/second-opinion.md  
-*Research-first approach and when to leverage O3 for deep analysis*
+### Interactive Refinement
 
 @./memory/interactive-refinement.md  
 *Iterative improvement through user feedback*
