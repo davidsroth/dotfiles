@@ -16,20 +16,6 @@ elif [ "$pane_count" = "1" ]; then
     tmux resize-pane -y 70%
     tmux select-pane -D
 else
-    # Multiple panes exist, check if we have a horizontal split
-    # Get layout info to detect horizontal splits
-    layout=$(tmux display-message -p '#{window_layout}')
-    
-    # Simple check: if layout contains ',', it's likely a horizontal split
-    # (vertical splits use '{' and '}')
-    if [[ "$layout" == *","* ]]; then
-        # Horizontal split exists, zoom the currently focused pane
-        tmux resize-pane -Z
-    else
-        # Only vertical splits exist, create lower third split
-        tmux split-window -v -c "#{pane_current_path}"
-        tmux select-pane -U
-        tmux resize-pane -y 70%
-        tmux select-pane -D
-    fi
+    # Multiple panes exist, just zoom the current pane
+    tmux resize-pane -Z
 fi
