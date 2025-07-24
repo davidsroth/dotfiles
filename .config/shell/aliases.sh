@@ -134,11 +134,6 @@ fi
 # Safety Aliases
 # ============================================================================
 
-# Confirmation prompts for destructive operations
-alias rm='rm -i'
-alias cp='cp -i'
-alias mv='mv -i'
-
 # Prevent accidental file overwrites
 alias wget='wget -c'
 
