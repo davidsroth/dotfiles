@@ -12,6 +12,10 @@ Work from the beginning of the conversation through to the end noting:
 - Error messages and their fixes
 - Configuration requirements identified
 
+## Multiple Calls in Same Session
+
+When called multiple times in a session, focus on a different aspect of the session each time.
+
 ## Where to Update
 
 - **Existing files where appropriate**: Add sections, examples, clarifications, corrections
@@ -29,5 +33,7 @@ You may add/change up to {{lines|150}} lines.
 - Count EVERY added/modified line against this limit
 - STOP immediately when approaching the limit
 - Focus only on the most critical learnings
+
+**Note**: Metadata updates (like `updated: YYYY-MM-DD`) and blank lines do NOT count toward the line limit.
 
 Think.
