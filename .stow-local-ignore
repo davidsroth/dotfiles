@@ -32,3 +32,13 @@ CONTRIBUTING.*
 install.sh
 bootstrap.sh
 macos-defaults.sh
+
+# Package management
+Brewfile
+Brewfile.lock.json
+
+# Documentation directory
+docs/
+
+# Example files
+.*\.example
