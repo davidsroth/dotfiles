@@ -36,12 +36,12 @@ This is David Roth's personal dotfiles repository for macOS development environm
 
 ### Terminal & Multiplexing
 
-- **Primary Terminal**: WezTerm with Gruvbox Dark Hard theme
-  - GPU-accelerated rendering
-  - Configuration documented in `.config/wezterm/README.md`
-- **Alternative Terminal**: Kitty
+- **Primary Terminal**: Kitty
   - Configured with Catppuccin Mocha theme
+  - GPU-accelerated rendering
   - See `.config/kitty/README.md`
+- **Alternative Terminal**: WezTerm
+  - Configuration documented in `.config/wezterm/README.md`
 - **Multiplexer**: tmux with modular configuration
   - Vim-like keybindings in `.config/tmux/keybindings.conf`
   - Settings and plugins
