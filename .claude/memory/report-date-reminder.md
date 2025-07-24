@@ -1,11 +1,13 @@
 ---
 created: 2025-07-18
-updated: 2025-07-18
+updated: 2025-07-24
 ---
 
 # Report Date Reminder
 
 Always include the current date at the top of any report, right after the title.
+
+**CRITICAL**: Check the `<env>` section for "Today's date" rather than guessing. Don't assume "2025" means "January 2025".
 
 Format:
 
