@@ -12,11 +12,14 @@ Project-specific `.claude/` directories for Claude helper tools.
 
 ```text
 project/.claude/
-├── scripts/    # Helper scripts for Claude operations
-├── docs/       # Claude-specific documentation
-├── tasks/      # Implementation plans and in-progress tasks
-├── reports/    # Generated analysis reports
-└── data/       # Raw data exports and analysis results
+├── scripts/     # Helper scripts for Claude operations
+├── docs/        # Claude-specific documentation
+├── tasks/       # All task-related content
+│   ├── active/  # In-progress tasks
+│   ├── planned/ # Implementation plans not yet started
+│   └── completed/ # Finished tasks with specs/logs
+├── reports/     # Generated analysis reports
+└── data/        # Raw data exports and analysis results
 ```
 
 ## Placement Guidelines
