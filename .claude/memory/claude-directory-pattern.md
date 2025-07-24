@@ -1,6 +1,6 @@
 ---
 created: 2025-07-18
-updated: 2025-07-18
+updated: 2025-07-24
 tags: [claude, tools, organization]
 ---
 
@@ -13,7 +13,10 @@ Project-specific `.claude/` directories for Claude helper tools.
 ```text
 project/.claude/
 ├── scripts/    # Helper scripts for Claude operations
-└── docs/       # Claude-specific documentation
+├── docs/       # Claude-specific documentation
+├── tasks/      # Implementation plans and in-progress tasks
+├── reports/    # Generated analysis reports
+└── data/       # Raw data exports and analysis results
 ```
 
 ## Placement Guidelines
