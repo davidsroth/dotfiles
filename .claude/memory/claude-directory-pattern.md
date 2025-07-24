@@ -1,7 +1,6 @@
 ---
 created: 2025-07-18
 updated: 2025-07-24
-tags: [claude, tools, organization]
 ---
 
 # Claude Directory Pattern

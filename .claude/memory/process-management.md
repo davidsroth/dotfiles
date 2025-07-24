@@ -1,7 +1,6 @@
 ---
 created: 2025-07-18
 updated: 2025-07-18
-tags: [process, background, services, debugging]
 ---
 
 # Process Management

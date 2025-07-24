@@ -1,7 +1,6 @@
 ---
 created: 2025-07-22
 updated: 2025-07-22
-tags: [tools, maintenance, selection]
 ---
 
 # Tool Selection Principles

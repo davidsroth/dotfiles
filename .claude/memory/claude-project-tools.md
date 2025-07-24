@@ -1,7 +1,6 @@
 ---
 created: 2025-07-18
 updated: 2025-07-18
-tags: [claude, tools, patterns]
 ---
 
 # Claude Project Tools Pattern

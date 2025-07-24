@@ -1,7 +1,6 @@
 ---
 created: 2025-07-22
 updated: 2025-07-22
-tags: [hooks, linting, formatting, automation]
 ---
 
 # Linting and Formatting Hooks

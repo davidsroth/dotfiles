@@ -1,7 +1,6 @@
 ---
 created: 2025-07-19
 updated: 2025-07-19
-tags: [workflow, interaction, refinement]
 ---
 
 # Interactive Refinement
