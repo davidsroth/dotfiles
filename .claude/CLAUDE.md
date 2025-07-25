@@ -1,6 +1,6 @@
 ---
 created: 2025-07-10
-updated: 2025-07-18
+updated: 2025-07-25
 ---
 
 # Claude Code Configuration
@@ -74,25 +74,7 @@ _Date handling in reports and documentation_
 @./memory/linting-hooks.md  
 _Automated formatting and linting via hooks_
 
-## System Information
+## Shell Configuration References
 
-### Hardware
-
-- **Model**: MacBook Pro (Mac15,11)
-- **Model Number**: MODEL_NUMBER_REDACTED
-- **Chip**: Apple M3 Max (14 cores: 10 performance + 4 efficiency)
-- **Memory**: 36 GB
-- **Storage**: 926 GB SSD
-
-### Software
-
-- **OS**: macOS 15.5 (Build 24F74)
-- **Kernel**: Darwin 24.5.0 (ARM64)
-- **Architecture**: ARM64
-
-### Development Environment
-
-- **Home Directory**: /Users/davidroth
-- **User**: davidroth
-- **Platform**: darwin
-- **Config Files**: Comprehensive dotfiles setup with symlinks
+@../.config/shell/aliases.sh - Shell command aliases  
+@../.config/shell/functions.sh - Shell utility functions
