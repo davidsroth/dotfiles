@@ -136,10 +136,3 @@ fi
 
 # Prevent accidental file overwrites
 alias wget='wget -c'
-
-# ============================================================================
-# Custom/Legacy Aliases (preserved from original)
-# ============================================================================
-
-# Git dotfiles management (if using bare repo method)
-alias config='/usr/bin/git --git-dir=$HOME/.cfg/ --work-tree=$HOME'
