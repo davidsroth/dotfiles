@@ -29,7 +29,6 @@ This is David Roth's personal dotfiles repository for macOS development environm
 
 - **Primary Editor**: Neovim (LazyVim-based setup)
 - **Plugins**:
-  - Telekasten for note-taking
   - VimTeX for LaTeX editing
   - Language support
 - **Secondary Editor**: Cursor (launched via `cursor` command)
@@ -78,26 +77,9 @@ All dotfiles are managed via symlinks from home directory to this repository:
 
 ### Key Directories
 
-- `/tmp/YYYYMMDD/`: Daily temporary file organization
 - `~/.config/`: XDG config directory for most tools
 - `~/dotfiles/`: This repository location
 
-## Custom Commands & Aliases
-
-### Aliases
-
-- `vim`, `nv` → `nvim`
-- `lz` → `lazygit`
-- `ls` → `lsd`
-- `cat` → `bat`
-- `cd` → Uses `zoxide`
-
-### Custom Functions
-
-- `pblog`: Daily logging helper
-- `tdump`: Quick note dumping
-- `rdom`, `tody`, `ystd`: Date helpers
-- `jt`, `jtm`: Temporary file management
 
 ## Working with This Repository
 
