@@ -12,67 +12,67 @@ This directory contains persistent knowledge and behavioral guidelines for Claud
 ### Memory Management
 
 @./memory/memory-management.md  
-*Complete lifecycle from creation triggers to archiving*
+_Complete lifecycle from creation triggers to archiving_
 
 ### Documentation Style
 
 @./memory/documentation-style.md  
-*Guidelines for factual, non-hyperbolic documentation*
+_Guidelines for factual, non-hyperbolic documentation_
 
 ## Methodologies
 
 ### Interactive Refinement
 
 @./memory/interactive-refinement.md  
-*Iterative improvement through user feedback*
+_Iterative improvement through user feedback_
 
 ## Operational Processes
 
 ### Tooling Workflow
 
 @./memory/tooling-workflow.md  
-*Editor and browser tooling integrations*
+_Editor and browser tooling integrations_
 
 ### Claude Directory Pattern
 
 @./memory/claude-directory-pattern.md  
-*Project-specific .claude directories for helper tools*
+_Project-specific .claude directories for helper tools_
 
 @./memory/claude-directory-linking.md  
-*Linking .claude contents into CLAUDE.local.md*
+_Linking .claude contents into CLAUDE.local.md_
 
 @./memory/claude-project-tools.md  
-*Managing project-specific Claude tooling*
+_Managing project-specific Claude tooling_
 
 ### Code Review Process
 
 @./memory/code-review-process.md  
-*Systematic PR review workflow with GitHub integration*
+_Systematic PR review workflow with GitHub integration_
 
 ### Git Commit Organization
 
 @./memory/git-commit-organization.md  
-*Workflow for organizing changes into logical commits*
+_Workflow for organizing changes into logical commits_
 
 ### Process Management
 
 @./memory/process-management.md  
-*Background processes, services, and debugging procedures*
+_Background processes, services, and debugging procedures_
 
 ### System Defaults Preference
 
 @./memory/system-defaults-preference.md  
-*Use system defaults for commands rather than specific applications*
+_Use system defaults for commands rather than specific applications_
 
 ### Documentation Practices
 
 @./memory/report-date-reminder.md  
-*Date handling in reports and documentation*
+_Date handling in reports and documentation_
 
 ### Automation
 
 @./memory/linting-hooks.md  
-*Automated formatting and linting via hooks*
+_Automated formatting and linting via hooks_
 
 ## System Information
 
