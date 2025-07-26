@@ -1,6 +1,6 @@
 ---
 created: 2025-07-18
-updated: 2025-07-24
+updated: 2025-07-25
 ---
 
 # Claude Directory Pattern
@@ -10,7 +10,8 @@ Project-specific `.claude/` directories for Claude helper tools.
 ## Structure
 
 ```text
-project/.claude/
+{project}/.claude/local/
+├── memory/
 ├── scripts/     # Helper scripts for Claude operations
 ├── docs/        # Claude-specific documentation
 ├── tasks/       # All task-related content
@@ -23,7 +24,7 @@ project/.claude/
 
 ## Placement Guidelines
 
-- **Root `.claude/`**: For project-wide tools (e.g., git helpers)
+- **Root `.claude/`**: For project-wide tools
 - **Subdirectory `.claude/`**: For module-specific tools (e.g., `project/subdir/.claude/`)
 - Keep tools close to the code they operate on
 - Never commit sensitive data (tokens, credentials)
@@ -36,3 +37,7 @@ Claude discovers memory files based on working directory:
 - Loads all CLAUDE.md files encountered
 - Subdirectory CLAUDE.md files only loaded when working in those subtrees
 - Creates natural scoping without explicit root linking
+
+## Security
+
+Never save tokens/credentials to disk. Use stdout → parse → pass via args.

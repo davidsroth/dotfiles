@@ -24,11 +24,11 @@ When called multiple times in a session, focus on a different aspect of the sess
 
 Prioritize supplementing existing documentation, and prioritize updating documentation nearer to the relevant code.
 
-You may add/change up to {{lines|150}} lines.
+You may add/change up to {{lines|5}} lines.
 
 ## LINE LIMIT ENFORCEMENT
 
-**CRITICAL**: You MUST stay within {{lines|150}} total line changes.
+**CRITICAL**: You MUST stay within {{lines|5}} total line changes.
 
 - Count EVERY added/modified line against this limit
 - STOP immediately when approaching the limit
