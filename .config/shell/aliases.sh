@@ -90,6 +90,10 @@ alias j='z'  # zoxide jump
 # Claude Code
 alias claudec='claude --continue'
 
+# Logs - view today's log
+alias tlog-view='${EDITOR:-nvim} /tmp/$(date +"%Y%m%d")/log'
+alias tlog-tail='tail -f /tmp/$(date +"%Y%m%d")/log'
+
 # ============================================================================
 # Utility Aliases
 # ============================================================================

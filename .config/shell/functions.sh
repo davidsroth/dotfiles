@@ -155,6 +155,33 @@ EOF
     echo "✓ Saved to $file" >&2
 }
 
+# Append stdin to daily log file with timestamp and optional context
+# Usage: command | tlog [context]
+# Example: git status | tlog "pre-commit"
+# Output: [2025-07-25 17:44:39] [pre-commit]
+#           <indented command output>
+tlog() {
+    local dir="$(ensure_today_dir)"
+    local file="$dir/log"
+    local context="${1:-}"
+    local timestamp="$(date '+%Y-%m-%d %H:%M:%S')"
+
+    # If context provided, show it
+    if [[ -n "$context" ]]; then
+        echo "[$timestamp] [$context]" >>"$file"
+    else
+        echo "[$timestamp]" >>"$file"
+    fi
+
+    # Append stdin with indentation
+    while IFS= read -r line; do
+        echo "  $line" >>"$file"
+    done
+
+    # Add separator
+    echo "" >>"$file"
+}
+
 # Find latest file in current directory
 fls() {
     ls -t | head -n 1
@@ -292,6 +319,6 @@ sysinfo() {
 # Clean old temp directories (older than 7 days)
 cleanup_tmp() {
     local days="${1:-7}"
-    find /tmp -maxdepth 1 -type d -name "[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]" -mtime +$days -exec rm -rf {} \;
+    find /tmp -maxdepth 1 -type d -name "[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]" -mtime +$days -exec rm -rf {} +
     echo "✓ Cleaned up temp directories older than $days days"
 }
