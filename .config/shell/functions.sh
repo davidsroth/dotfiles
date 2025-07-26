@@ -68,10 +68,10 @@ pblog() {
     local dir="$(ensure_today_dir)"
     local file="$dir/$(today).md"
     local timestamp=$(now)
-    
+
     # Create file with frontmatter if it doesn't exist
     if [[ ! -f "$file" ]]; then
-        cat > "$file" <<EOF
+        cat >"$file" <<EOF
 ---
 date: $(today)
 type: daily-log
@@ -79,9 +79,9 @@ type: daily-log
 
 EOF
     fi
-    
+
     # Append entry with timestamp
-    cat >> "$file" <<EOF
+    cat >>"$file" <<EOF
 ## $timestamp
 
 $(pbpaste)
@@ -89,7 +89,7 @@ $(pbpaste)
 ---
 
 EOF
-    
+
     echo "✓ Added clipboard content to $file"
 }
 
@@ -99,15 +99,15 @@ note() {
     local file="$dir/$(today).md"
     local timestamp=$(now)
     local content="$*"
-    
+
     if [[ -z "$content" ]]; then
         echo "Usage: note <your note here>"
         return 1
     fi
-    
+
     # Create file with frontmatter if it doesn't exist
     if [[ ! -f "$file" ]]; then
-        cat > "$file" <<EOF
+        cat >"$file" <<EOF
 ---
 date: $(today)
 type: daily-log
@@ -115,9 +115,9 @@ type: daily-log
 
 EOF
     fi
-    
+
     # Append note
-    cat >> "$file" <<EOF
+    cat >>"$file" <<EOF
 ## $timestamp
 
 $content
@@ -125,7 +125,7 @@ $content
 ---
 
 EOF
-    
+
     echo "✓ Added note to $file"
 }
 
@@ -138,10 +138,10 @@ tdump() {
     local dir="$(ensure_today_dir)"
     local header="$1"
     local file="$dir/$(datetime).txt"
-    
+
     # Add header if provided
     if [[ -n "$header" ]]; then
-        cat > "$file" <<EOF
+        cat >"$file" <<EOF
 ---
 $header
 ---
@@ -151,8 +151,8 @@ EOF
     else
         tee "$file"
     fi
-    
-    echo "✓ Saved to $file"
+
+    echo "✓ Saved to $file" >&2
 }
 
 # Find latest file in current directory
@@ -187,27 +187,27 @@ opentd() {
 mkscript() {
     local name="$1"
     local lang="${2:-bash}"
-    
+
     if [[ -z "$name" ]]; then
         echo "Usage: mkscript <name> [language]"
         return 1
     fi
-    
+
     case "$lang" in
-        bash|sh)
-            echo '#!/usr/bin/env bash' > "$name"
-            ;;
-        python|py)
-            echo '#!/usr/bin/env python3' > "$name"
-            ;;
-        node|js)
-            echo '#!/usr/bin/env node' > "$name"
-            ;;
-        *)
-            echo "#!/usr/bin/env $lang" > "$name"
-            ;;
+    bash | sh)
+        echo '#!/usr/bin/env bash' >"$name"
+        ;;
+    python | py)
+        echo '#!/usr/bin/env python3' >"$name"
+        ;;
+    node | js)
+        echo '#!/usr/bin/env node' >"$name"
+        ;;
+    *)
+        echo "#!/usr/bin/env $lang" >"$name"
+        ;;
     esac
-    
+
     chmod +x "$name"
     ${EDITOR:-nvim} "$name"
 }
@@ -216,18 +216,18 @@ mkscript() {
 extract() {
     if [[ -f "$1" ]]; then
         case "$1" in
-            *.tar.bz2)   tar xjf "$1"    ;;
-            *.tar.gz)    tar xzf "$1"    ;;
-            *.bz2)       bunzip2 "$1"    ;;
-            *.rar)       unrar x "$1"    ;;
-            *.gz)        gunzip "$1"     ;;
-            *.tar)       tar xf "$1"     ;;
-            *.tbz2)      tar xjf "$1"    ;;
-            *.tgz)       tar xzf "$1"    ;;
-            *.zip)       unzip "$1"      ;;
-            *.Z)         uncompress "$1" ;;
-            *.7z)        7z x "$1"       ;;
-            *)           echo "'$1' cannot be extracted" ;;
+        *.tar.bz2) tar xjf "$1" ;;
+        *.tar.gz) tar xzf "$1" ;;
+        *.bz2) bunzip2 "$1" ;;
+        *.rar) unrar x "$1" ;;
+        *.gz) gunzip "$1" ;;
+        *.tar) tar xf "$1" ;;
+        *.tbz2) tar xjf "$1" ;;
+        *.tgz) tar xzf "$1" ;;
+        *.zip) unzip "$1" ;;
+        *.Z) uncompress "$1" ;;
+        *.7z) 7z x "$1" ;;
+        *) echo "'$1' cannot be extracted" ;;
         esac
     else
         echo "'$1' is not a valid file"
@@ -247,7 +247,7 @@ mkcd() {
 up() {
     local count="${1:-1}"
     local path=""
-    for ((i=0; i<count; i++)); do
+    for ((i = 0; i < count; i++)); do
         path="../$path"
     done
     cd "$path" || return
