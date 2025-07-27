@@ -4,19 +4,29 @@ Analyze unstaged/uncommitted changes and organize them into logical, well-struct
 
 ## Process
 
-1. **Analyze Current State**
+1. **Check Current Branch**
+   - Run `git rev-parse --abbrev-ref HEAD` to get current branch
    - Run `git status` to see all changes
    - Run `git diff` to understand unstaged changes
    - Run `git diff --cached` to see staged changes
-   - Run `git log --oneline -5` to understand commit style
+   - Determine if current branch is appropriate for the changes:
+     - If on `main`/`master` and changes are non-trivial, create a feature branch
+     - If branch name doesn't match the nature of changes, create appropriate branch
+   - If new branch needed:
+     - Suggest descriptive branch name based on changes (e.g., `feat/add-logging`, `fix/api-error`, `chore/update-deps`)
+     - Create and switch to new branch: `git checkout -b <branch-name>`
 
-2. **Group Related Changes**
+2. **Analyze Commit History**
+   - Run `git log --oneline -5` to understand commit style
+   - Check if repository uses conventional commits
+
+3. **Group Related Changes**
    - Group changes by feature/purpose
    - Separate refactoring from features
    - Keep documentation updates separate
    - Group chore/maintenance tasks together
 
-3. **Create Commits**
+4. **Create Commits**
    - Use conventional commit format if repo uses it
    - Write clear, descriptive commit messages
    - Include context in commit body when helpful
@@ -36,7 +46,7 @@ Analyze unstaged/uncommitted changes and organize them into logical, well-struct
 
 ## Example Commit Message Format
 
-```
+```text
 type(scope): short description
 
 - Bullet point explaining what changed
@@ -50,14 +60,28 @@ Co-Authored-By: Claude <noreply@anthropic.com>
 
 ## Steps to Execute
 
-1. Show current repository state
-2. Analyze commit history for style patterns
-3. Group changes logically
-4. Stage and commit each group separately
-5. Verify all changes are committed
+1. Check current branch and determine if appropriate
+2. Create new branch if needed based on change analysis
+3. Show current repository state
+4. Analyze commit history for style patterns
+5. Group changes logically
+6. Stage and commit each group separately
+7. Verify all changes are committed
+
+## Branch Naming Conventions
+
+When creating new branches, use descriptive names following these patterns:
+
+- **Features**: `feat/description` or `feature/description`
+- **Bug fixes**: `fix/description` or `bugfix/description`
+- **Chores**: `chore/description`
+- **Refactoring**: `refactor/description`
+- **Documentation**: `docs/description`
 
 ## Important Guidelines
 
+- Never commit directly to `main`/`master` unless changes are trivial
+- Create feature branches for any substantial work
 - Never commit sensitive information
 - Keep commits focused and atomic
 - Separate concerns into different commits
