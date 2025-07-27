@@ -33,7 +33,9 @@
       "Bash(git add:*)",
       "Bash(diff:*)",
       "WebFetch(domain:docs.anthropic.com)",
-      "Bash(git commit:*)"
+      "WebFetch(domain:docs.anthropic.com)",
+      "Bash(git commit:*)",
+      "Bash(git rev-parse:*)"
     ],
     "deny": []
   },
