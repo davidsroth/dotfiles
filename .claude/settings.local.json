@@ -33,9 +33,17 @@
       "Bash(git add:*)",
       "Bash(diff:*)",
       "WebFetch(domain:docs.anthropic.com)",
-      "WebFetch(domain:docs.anthropic.com)",
       "Bash(git commit:*)",
-      "Bash(git rev-parse:*)"
+      "Bash(git rev-parse:*)",
+      "mcp__sunsama__get-tasks-by-day",
+      "mcp__sunsama__update-task-planned-time",
+      "mcp__sunsama__update-task-notes",
+      "mcp__sunsama__get-task-by-id",
+      "mcp__sunsama__create-task",
+      "Bash(grep:*)",
+      "mcp__sunsama__get-streams",
+      "mcp__sunsama__update-task-stream",
+      "mcp__sunsama__get-tasks-backlog"
     ],
     "deny": []
   },
@@ -46,18 +54,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash -c 'file=\"$CLAUDE_FILE_PATH\"; ext=\"${file##*.}\"; case \"$ext\" in py) black \"$file\" 2>/dev/null || true ;; js|jsx|ts|tsx|json) prettier --write \"$file\" 2>/dev/null || true ;; go) gofmt -w \"$file\" 2>/dev/null || true ;; rs) rustfmt \"$file\" 2>/dev/null || true ;; sh|bash) shfmt -w \"$file\" 2>/dev/null || true ;; md) prettier --write \"$file\" 2>/dev/null || true ;; esac'"
-          }
-        ]
-      }
-    ],
-    "PreToolUse": [
-      {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash -c 'echo \"$CLAUDE_TOOL_INPUT\" | grep -qE \"\\b(grep|find)\\b\" && echo \"⚠️  Consider using ripgrep (rg) or fd for better performance\" >&2 || true'"
+            "command": "black \"$CLAUDE_FILE_PATH\" 2>/dev/null || true"
           }
         ]
       }
