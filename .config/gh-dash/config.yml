@@ -3,18 +3,14 @@
 prSections:
   - title: Review Requested
     filters: is:open review-requested:@me
-  - title: Tower
-    filters: is:open label:tower
-  - title: Nectar
-    filters: is:open label:nectar
-  - title: Ready to Merge
-    filters: is:open review:approved status:success -label:wip,do-not-merge
+  - title: Recently Updated
+    filters: is:open sort:updated-desc
+  - title: Tower & Nectar
+    filters: is:open label:tower,nectar
   - title: My Pull Requests
     filters: is:open author:@me
   - title: Assigned to Me
     filters: is:open assignee:@me
-  - title: Recently Updated
-    filters: is:open sort:updated-desc
 
 issuesSections:
   - title: My Issues
@@ -32,6 +28,7 @@ defaults:
 
 repoPaths:
   DistylAI/distillery: /Volumes/git/distillery
+  davidsroth/dotfiles: /Users/davidsroth/dotfiles
 
 keybindings:
   universal:
