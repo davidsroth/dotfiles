@@ -19,6 +19,9 @@ _Complete lifecycle from creation triggers to archiving_
 @./memory/documentation-style.md  
 _Guidelines for factual, non-hyperbolic documentation_
 
+@./memory/report-date-reminder.md  
+_Date handling in reports and documentation_
+
 ## Methodologies
 
 ### Interactive Refinement
@@ -66,13 +69,10 @@ _Use system defaults for commands rather than specific applications_
 
 ### Documentation Practices
 
-@./memory/report-date-reminder.md  
-_Date handling in reports and documentation_
+## MCP Integration
 
-### Automation
-
-@./memory/linting-hooks.md  
-_Automated formatting and linting via hooks_
+@./memory/mcp/mcp.md
+_Model Context Protocol server configurations and usage patterns_
 
 ## Shell Configuration References
 
