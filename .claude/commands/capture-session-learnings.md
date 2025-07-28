@@ -36,4 +36,4 @@ You may add/change up to {{lines|5}} lines.
 
 **Note**: Metadata updates (like `updated: YYYY-MM-DD`) and blank lines do NOT count toward the line limit.
 
-Think.
+Think before making your edits. Think about how this information will fit into the existing structure.
