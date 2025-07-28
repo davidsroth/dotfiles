@@ -189,3 +189,10 @@ fi
 # ============================================================================
 # Uncomment the line below to see startup performance report
 # zprof
+
+# bun completions
+[ -s "/Users/davidroth/.bun/_bun" ] && source "/Users/davidroth/.bun/_bun"
+
+# bun
+export BUN_INSTALL="$HOME/.bun"
+export PATH="$BUN_INSTALL/bin:$PATH"
