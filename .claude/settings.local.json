@@ -47,6 +47,11 @@
     ],
     "deny": []
   },
+  "enableAllProjectMcpServers": true,
+  "enabledMcpjsonServers": [
+    "github",
+    "sunsama"
+  ],
   "hooks": {
     "PostToolUse": [
       {
