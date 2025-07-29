@@ -55,4 +55,5 @@ vim.opt.ignorecase = true
 vim.opt.smartcase = true
 
 -- Improve startup time
-vim.opt.lazyredraw = true
+-- NOTE: lazyredraw is disabled as it causes issues with Noice.nvim
+-- vim.opt.lazyredraw = true
