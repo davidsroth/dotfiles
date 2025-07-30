@@ -8,18 +8,15 @@
 
 # Skip "Press enter to return to lazygit" prompt
 promptToReturnFromSubprocess: false
-
 customCommands:
   # ============================================================================
   # Branch Operations
   # ============================================================================
-
   - key: "F"
     command: "git fetch --prune"
     context: "localBranches"
     output: log
     description: "Fetch and prune branches"
-
   # ============================================================================
   # GitHub Integration
   # ============================================================================
@@ -29,7 +26,6 @@ customCommands:
     context: "commits"
     command: "open $(git remote get-url origin | sed 's/\\.git$//' | sed 's/git@github.com:/https:\\/\\/github.com\\//')/commit/{{.SelectedLocalCommit.Hash}}"
     description: "Open commit in GitHub"
-
   # ============================================================================
   # File Operations
   # ============================================================================
@@ -39,21 +35,30 @@ customCommands:
     context: "files"
     command: "git {{if .SelectedFile.HasUnstagedChanges}} add {{else}} reset {{end}} {{.SelectedFile.Name | quote}}"
     description: "Toggle file staged"
-
   # Show file history
   - key: "H"
     context: "files"
     command: "lazygit log --follow -- {{.SelectedFile.Name}}"
     description: "Show file history"
     output: terminal
-
   # Show file in HEAD
   - key: "W"
     context: "files"
     command: "git show HEAD:{{.SelectedFile.Name}}"
     description: "Show file in HEAD"
     output: terminal
-
+  # Open file in default editor (EDITOR)
+  - key: "e"
+    context: "files"
+    command: "${EDITOR:-nvim} {{.SelectedFile.Name}}"
+    description: "Edit in $EDITOR"
+    output: terminal
+  # Open file in visual editor (VISUAL)
+  - key: "E"
+    context: "files"
+    command: "${VISUAL:-cursor} {{.SelectedFile.Name}}"
+    description: "Edit in $VISUAL"
+    output: terminal
   # ============================================================================
   # Commit Operations
   # ============================================================================
@@ -64,25 +69,21 @@ customCommands:
     command: "git rebase -i {{.SelectedLocalCommit.Hash}}^"
     description: "Interactive rebase from commit"
     output: terminal
-
   # Copy commit hash to clipboard
   - key: "y"
     context: "commits"
     command: "echo -n {{.SelectedLocalCommit.Hash}} | pbcopy"
     description: "Copy commit hash"
-
   # Revert commit
   - key: "R"
     context: "commits"
     command: "git revert {{.SelectedLocalCommit.Hash}}"
     description: "Revert commit"
-
   # Cherry-pick commit
   - key: "C"
     context: "commits"
     command: "git cherry-pick {{.SelectedLocalCommit.Hash}}"
     description: "Cherry-pick commit"
-
   # Show changed files in commit
   - key: "D"
     context: "commits"
@@ -110,7 +111,6 @@ gui:
   mouseEvents: true
   # Command log size
   commandLogSize: 8
-
   # ============================================================================
   # Modern UI Enhancements (2024/2025)
   # ============================================================================
@@ -119,7 +119,6 @@ gui:
   nerdFontsVersion: "3"
   # Show file icons for better visual experience
   showFileIcons: true
-
   # ============================================================================
   # Theme Configuration
   # ============================================================================
@@ -149,10 +148,10 @@ gui:
   authorColors:
     "*": "#999999" # default color for unknown authors
 os:
-  edit: "cursor {{filename}}"
-  editAtLine: "cursor --goto {{filename}}:{{line}}"
-  editAtLineAndWait: "cursor --wait --goto {{filename}}:{{line}}"
-  openDirInEditor: "cursor {{dir}}"
+  edit: "${EDITOR:-nvim} {{filename}}"
+  editAtLine: "${EDITOR:-nvim} +{{line}} {{filename}}"
+  editAtLineAndWait: "${EDITOR:-nvim} +{{line}} {{filename}}"
+  openDirInEditor: "${EDITOR:-nvim} {{dir}}"
 git:
   # ============================================================================
   # Git Behavior Configuration
@@ -161,7 +160,6 @@ git:
   # Pull mode options: 'auto', 'merge', 'rebase', 'ff-only'
   pull:
     mode: "rebase"
-
   # ============================================================================
   # Performance & Auto-refresh Settings (2024/2025)
   # ============================================================================
@@ -176,7 +174,6 @@ git:
   fetchAll: true
   # Auto fast-forward local branches when possible
   autoForwardBranches: allBranches
-
   # ============================================================================
   # Staging & Diff Configuration
   # ============================================================================
@@ -186,7 +183,6 @@ git:
     splitDiff: "auto"
   # Show untracked files in file tree
   showUntrackedFiles: true
-
   # ============================================================================
   # Security & Commit Settings
   # ============================================================================
@@ -198,7 +194,6 @@ keybinding:
   # ============================================================================
   # Key Binding Configuration
   # ============================================================================
-
   universal:
     # Quick navigation (vim-like)
     scrollUpMain-alt1: "K"
@@ -212,21 +207,18 @@ keybinding:
     # Improved undo/redo
     undo: "u"
     redo: "<c-r>"
-
   commits:
     # Easier fixup commit
     createFixupCommit: "F"
     # Advanced commit operations
     amendToCommit: "A"
     tagCommit: "T"
-
   branches:
     # Push with tracking
     pushTag: "P"
     # Advanced branch operations
     setUpstream: "U"
     fetchRemote: "f"
-
   files:
     # Stage/unstage all
     stageAll: "A"

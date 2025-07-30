@@ -4,7 +4,7 @@
 
 [core]
 	# Default editor for commit messages and interactive commands
-	editor = cursor --wait
+	editor = ${VISUAL:-${EDITOR:-nvim}} --wait
 	
 	# Better diff algorithm
 	algorithm = histogram
