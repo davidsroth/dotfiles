@@ -124,15 +124,13 @@ add-zsh-hook preexec load_nvm
 # ============================================================================
 
 # Neovim remote support
+
+# Neovim remote support - override both when inside neovim
 if [ -n "$NVIM_LISTEN_ADDRESS" ]; then
-    # Use neovim-remote when inside neovim
-    alias nvim=nvr -cc split --remote-wait +'set bufhidden=wipe'
+    # Use neovim-remote when inside neovim to avoid nested instances
+    alias nvim='nvr -cc split --remote-wait +'"'"'set bufhidden=wipe'"'"
     export VISUAL="nvr -cc split --remote-wait +'set bufhidden=wipe'"
     export EDITOR="nvr -cc split --remote-wait +'set bufhidden=wipe'"
-else
-    # Use cursor as default editor
-    export VISUAL="cursor"
-    export EDITOR="cursor"
 fi
 
 # ============================================================================

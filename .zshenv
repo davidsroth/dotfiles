@@ -19,8 +19,8 @@ export LC_ALL="${LC_ALL:-en_US.UTF-8}"
 # Default programs
 export PAGER="${PAGER:-less}"
 export LESS="${LESS:--R}"
-export EDITOR="${EDITOR:-nvim}"
-export VISUAL="${VISUAL:-cursor}"
+export EDITOR="nvim"
+export VISUAL="cursor"
 
 # Development paths
 export JAVA_HOME="/Library/Java/JavaVirtualMachines/zulu-17.jdk/Contents/Home"
