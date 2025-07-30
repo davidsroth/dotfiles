@@ -158,3 +158,7 @@ All dotfiles are managed via symlinks from home directory to this repository:
 - Added global gitignore at `.config/git/ignore`
 - Created documentation for components
 - Added Starship prompt configuration
+
+## Git Workflow
+
+For this personal dotfiles repository, direct commits to the main branch are acceptable. Feature branches are optional and primarily used for organizing related changes.
