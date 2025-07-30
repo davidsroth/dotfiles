@@ -17,21 +17,21 @@ customCommands:
     context: "localBranches"
     output: log
     description: "Fetch and prune branches"
-  # ============================================================================
-  # GitHub Integration
-  # ============================================================================
-
   # Open commit in browser (system default)
   - key: "<c-o>"
+    # ============================================================================
+    # GitHub Integration
+    # ============================================================================
+
     context: "commits"
     command: "open $(git remote get-url origin | sed 's/\\.git$//' | sed 's/git@github.com:/https:\\/\\/github.com\\//')/commit/{{.SelectedLocalCommit.Hash}}"
     description: "Open commit in GitHub"
-  # ============================================================================
-  # File Operations
-  # ============================================================================
-
   # Toggle file staging with 'a'
   - key: "a"
+    # ============================================================================
+    # File Operations
+    # ============================================================================
+
     context: "files"
     command: "git {{if .SelectedFile.HasUnstagedChanges}} add {{else}} reset {{end}} {{.SelectedFile.Name | quote}}"
     description: "Toggle file staged"
@@ -59,12 +59,12 @@ customCommands:
     command: "${VISUAL:-cursor} {{.SelectedFile.Name}}"
     description: "Edit in $VISUAL"
     output: terminal
-  # ============================================================================
-  # Commit Operations
-  # ============================================================================
-
   # Interactive rebase from selected commit
   - key: "E"
+    # ============================================================================
+    # Commit Operations
+    # ============================================================================
+
     context: "commits"
     command: "git rebase -i {{.SelectedLocalCommit.Hash}}^"
     description: "Interactive rebase from commit"
@@ -222,3 +222,6 @@ keybinding:
   files:
     # Stage/unstage all
     stageAll: "A"
+    # Override default edit keybinding
+    edit: "<disabled>"
+    editFile: "<disabled>"
