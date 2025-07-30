@@ -26,6 +26,12 @@ customCommands:
     context: "commits"
     command: "open $(git remote get-url origin | sed 's/\\.git$//' | sed 's/git@github.com:/https:\\/\\/github.com\\//')/commit/{{.SelectedLocalCommit.Hash}}"
     description: "Open commit in GitHub"
+  # Open GitHub Dashboard
+  - key: "D"
+    context: "global"
+    command: "gh dash"
+    description: "Open GitHub Dashboard"
+    output: terminal
   # Toggle file staging with 'a'
   - key: "a"
     # ============================================================================
@@ -57,6 +63,12 @@ customCommands:
   - key: "E"
     context: "files"
     command: "${VISUAL:-cursor} {{.SelectedFile.Name}}"
+    description: "Edit in $VISUAL"
+    output: terminal
+  # Open file in visual editor from commit files view
+  - key: "E"
+    context: "commitFiles"
+    command: "${VISUAL:-cursor} {{.SelectedCommitFile.Name}}"
     description: "Edit in $VISUAL"
     output: terminal
   # Interactive rebase from selected commit
