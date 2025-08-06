@@ -43,7 +43,9 @@
       "Bash(grep:*)",
       "mcp__sunsama__get-streams",
       "mcp__sunsama__update-task-stream",
-      "mcp__sunsama__get-tasks-backlog"
+      "mcp__sunsama__get-tasks-backlog",
+      "mcp__sunsama__get-user",
+      "mcp__sunsama__update-task-text"
     ],
     "deny": []
   },

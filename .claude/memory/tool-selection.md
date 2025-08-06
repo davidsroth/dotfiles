@@ -1,10 +1,9 @@
 ---
 created: 2025-07-22
-updated: 2025-07-22
+updated: 2025-08-02
 ---
 
-# Tool Selection Principles
+# Tool Selection
 
-Always verify maintenance status before adopting tools. Example: `dog` was disabled in Homebrew for lack of maintenance, replaced with actively maintained `doggo`.
-
-Check: Homebrew warnings, GitHub last commit date, issue activity.
+Use `fd` instead of `find` for file searching - it's faster and has better defaults.
+Prefer modern rust-based CLI tools when available (fd, ripgrep, bat, etc).
