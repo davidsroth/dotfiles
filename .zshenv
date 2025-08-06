@@ -50,6 +50,14 @@ export PYENV_VIRTUALENV_DISABLE_PROMPT=1
 [[ ! -d "$XDG_STATE_HOME" ]] && mkdir -p "$XDG_STATE_HOME"
 [[ ! -d "$XDG_STATE_HOME/zsh" ]] && mkdir -p "$XDG_STATE_HOME/zsh"
 
+# FZF configuration
+export FZF_DEFAULT_OPTS="--height 40% --layout=reverse --border"
+export FZF_DEFAULT_COMMAND='fd --type f --hidden --follow --exclude .git'
+export FZF_CTRL_T_COMMAND="$FZF_DEFAULT_COMMAND"
+
+# FZF file opener - opens files in new window using default editor
+export FZF_DEFAULT_OPTS="$FZF_DEFAULT_OPTS --bind 'enter:execute($EDITOR {} < /dev/tty > /dev/tty 2>&1)+abort'"
+
 # Source sensitive environment variables if they exist
 # Keep passwords, tokens, and keys in ~/.env (not tracked in git)
 [[ -f "$HOME/.env" ]] && source "$HOME/.env"
