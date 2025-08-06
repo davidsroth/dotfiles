@@ -40,7 +40,7 @@ end
 
 -- VimTeX configuration
 vim.g.vimtex_format_enabled = true
-vim.g.vimtex_view_method = "skim"  -- Fixed: was "view_methods"
+vim.g.vimtex_view_method = "skim" -- Fixed: was "view_methods"
 
 -- ============================================================================
 -- Performance Optimizations
@@ -57,3 +57,35 @@ vim.opt.smartcase = true
 -- Improve startup time
 -- NOTE: lazyredraw is disabled as it causes issues with Noice.nvim
 -- vim.opt.lazyredraw = true
+
+-- ============================================================================
+-- Folding Configuration
+-- ============================================================================
+
+-- Enable folding
+vim.opt.foldenable = true
+vim.opt.foldlevel = 99 -- Start with all folds open
+vim.opt.foldlevelstart = 99 -- Start with all folds open
+vim.opt.foldmethod = "expr" -- Use treesitter for folding
+vim.opt.foldexpr = "v:lua.vim.treesitter.foldexpr()"
+vim.opt.foldcolumn = "0" -- Hide fold column
+vim.opt.fillchars = { fold = " " } -- Clean fold fill character
+
+-- ============================================================================
+-- Diagnostic Configuration
+-- ============================================================================
+
+-- Show only errors by default (hide warnings)
+vim.diagnostic.config({
+  virtual_text = {
+    severity = { min = vim.diagnostic.severity.ERROR },
+  },
+  signs = {
+    severity = { min = vim.diagnostic.severity.ERROR },
+  },
+  underline = {
+    severity = { min = vim.diagnostic.severity.ERROR },
+  },
+  update_in_insert = false,
+  severity_sort = true,
+})

@@ -1,14 +1,14 @@
 -- ============================================================================
--- Python & uv Integration
+-- Python Integration (uv & Poetry)
 -- ============================================================================
 
 return {
-  -- Enhanced Python support with uv integration
+  -- Enhanced Python support with uv and Poetry integration
   {
     "neovim/nvim-lspconfig",
     opts = {
       servers = {
-        -- Pyright configuration for uv environments
+        -- Pyright configuration for uv and Poetry environments
         pyright = {
           settings = {
             python = {
@@ -35,29 +35,29 @@ return {
       "mfussenegger/nvim-dap-python",
     },
     opts = {
-      -- Automatically detect uv virtual environments
+      -- Automatically detect uv and Poetry virtual environments
       anaconda_base_path = nil,
       anaconda_envs_path = nil,
       pyenv_path = vim.fn.expand("~/.pyenv/versions"),
       pipenv_path = nil,
-      poetry_path = nil,
+      poetry_path = vim.fn.expand("~/Library/Caches/pypoetry/virtualenvs"),
       hatch_path = nil,
       venvwrapper_path = nil,
       
-      -- Add uv venv detection
+      -- Add uv and Poetry venv detection
       name = {
         ".venv",
         "venv",
       },
       
-      -- Enable uv environment detection
+      -- Enable environment detection
       enable_cached_venvs = true,
       cached_venv_automatic_activation = true,
       
-      -- Search in parent directories for .venv
-      parents = 2,
+      -- Search in parent directories for .venv and pyproject.toml
+      parents = 3,
       
-      -- uv creates .venv by default
+      -- uv creates .venv by default, Poetry uses cache directory
       dap_enabled = true,
     },
     keys = {
@@ -74,7 +74,7 @@ return {
       "linux-cultist/venv-selector.nvim",
     },
     opts = function(_, opts)
-      -- Auto-detect uv virtual environments
+      -- Auto-detect uv and Poetry virtual environments
       local util = require("lspconfig.util")
       
       -- Function to find uv venv
@@ -86,12 +86,43 @@ return {
         return nil
       end
       
+      -- Function to find Poetry venv
+      local function get_poetry_venv_path(root_dir)
+        -- Check if pyproject.toml exists and contains poetry
+        local pyproject_path = util.path.join(root_dir, "pyproject.toml")
+        if vim.fn.filereadable(pyproject_path) == 1 then
+          local pyproject_content = vim.fn.readfile(pyproject_path)
+          local is_poetry_project = false
+          for _, line in ipairs(pyproject_content) do
+            if line:match("tool%.poetry") then
+              is_poetry_project = true
+              break
+            end
+          end
+          
+          if is_poetry_project then
+            -- Try to get Poetry env path
+            local handle = io.popen("cd '" .. root_dir .. "' && poetry env info --path 2>/dev/null")
+            if handle then
+              local result = handle:read("*a")
+              handle:close()
+              local venv_path = result:gsub("^%s+", ""):gsub("%s+$", "")
+              if venv_path ~= "" and vim.fn.isdirectory(venv_path) == 1 then
+                return venv_path
+              end
+            end
+          end
+        end
+        return nil
+      end
+      
       -- Override python path detection
       opts.servers = vim.tbl_deep_extend("force", opts.servers or {}, {
         pyright = {
           before_init = function(_, config)
             local root_dir = config.root_dir
-            local venv = get_uv_venv_path(root_dir)
+            -- Try uv first, then Poetry
+            local venv = get_uv_venv_path(root_dir) or get_poetry_venv_path(root_dir)
             
             if venv then
               config.settings.python.pythonPath = util.path.join(venv, "bin", "python")
@@ -152,7 +183,12 @@ return {
           local venv = vim.env.VIRTUAL_ENV
           if venv then
             local venv_name = vim.fn.fnamemodify(venv, ":t")
-            return "  " .. venv_name
+            -- Check if it's a Poetry environment
+            if venv:match("pypoetry/virtualenvs") then
+              return "  (poetry) " .. venv_name
+            else
+              return "  " .. venv_name
+            end
           end
           return ""
         end,

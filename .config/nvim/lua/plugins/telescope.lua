@@ -1,10 +1,12 @@
+-- Telescope: Fuzzy finder for files, text, and more
+-- Provides powerful search capabilities with preview
 return {
   {
     "nvim-telescope/telescope.nvim",
     keys = {
-      -- change a keymap
+      -- Core keybindings (more available via LazyVim defaults)
       { "<leader>ff", "<cmd>Telescope find_files<cr>", desc = "Find Files" },
-      -- add a keymap to browse plugin files
+      -- Search in lazy.nvim plugin directory
       {
         "<leader>fp",
         function()
@@ -15,6 +17,8 @@ return {
     },
   },
   {
+    -- FZF sorter for performance (requires build step)
+    -- Significantly improves search speed for large projects
     "telescope.nvim",
     dependencies = {
       "nvim-telescope/telescope-fzf-native.nvim",

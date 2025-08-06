@@ -54,3 +54,64 @@ map("i", "<m-Down>", "<Esc>:m .+1<CR>==gi", { desc = "Swap current line with abo
 map("i", "<m-Up>", "<Esc>:m .-2<CR>==gi", { desc = "Swap current line with above" })
 map("v", "<m-Down>", ":m '>+1<CR>gv=gv", { desc = "Swap current line with above" })
 map("v", "<m-Up>", ":m '<-2<CR>gv=gv", { desc = "Swap current line with above" })
+
+-- Toggle diagnostics warnings
+local function toggle_diagnostics_warnings()
+  -- Read the current diagnostic configuration
+  local current_config = vim.diagnostic.config()
+
+  -- Check if warnings are currently enabled by looking at virtual_text severity
+  local warnings_enabled = true
+  if
+    current_config.virtual_text
+    and type(current_config.virtual_text) == "table"
+    and current_config.virtual_text.severity
+  then
+    warnings_enabled = false
+  end
+
+  if warnings_enabled then
+    -- Currently showing all, switch to errors only
+    vim.diagnostic.config({
+      virtual_text = {
+        severity = { min = vim.diagnostic.severity.ERROR },
+      },
+      signs = {
+        severity = { min = vim.diagnostic.severity.ERROR },
+      },
+      underline = {
+        severity = { min = vim.diagnostic.severity.ERROR },
+      },
+      update_in_insert = false,
+      severity_sort = true,
+    })
+    vim.notify("Diagnostics warnings disabled (errors only)", vim.log.levels.INFO)
+  else
+    -- Currently errors only, switch to show all
+    vim.diagnostic.config({
+      virtual_text = true,
+      signs = true,
+      underline = true,
+      update_in_insert = false,
+      severity_sort = true,
+    })
+    vim.notify("Diagnostics warnings enabled", vim.log.levels.INFO)
+  end
+end
+
+-- Create user command
+vim.api.nvim_create_user_command("ToggleWarnings", toggle_diagnostics_warnings, {})
+
+-- Add keybinding
+map("n", "<leader>tw", toggle_diagnostics_warnings, { desc = "Toggle diagnostics warnings" })
+
+-- Open current file in Finder
+map("n", "<leader>of", function()
+  local file = vim.fn.expand("%:p")
+  if file ~= "" then
+    vim.fn.system({ "open", "-R", file })
+    vim.notify("Opened in Finder: " .. file, vim.log.levels.INFO)
+  else
+    vim.notify("No file to open", vim.log.levels.WARN)
+  end
+end, { desc = "Open file in Finder" })
