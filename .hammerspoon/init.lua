@@ -31,7 +31,9 @@ local function launchOrFocusOrRotate(app)
 	end
 end
 
-hs.pathwatcher.new(os.getenv("HOME") .. "~/dotfiles/.hammerspoon/", hs.reload):start()
+-- Reload on changes in dotfiles repo and in the active Hammerspoon config dir
+hs.pathwatcher.new(os.getenv("HOME") .. "/dotfiles/.hammerspoon/", hs.reload):start()
+hs.pathwatcher.new(hs.configdir, hs.reload):start()
 hs.application.enableSpotlightForNameSearches(true)
 
 local launchKeys = {
