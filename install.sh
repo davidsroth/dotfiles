@@ -357,6 +357,12 @@ install_packages() {
         brew untap homebrew/bundle 2>/dev/null || true
         brew untap homebrew/cask-fonts 2>/dev/null || true
         
+        # Re-tap fonts if Brewfile includes font casks
+        if grep -qE '^cask\s+"font-' "$DOTFILES_DIR/Brewfile" 2>/dev/null; then
+            info "Ensuring homebrew/cask-fonts tap for font casks..."
+            brew tap homebrew/cask-fonts 2>/dev/null || true
+        fi
+        
         # Run brew bundle with no-upgrade to be idempotent
         local brew_exit_code=0
         if [[ "$VERBOSE" == "true" ]]; then
@@ -593,10 +599,13 @@ post_install_setup() {
     fi
     
     # tmux plugin manager
-    if [[ ! -d "$HOME/.tmux/plugins/tpm" ]]; then
+    # Skip cloning if vendored TPM exists under dotfiles config
+    if [[ ! -d "$HOME/.config/tmux/plugins/tpm" ]] && [[ ! -d "$HOME/.tmux/plugins/tpm" ]]; then
         info "Installing Tmux Plugin Manager..."
         git clone https://github.com/tmux-plugins/tpm ~/.tmux/plugins/tpm
         success "TPM installed"
+    else
+        [[ "$VERBOSE" == "true" ]] && success "TPM already available" || true
     fi
     
     # Set shell
