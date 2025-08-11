@@ -62,13 +62,13 @@ customCommands:
   # Open file in visual editor (VISUAL)
   - key: "E"
     context: "files"
-    command: "${VISUAL:-cursor} {{.SelectedFile.Name}}"
+    command: "${VISUAL:-$EDITOR} {{.SelectedFile.Name}}"
     description: "Edit in $VISUAL"
     output: terminal
   # Open file in visual editor from commit files view
   - key: "E"
     context: "commitFiles"
-    command: "${VISUAL:-cursor} {{.SelectedCommitFile.Name}}"
+    command: "${VISUAL:-$EDITOR} {{.SelectedCommitFile.Name}}"
     description: "Edit in $VISUAL"
     output: terminal
   # Interactive rebase from selected commit
