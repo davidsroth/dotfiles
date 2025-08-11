@@ -4,10 +4,9 @@
 
 [core]
 	# Default editor for commit messages and interactive commands
-	editor = ${VISUAL:-${EDITOR:-nvim}} --wait
+	editor = nvim --wait
 	
-	# Better diff algorithm
-	algorithm = histogram
+	# Better diff settings configured in [diff]
 	
 	# Prevent issues with file permissions on macOS
 	filemode = false
@@ -21,7 +20,7 @@
 	# Faster operations on macOS
 	untrackedcache = true
 	fsmonitor = true
-	excludesfile = /Users/davidroth/.config/git/ignore
+	excludesfile = ~/.config/git/ignore
 
 [init]
 	# Set default branch name for new repositories
@@ -178,7 +177,7 @@
 
 [pack]
 	# Performance optimizations for large repositories
-	threads = 0  # Use all CPU cores
+	threads = 0
 	windowMemory = 256m
 
 [gc]
@@ -187,8 +186,8 @@
 	autopacklimit = 50
 
 [help]
-	# Automatically correct mistyped commands
-	autocorrect = 20  # 2 second delay
+	# Automatically correct mistyped commands (2-second delay)
+	autocorrect = 20
 
 [rerere]
 	# Remember conflict resolutions
