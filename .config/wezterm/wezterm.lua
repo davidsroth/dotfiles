@@ -30,8 +30,13 @@ config.color_scheme = "Catppuccin Mocha"
 -- Font Configuration
 -- ============================================================================
 
--- Primary font configuration
-config.font = wezterm.font("Monaco", { weight = "Regular" })
+-- Primary font configuration with fallbacks for Nerd Font glyphs
+config.font = wezterm.font_with_fallback({
+  "Monaco",
+  "JetBrainsMono Nerd Font Mono",
+  "FiraCode Nerd Font Mono",
+  "Menlo",
+})
 config.font_size = 12.0
 
 -- Font rendering optimizations
