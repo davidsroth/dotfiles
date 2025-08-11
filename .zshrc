@@ -62,8 +62,10 @@ setopt INTERACTIVE_COMMENTS # Allow comments in interactive shell
 # Critical Immediate Loads
 # ============================================================================
 
-# Zoxide - must be loaded before first use
-eval "$(zoxide init zsh)"
+# Zoxide - must be loaded before first use (guarded)
+if command -v zoxide >/dev/null 2>&1; then
+    eval "$(zoxide init zsh)"
+fi
 
 # Load shell configuration
 [ -f ~/.config/shell/aliases.sh ] && source ~/.config/shell/aliases.sh
@@ -144,11 +146,11 @@ eval "$(starship init zsh)"
 # Plugin Loading (Deferred for Performance)
 # ============================================================================
 
-# Zsh autosuggestions - suggests commands as you type
-zsh-defer source $(brew --prefix)/share/zsh-autosuggestions/zsh-autosuggestions.zsh
+# Zsh autosuggestions - suggests commands as you type (guard brew and defer)
+zsh-defer -c 'command -v brew >/dev/null 2>&1 && source "$(brew --prefix)/share/zsh-autosuggestions/zsh-autosuggestions.zsh"'
 
-# Zsh syntax highlighting - must be loaded last
-zsh-defer source $(brew --prefix)/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh
+# Zsh syntax highlighting - must be loaded last (guard brew and defer)
+zsh-defer -c 'command -v brew >/dev/null 2>&1 && source "$(brew --prefix)/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh"'
 
 # ============================================================================
 # Performance Settings
@@ -159,7 +161,10 @@ zsh-defer source $(brew --prefix)/share/zsh-syntax-highlighting/zsh-syntax-highl
 # Custom Aliases
 # ============================================================================
 
-alias claude="/Users/davidroth/.claude/local/claude"
+# Local Claude alias if available
+if [ -x "$HOME/.claude/local/claude" ]; then
+  alias claude="$HOME/.claude/local/claude"
+fi
 
 # ============================================================================
 # History Substring Search Configuration
@@ -188,8 +193,8 @@ fi
 # Uncomment the line below to see startup performance report
 # zprof
 
-# bun completions
-[ -s "/Users/davidroth/.bun/_bun" ] && source "/Users/davidroth/.bun/_bun"
+# bun completions (if installed)
+[ -s "$HOME/.bun/_bun" ] && source "$HOME/.bun/_bun"
 
 # bun
 export BUN_INSTALL="$HOME/.bun"

@@ -19,8 +19,33 @@ export LC_ALL="${LC_ALL:-en_US.UTF-8}"
 # Default programs
 export PAGER="${PAGER:-less}"
 export LESS="${LESS:--R}"
-export EDITOR="nvim"
-export VISUAL="cursor"
+
+# Editor defaults with sensible fallbacks
+# - Respect existing values if already set
+# - Prefer nvim, then vim, then nano, otherwise vi
+if [ -z "${EDITOR:-}" ]; then
+  if command -v nvim >/dev/null 2>&1; then
+    export EDITOR="nvim"
+  elif command -v vim >/dev/null 2>&1; then
+    export EDITOR="vim"
+  elif command -v nano >/dev/null 2>&1; then
+    export EDITOR="nano"
+  else
+    export EDITOR="vi"
+  fi
+fi
+
+if [ -z "${VISUAL:-}" ]; then
+  if command -v nvim >/dev/null 2>&1; then
+    export VISUAL="nvim"
+  elif command -v vim >/dev/null 2>&1; then
+    export VISUAL="vim"
+  elif command -v nano >/dev/null 2>&1; then
+    export VISUAL="nano"
+  else
+    export VISUAL="$EDITOR"
+  fi
+fi
 
 # Development paths
 export JAVA_HOME="/Library/Java/JavaVirtualMachines/zulu-17.jdk/Contents/Home"
