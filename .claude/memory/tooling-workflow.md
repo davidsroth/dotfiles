@@ -46,7 +46,7 @@ Token handling pattern:
 - Use appropriate file permissions (600) for token files
 - Claude parses token and passes via --token argument
 
-## Background Processes & Services (Condensed)
+## Background Processes & Services
 ### Start, Monitor, Stop
 - Start in background: `nohup <cmd> > logs/app.log 2>&1 &; echo $! > app.pid`
 - Health check loop: `for i in {1..15}; do curl -sf :3000/health && break; sleep 1; done`
@@ -78,3 +78,11 @@ Token handling pattern:
 
 ### Typical Durations
 - DB exports: 5–15m; full builds: 3–10m; container builds: 2–8m; tests: 1–5m
+
+## System Defaults
+- Prefer system defaults over hardcoded apps
+- macOS: `open`; Linux: `xdg-open`
+- Open URLs/files: `open "<url-or-path>"` (respects defaults)
+- Editors: use `${VISUAL}` then `${EDITOR}`, with sensible fallback
+- Example: `${VISUAL:-${EDITOR:-vi}} "${file}"`
+- Keep logic portable; only hardcode when requested

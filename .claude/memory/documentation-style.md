@@ -34,3 +34,8 @@ Write with affirmative language: state what things are, not what they aren't.
 ## Line Counting
 
 When counting lines for budgets, blank lines don't count toward the total - only content lines.
+
+## Report Date
+- Include a report date near the top
+- Format: `Report Date: Month Day, Year`
+- Source the date from the environment-provided value (not the system clock)
