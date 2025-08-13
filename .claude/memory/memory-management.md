@@ -1,8 +1,3 @@
----
-created: 2025-07-18
-updated: 2025-07-18
----
-
 # Memory Management
 
 Complete lifecycle for memory files from creation to archiving.

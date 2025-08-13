@@ -1,8 +1,3 @@
----
-created: 2025-07-17
-updated: 2025-07-18
----
-
 # System Defaults Preference
 
 Use system defaults for commands rather than hardcoding specific applications.

@@ -1,8 +1,3 @@
----
-created: 2025-07-18
-updated: 2025-07-18
----
-
 # Claude Directory Linking Practice
 
 Always link `.claude` directory contents into the closest CLAUDE.local.md file with format:

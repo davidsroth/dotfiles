@@ -1,8 +1,3 @@
----
-created: 2025-07-18
-updated: 2025-07-24
----
-
 # Report Date Reminder
 
 Always include the current date at the top of any report, right after the title.

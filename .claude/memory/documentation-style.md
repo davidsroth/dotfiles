@@ -1,8 +1,3 @@
----
-created: 2025-07-18
-updated: 2025-07-18
----
-
 # Documentation Style
 
 Use factual, non-hyperbolic language in documentation.
