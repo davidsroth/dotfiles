@@ -37,7 +37,7 @@ Claude discovers memory files based on working directory:
 
 Never save tokens/credentials to disk. Use stdout → parse → pass via args.
 
-## Git Root Reference (Condensed)
+## Git Root Reference
 - Repo root path: `git rev-parse --show-toplevel` (absolute path)
 - Use root in scripts so commands work from any subdir
 - Change to root: `cd "$(git rev-parse --show-toplevel)"`

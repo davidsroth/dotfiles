@@ -75,9 +75,9 @@ Feature development:
 
 ## See Also
 
-- @/git-organize-commits.md - The executable command
+- @/commands/git-organize-commits.md - The executable command
 
-## Code Review (Condensed)
+## Code Review
 - Discovery: checkout PR branch, `git status`, read PR details/diffs, scan existing comments, confirm scope
 - Analysis checklist: implementation changes, tests present/missing, security/compliance, code quality/standards
 - Investigation: read changed files end-to-end, search for related patterns, spot missing pieces (esp. tests), verify repo standards

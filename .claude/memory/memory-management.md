@@ -73,12 +73,12 @@ mv .claude/outdated-memory.md .claude/archive/$(date +%Y-%m)/
 # Update CLAUDE.md to remove reference
 ```
 
-Archive file header:
+Archive file header (example):
 
 ```yaml
-archived: 2025-07-18
+archived: YYYY-MM-DD
 archive_reason: "Brief explanation"
-superseded_by: "@~/.claude/new-file.md"
+superseded_by: "@/path/to/new-file.md"
 ```
 
 ### What to Archive
