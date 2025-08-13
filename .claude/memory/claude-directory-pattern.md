@@ -52,3 +52,15 @@ Never save tokens/credentials to disk. Use stdout → parse → pass via args.
   fi
   ```
 - Superproject root (if needed): `git rev-parse --show-superproject-working-tree`
+
+## Linking Practice
+- Link `.claude` contents into the nearest `CLAUDE.local.md` with a short index
+- Example index entries: `@.claude/docs/*.md` and `@.claude/scripts/*.py`
+- `CLAUDE.local.md` files are gitignored, scoped to the working directory, and keep project `CLAUDE.md` clean
+- Use per-directory `CLAUDE.local.md` for personal notes at different tree levels
+
+## Project Tools
+- Keep Claude helper scripts under `.claude/scripts/` and docs under `.claude/docs/`
+- Co-locate helper tools with the code they operate on for discoverability
+- Do not store secrets in scripts; prefer stdout pass-through and arguments
+- Purpose: organize Claude-specific assets separately from application code while remaining in-repo

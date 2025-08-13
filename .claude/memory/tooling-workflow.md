@@ -86,3 +86,6 @@ Token handling pattern:
 - Editors: use `${VISUAL}` then `${EDITOR}`, with sensible fallback
 - Example: `${VISUAL:-${EDITOR:-vi}} "${file}"`
 - Keep logic portable; only hardcode when requested
+
+## Tool Selection
+- Use `fd` over `find`; prefer `ripgrep` and `bat` when available

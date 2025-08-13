@@ -39,3 +39,7 @@ When counting lines for budgets, blank lines don't count toward the total - only
 - Include a report date near the top
 - Format: `Report Date: Month Day, Year`
 - Source the date from the environment-provided value (not the system clock)
+
+## Interactive Refinement
+- Treat interruptions as guidance; capture correction patterns as preferences
+- Apply lessons immediately to avoid repeating the same mistakes
