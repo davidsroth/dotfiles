@@ -45,7 +45,9 @@
       "mcp__sunsama__update-task-stream",
       "mcp__sunsama__get-tasks-backlog",
       "mcp__sunsama__get-user",
-      "mcp__sunsama__update-task-text"
+      "mcp__sunsama__update-task-text",
+      "Bash(git worktree:*)",
+      "Bash(lazygit:*)"
     ],
     "deny": []
   },

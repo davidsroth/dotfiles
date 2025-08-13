@@ -57,6 +57,11 @@ _Systematic PR review workflow with GitHub integration_
 @./memory/git-commit-organization.md  
 _Workflow for organizing changes into logical commits_
 
+### Git Repo Root Reference
+
+@./memory/git-root-reference.md
+_Command to reference repository root path_
+
 ### Process Management
 
 @./memory/process-management.md  
