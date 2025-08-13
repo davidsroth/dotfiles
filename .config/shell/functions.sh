@@ -299,6 +299,164 @@ glog() {
     git log --oneline --graph --decorate "${@:-HEAD}"
 }
 
+# Create a new git worktree and tmux session with auto-generated name
+tmux_worktree_session() {
+    # Check if we're in a git repository
+    if ! git rev-parse --git-dir >/dev/null 2>&1; then
+        echo "Error: Not in a git repository"
+        return 1
+    fi
+    
+    # Generate branch name based on current date and time
+    local branch="work/$(date +%Y%m%d-%H%M%S)"
+    
+    # Get the current repository root and name
+    local git_root="$(git rev-parse --show-toplevel)"
+    local repo_name="$(basename "$git_root")"
+    local parent_dir="$(dirname "$git_root")"
+    local worktree_dir="$parent_dir/${repo_name}-${branch//\//-}"
+    
+    git worktree add -b "$branch" "$worktree_dir" >/dev/null 2>&1
+    
+    if [[ $? -ne 0 ]]; then
+        echo "Error: Failed to create worktree"
+        return 1
+    fi
+    
+    # Create tmux session with branch name (replace slashes with dashes)
+    local session_name="${repo_name}-${branch//\//-}"
+    
+    # Check if we're in tmux
+    if [[ -n "$TMUX" ]]; then
+        # Create new session detached, then switch to it
+        tmux new-session -d -s "$session_name" -c "$worktree_dir" 2>/dev/null
+        tmux switch-client -t "$session_name" 2>/dev/null
+    else
+        # Not in tmux, just create and attach
+        tmux new-session -s "$session_name" -c "$worktree_dir" 2>/dev/null
+    fi
+}
+
+# Rename current git worktree and tmux session
+tmux_rename_worktree() {
+    local new_name="$1"
+    
+    if [[ -z "$new_name" ]]; then
+        echo "Usage: tmux_rename_worktree <new-name>"
+        return 1
+    fi
+    
+    # Check if we're in a git repository
+    if ! git rev-parse --git-dir >/dev/null 2>&1; then
+        echo "Error: Not in a git repository"
+        return 1
+    fi
+    
+    # Get current worktree info
+    local current_dir="$(pwd)"
+    local git_root="$(git rev-parse --show-toplevel)"
+    
+    # Get main worktree path (first entry in worktree list)
+    local main_worktree="$(git worktree list --porcelain | grep '^worktree' | head -1 | cut -d' ' -f2)"
+    
+    # Get repo name from main worktree
+    local repo_name="$(basename "$main_worktree")"
+    
+    # Validate repo name
+    if [[ -z "$repo_name" ]]; then
+        echo "Error: Could not determine repository name"
+        return 1
+    fi
+    
+    # Check if we're in the main worktree
+    if [[ "$git_root" == "$main_worktree" ]]; then
+        echo "Error: Cannot rename the main worktree"
+        return 1
+    fi
+    
+    # Generate new worktree path
+    local parent_dir="$(dirname "$git_root")"
+    local new_worktree_dir="$parent_dir/${repo_name}-${new_name}"
+    
+    # Check if target directory already exists
+    if [[ -d "$new_worktree_dir" ]]; then
+        echo "Error: Directory $new_worktree_dir already exists"
+        return 1
+    fi
+    
+    # Move the worktree
+    if ! git worktree move "$git_root" "$new_worktree_dir" 2>/dev/null; then
+        echo "Error: Failed to move worktree"
+        return 1
+    fi
+    
+    # Get current tmux session name
+    local current_session=""
+    if [[ -n "$TMUX" ]]; then
+        current_session="$(tmux display-message -p '#S')"
+        local new_session_name="${repo_name}-${new_name}"
+        
+        # Rename tmux session
+        tmux rename-session -t "$current_session" "$new_session_name" 2>/dev/null
+    fi
+    
+    # Change to new directory
+    cd "$new_worktree_dir"
+}
+
+# Clean up current git worktree and tmux session
+tmux_cleanup_worktree() {
+    # Check if we're in a git repository
+    if ! git rev-parse --git-dir >/dev/null 2>&1; then
+        echo "Error: Not in a git repository"
+        return 1
+    fi
+    
+    # Get current worktree info
+    local git_root="$(git rev-parse --show-toplevel)"
+    
+    # Get main worktree path (first entry in worktree list)
+    local main_worktree="$(git worktree list --porcelain | grep '^worktree' | head -1 | cut -d' ' -f2)"
+    
+    # Get repo name from main worktree
+    local repo_name="$(basename "$main_worktree")"
+    
+    # Check if we're in the main worktree
+    if [[ "$git_root" == "$main_worktree" ]]; then
+        echo "Error: Cannot cleanup the main worktree"
+        return 1
+    fi
+    
+    local worktree_name="$(basename "$git_root")"
+    
+    # Get current tmux session info
+    local current_session=""
+    local main_session="$repo_name"
+    
+    if [[ -n "$TMUX" ]]; then
+        current_session="$(tmux display-message -p '#S')"
+        
+        # Check if main session exists, create it if not
+        if ! tmux has-session -t "$main_session" 2>/dev/null; then
+            tmux new-session -d -s "$main_session" -c "$main_worktree" 2>/dev/null
+        fi
+        
+        # Switch to main session before cleanup
+        tmux switch-client -t "$main_session" 2>/dev/null
+    fi
+    
+    # Remove the worktree (force to handle uncommitted changes)
+    if ! git worktree remove --force "$git_root" 2>/dev/null; then
+        echo "Error: Failed to remove worktree"
+        return 1
+    fi
+    
+    # Kill the tmux session if it exists and we're in tmux
+    if [[ -n "$TMUX" && -n "$current_session" && "$current_session" != "$main_session" ]]; then
+        tmux kill-session -t "$current_session" 2>/dev/null
+    fi
+}
+
 # ============================================================================
 # System Information
 # ============================================================================
