@@ -1,8 +1,3 @@
----
-created: 2025-07-18
-updated: 2025-07-25
----
-
 # Claude Directory Pattern
 
 Project-specific `.claude/` directories for Claude helper tools.
@@ -41,3 +36,19 @@ Claude discovers memory files based on working directory:
 ## Security
 
 Never save tokens/credentials to disk. Use stdout → parse → pass via args.
+
+## Git Root Reference (Condensed)
+- Repo root path: `git rev-parse --show-toplevel` (absolute path)
+- Use root in scripts so commands work from any subdir
+- Change to root: `cd "$(git rev-parse --show-toplevel)"`
+- Store once: `ROOT="$(git rev-parse --show-toplevel)"`
+- Quote paths when expanding: `"$ROOT/path/with spaces/file"`
+- Guard outside git repos:
+  ```bash
+  if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    ROOT="$(git rev-parse --show-toplevel)"
+  else
+    echo "Not in a Git repository" >&2; exit 1
+  fi
+  ```
+- Superproject root (if needed): `git rev-parse --show-superproject-working-tree`

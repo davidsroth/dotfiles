@@ -1,8 +1,3 @@
----
-created: 2025-07-18
-updated: 2025-07-18
----
-
 # Git Commit Organization Workflow
 
 Execute when user says "organize git changes into neat commits" or similar.
@@ -81,4 +76,11 @@ Feature development:
 ## See Also
 
 - @/git-organize-commits.md - The executable command
-- @./code-review-process.md - Related git workflows
+
+## Code Review (Condensed)
+- Discovery: checkout PR branch, `git status`, read PR details/diffs, scan existing comments, confirm scope
+- Analysis checklist: implementation changes, tests present/missing, security/compliance, code quality/standards
+- Investigation: read changed files end-to-end, search for related patterns, spot missing pieces (esp. tests), verify repo standards
+- Commenting: batch comments in a pending review, add context and examples, ask for confirmation before submitting
+- Criteria: Critical (security/breaking/missing tests); Important (quality, errors, docs); Nice-to-have (organization, optimizations, follow-ups)
+- Practices: track todos for completeness; link to existing patterns; prefer batched reviews; mix human judgment with technical analysis
