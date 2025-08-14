@@ -48,6 +48,7 @@ brew "choose"          # Better cut
 brew "jless"           # JSON viewer
 brew "btop"            # Modern system monitor
 brew "doggo"           # Modern DNS client (actively maintained)
+brew "fastfetch"       # System info display
 
 # Language Managers
 brew "pyenv"

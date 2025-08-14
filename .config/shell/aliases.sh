@@ -74,6 +74,7 @@ alias sed='sd'
 alias ping='gping'
 alias dig='doggo'
 alias top='btop'
+alias ff='fastfetch'
 
 # ============================================================================
 # Development Tools
