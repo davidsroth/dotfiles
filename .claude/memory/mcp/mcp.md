@@ -2,14 +2,6 @@
 
 Consolidated knowledge about MCP servers and their integrations.
 
-## GitHub MCP
-- Verify GitHub username before PR actions; it may differ from local
-- Prefer `search_pull_requests` with filters over `list_pull_requests` to avoid token limits
-- Use small `perPage` (5–10) and apply filters early
-- Mergeability quick refs: `mergeable:false`=conflicts, `mergeable_state:"blocked"`=awaiting review, `"dirty"`=needs rebase, `draft:true`
-- Close PR: `mcp__github__update_pull_request state:"closed"`
-- Cleanup workflow: search open PRs by author → check mergeable status → identify blockers (reviews/conflicts/drafts) → close stale or resolve
-
 ## Sunsama MCP
 - Two-step scheduling: (1) create task → backlog, (2) schedule via `update-task-snooze-date` to move to a day
 - Use ISO date `YYYY-MM-DD` for `snoozeUntil`; convert times to your local timezone (set `TZ` appropriately when needed)

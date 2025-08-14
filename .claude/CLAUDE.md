@@ -50,7 +50,7 @@ _Managing project-specific Claude tooling_
 ### Code Review Process
 
 @./memory/code-review-process.md  
-_Systematic PR review workflow with GitHub integration_
+_Systematic PR review workflow_
 
 ### Git Commit Organization
 
