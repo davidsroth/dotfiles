@@ -41,4 +41,15 @@ Brewfile.lock.json
 docs/
 
 # Example files
-.*\.example
+.*\.example$
+.*\.example\..*$
+
+# Local, host-specific configs that should never be stowed
+^.claude/settings\.local\.json$
+^.claude/\.claude/settings\.local\.json$
+# Be extra-safe: ignore any nested .claude local settings directory/files
+^.claude/\.claude/.*$
+# Unanchored match for stubborn stow runs from parent dirs
+.claude/\.claude/settings\.local\.json
+^\.config/gh-dash/config\.local\.yml$
+^\.config/gh-dash/config\.local\.example\.yml$

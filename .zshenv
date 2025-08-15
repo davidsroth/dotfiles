@@ -48,7 +48,10 @@ if [ -z "${VISUAL:-}" ]; then
 fi
 
 # Development paths
-export JAVA_HOME="/Library/Java/JavaVirtualMachines/zulu-17.jdk/Contents/Home"
+# Only set JAVA_HOME if the path exists on this machine
+if [ -d "/Library/Java/JavaVirtualMachines/zulu-17.jdk/Contents/Home" ]; then
+  export JAVA_HOME="/Library/Java/JavaVirtualMachines/zulu-17.jdk/Contents/Home"
+fi
 export NVM_DIR="$HOME/.nvm"
 
 # Application configuration
