@@ -27,8 +27,10 @@ defaults:
   view: prs
 
 repoPaths:
+  # Machine-specific example; adjust or remove if not present
   DistylAI/distillery: /Volumes/git/distillery
-  davidsroth/dotfiles: /Users/davidsroth/dotfiles
+  # Use home-relative path to your dotfiles
+  davidsroth/dotfiles: ~/dotfiles
 
 keybindings:
   universal:

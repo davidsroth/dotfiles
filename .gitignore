@@ -27,3 +27,4 @@ __pycache__/
 *.local
 !*.local.example
 .config/nvim/.luarc.json
+.config/gh-dash/config.local.yml

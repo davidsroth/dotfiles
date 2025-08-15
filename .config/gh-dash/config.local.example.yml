@@ -1,0 +1,12 @@
+# Local overrides for gh-dash (untracked)
+# Copy to: ~/.config/gh-dash/config.local.yml and customize
+# Note: gh-dash reads a single config file. This file is a template for
+# machine-specific values you may manually merge into config.yml as needed.
+
+# Example: add machine-specific repo paths
+repoPaths:
+  myorg/private-repo: /Volumes/git/private-repo
+  # Another example using home-relative path
+  myuser/project: ~/src/project
+
+# You can also add or override keybindings here if you choose to manually merge.

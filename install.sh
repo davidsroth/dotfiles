@@ -665,6 +665,14 @@ show_summary() {
   echo "  4. In tmux, press prefix + I to install plugins"
   echo "  5. Configure GUI apps as needed (1Password, etc.)"
 
+  # Hint if TPM is missing
+  if [[ ! -x "$HOME/.tmux/plugins/tpm/tpm" ]]; then
+    echo
+    warning "tmux plugin manager (TPM) not found at ~/.tmux/plugins/tpm"
+    echo "  Install with: git clone https://github.com/tmux-plugins/tpm ~/.tmux/plugins/tpm"
+    echo "  Then in tmux, press prefix + I to install plugins"
+  fi
+
   if [[ "$GITHUB_USER" == "YOUR_USERNAME" ]]; then
     echo
     warning "Don't forget to update GITHUB_USER in this script!"
