@@ -67,10 +67,12 @@ Managed by TPM (Tmux Plugin Manager):
 
 ## Installation
 
-1. Clone TPM:
+1. Install TPM (Tmux Plugin Manager) to the standard location:
    ```bash
-   git clone https://github.com/tmux-plugins/tpm ~/.config/tmux/plugins/tpm
+   git clone https://github.com/tmux-plugins/tpm ~/.tmux/plugins/tpm
    ```
+
+   This configuration prefers `~/.tmux/plugins/tpm/tpm` and only falls back to a vendored copy under `~/.config/tmux/plugins/tpm/tpm` if present.
 
 2. Start tmux and install plugins:
    ```bash

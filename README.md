@@ -58,6 +58,20 @@ The installer will:
 - Configure additional tools (NVM, Git LFS, tmux plugins)
 - Optionally apply macOS system preferences
 
+### Symlinking (GNU Stow)
+
+This repo uses GNU Stow to create symlinks into your home directory. A `.stowrc` is provided that sets the target to `$HOME`, so you can run Stow commands from the repository root:
+
+```bash
+# Preview the links (no changes)
+stow -n -v .
+
+# Create or update links
+stow -R .
+```
+
+Files and directories that should not be linked (e.g., scripts, docs) are excluded via `.stow-local-ignore`.
+
 ### Manual Installation
 
 If you prefer manual setup:
@@ -157,6 +171,20 @@ Component documentation:
 - macOS (tested on Sequoia 15.5)
 - `curl` (pre-installed on macOS)
 - Internet connection for downloading packages
+
+## Post-Install Checks
+
+Run a few quick commands to verify the environment:
+
+```bash
+zsh -i -c 'echo EDITOR=$EDITOR VISUAL=$VISUAL; which nvim; tmux -V; wezterm -V || true; kitty --version || true'
+
+# Check tmux plugin manager (TPM) location
+test -x ~/.tmux/plugins/tpm/tpm && echo 'TPM installed at ~/.tmux/plugins/tpm'
+
+# Confirm Homebrew path in login shells
+zsh -l -c 'echo PATH=$PATH | cut -c1-200'
+```
 
 ## Recent Updates
 
