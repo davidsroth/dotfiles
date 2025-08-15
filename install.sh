@@ -320,44 +320,24 @@ install_packages() {
   info "Running brew bundle..."
   cd "$DOTFILES_DIR"
 
-  # Check what would be installed
+  # Check if all Brewfile dependencies are already satisfied (use exit code)
   if [[ "$VERBOSE" == "true" ]]; then
     info "Checking Brewfile dependencies..."
-    brew bundle check --verbose || true
-  else
-    # Quietly check if anything needs to be installed
-    info "Checking installed packages..."
-    local check_output
-    check_output=$(brew bundle check 2>&1 || true)
-
-    # If only font issues, consider it mostly installed
-    local issue_count=0
-    if [[ -n "$check_output" ]] && echo "$check_output" | grep -q "→"; then
-      # Count arrow lines safely, only if they exist
-      issue_count=$(echo "$check_output" | grep "→" | wc -l)
-      # Ensure it's a single number
-      issue_count=${issue_count// /}
+    if brew bundle check --no-upgrade --verbose; then
+      success "All Brewfile packages already installed"
+      return 0
     fi
-    if [[ -z "$check_output" ]] || ([[ "$check_output" =~ "brew bundle can't satisfy" ]] && [[ "$issue_count" -le 2 ]]); then
-      if [[ -z "$check_output" ]]; then
-        success "All Brewfile packages already installed"
-        return 0
-      else
-        info "Most packages already installed (minor issues with fonts/casks)"
-      fi
+  else
+    info "Checking installed packages..."
+    if brew bundle check --no-upgrade >/dev/null 2>&1; then
+      success "All Brewfile packages already installed"
+      return 0
     fi
   fi
 
   # Install everything from Brewfile
   if confirm "Install packages from Brewfile?" "y"; then
-    # Clean up any deprecated taps first
-    if [[ "$VERBOSE" == "true" ]]; then
-      info "Cleaning up deprecated taps..."
-    fi
-    brew untap homebrew/bundle 2>/dev/null || true
-    brew untap homebrew/cask-fonts 2>/dev/null || true
-
-    # Re-tap fonts if Brewfile includes font casks
+    # Ensure fonts tap if Brewfile includes font casks
     if grep -qE '^cask\s+"font-' "$DOTFILES_DIR/Brewfile" 2>/dev/null; then
       info "Ensuring homebrew/cask-fonts tap for font casks..."
       brew tap homebrew/cask-fonts 2>/dev/null || true
