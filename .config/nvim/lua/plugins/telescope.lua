@@ -3,6 +3,13 @@
 return {
   {
     "nvim-telescope/telescope.nvim",
+    opts = {
+      defaults = {
+        -- Show results top-down with prompt at the top
+        sorting_strategy = "ascending",
+        layout_config = { prompt_position = "top" },
+      },
+    },
     keys = {
       -- Core keybindings (more available via LazyVim defaults)
       { "<leader>ff", "<cmd>Telescope find_files<cr>", desc = "Find Files" },

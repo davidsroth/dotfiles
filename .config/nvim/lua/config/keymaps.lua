@@ -115,3 +115,18 @@ map("n", "<leader>of", function()
     vim.notify("No file to open", vim.log.levels.WARN)
   end
 end, { desc = "Open file in Finder" })
+
+-- Claude Code: floating popup (mirrors tmux 'c c')
+map("n", "<leader>clc", function()
+  local ok, term = pcall(require, "utils.floating_term")
+  if not ok then
+    vim.notify("utils.floating_term not found", vim.log.levels.ERROR)
+    return
+  end
+  term.open("claude", { title = "Claude", width = 0.8, height = 0.8 })
+end, { desc = "Claude Code (float)" })
+
+-- Optional command for command palette use
+vim.api.nvim_create_user_command("ClaudeCode", function()
+  require("utils.floating_term").open("claude", { title = "Claude" })
+end, {})
