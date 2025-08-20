@@ -32,6 +32,8 @@ CONTRIBUTING.*
 install.sh
 bootstrap.sh
 macos-defaults.sh
+justfile
+Justfile
 
 # Package management
 Brewfile
