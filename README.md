@@ -209,7 +209,7 @@ zsh -l -c 'echo PATH=$PATH | cut -c1-200'
 
 - `vim`, `nv` → `nvim`
 - `lz` → `lazygit`
-- `ls` → `lsd`
+- `ls` → `eza`
 - `cat` → `bat`
 - `cd` → Uses zoxide
 

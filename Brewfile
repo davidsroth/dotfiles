@@ -3,6 +3,7 @@
 
 # Taps
 tap "homebrew/services"
+tap "zen-browser/zen-browser"
 
 # Command Line Tools
 # =================
@@ -31,7 +32,6 @@ brew "neovim"
 brew "ripgrep"
 brew "fd"
 brew "bat"
-brew "lsd"
 brew "eza"             # Better ls with git integration
 brew "tree"
 brew "jq"
@@ -44,7 +44,7 @@ brew "duf"             # Better df
 brew "gping"           # Graphical ping
 brew "procs"           # Better ps
 brew "sd"              # Better sed
-brew "choose"          # Better cut
+brew "choose-rust"     # Better cut (choose-rust)
 brew "jless"           # JSON viewer
 brew "btop"            # Modern system monitor
 brew "doggo"           # Modern DNS client (actively maintained)
