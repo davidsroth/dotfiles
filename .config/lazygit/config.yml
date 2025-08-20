@@ -71,28 +71,10 @@ customCommands:
     command: "${VISUAL:-$EDITOR} {{.SelectedCommitFile.Name}}"
     description: "Edit in $VISUAL"
     output: terminal
-  # Create worktree for selected branch
+  # Create worktree for selected branch (opens tmux in matching subdir)
   - key: "W"
     context: "localBranches"
-    command: |
-      bash -c '
-        branch="{{.SelectedLocalBranch.Name}}"
-        repo_name="$(basename "$(git rev-parse --show-toplevel)")"
-        parent_dir="$(dirname "$(git rev-parse --show-toplevel)")"
-        worktree_dir="$parent_dir/${repo_name}-${branch//\//-}"
-        
-        if git worktree add "$worktree_dir" "$branch" >/dev/null 2>&1; then
-          echo "✓ Created worktree: $worktree_dir"
-          if [[ -n "$TMUX" ]]; then
-            session_name="${repo_name}-${branch//\//-}"
-            tmux new-session -d -s "$session_name" -c "$worktree_dir" 2>/dev/null
-            tmux switch-client -t "$session_name" 2>/dev/null
-            echo "✓ Created tmux session: $session_name"
-          fi
-        else
-          echo "✗ Failed to create worktree"
-        fi
-      '
+    command: '~/.config/shell/bin/tmux_worktree_session_for_branch "{{.SelectedLocalBranch.Name}}"'
     description: "Create worktree for branch"
     output: terminal
   # Interactive rebase from selected commit
