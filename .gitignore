@@ -17,6 +17,9 @@ __pycache__/
 .hammerspoon/Spoons/*
 !.hammerspoon/Spoons/.gitkeep
 
+# Karabiner generated backups (not for version control)
+.config/karabiner/automatic_backups/
+
 # Editor temporary files
 *.swp
 *.swo
