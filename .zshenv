@@ -12,6 +12,21 @@ export XDG_CACHE_HOME="${XDG_CACHE_HOME:-$HOME/.cache}"
 export XDG_DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
 export XDG_STATE_HOME="${XDG_STATE_HOME:-$HOME/.local/state}"
 
+# Ensure essential binary dirs are in PATH for all shells (incl. non-interactive)
+# This allows commands like nvim/cursor to be discoverable when .zprofile/.zshrc
+# are not sourced (e.g., subprocesses launched by TUIs like lazygit).
+if [ -d "/opt/homebrew/bin" ] && [[ ":$PATH:" != *":/opt/homebrew/bin:"* ]]; then
+  export PATH="/opt/homebrew/bin:$PATH"
+fi
+if [ -d "/usr/local/bin" ] && [[ ":$PATH:" != *":/usr/local/bin:"* ]]; then
+  export PATH="/usr/local/bin:$PATH"
+fi
+# Cursor app CLI path (when not symlinked into /usr/local/bin)
+if [ -d "/Applications/Cursor.app/Contents/Resources/app/bin" ] \
+   && [[ ":$PATH:" != *":/Applications/Cursor.app/Contents/Resources/app/bin:"* ]]; then
+  export PATH="/Applications/Cursor.app/Contents/Resources/app/bin:$PATH"
+fi
+
 # Language and locale
 export LANG="${LANG:-en_US.UTF-8}"
 export LC_ALL="${LC_ALL:-en_US.UTF-8}"
@@ -23,7 +38,7 @@ export LESS="${LESS:--R}"
 # Editor defaults with sensible fallbacks
 # - Respect existing values if already set
 # - Prefer nvim, then vim, then nano, otherwise vi
-if [ -z "${EDITOR:-}" ]; then
+if [ -z "${EDITOR:-}" ] || [ "${EDITOR:-}" = "vi" ] || [ "${EDITOR:-}" = "vim" ]; then
   if command -v nvim >/dev/null 2>&1; then
     export EDITOR="nvim"
   elif command -v vim >/dev/null 2>&1; then
@@ -35,8 +50,10 @@ if [ -z "${EDITOR:-}" ]; then
   fi
 fi
 
-if [ -z "${VISUAL:-}" ]; then
-  if command -v nvim >/dev/null 2>&1; then
+if [ -z "${VISUAL:-}" ] || [ "${VISUAL:-}" = "vi" ] || [ "${VISUAL:-}" = "vim" ]; then
+  if command -v cursor >/dev/null 2>&1; then
+    export VISUAL="cursor"
+  elif command -v nvim >/dev/null 2>&1; then
     export VISUAL="nvim"
   elif command -v vim >/dev/null 2>&1; then
     export VISUAL="vim"
