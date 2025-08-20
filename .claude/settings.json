@@ -16,5 +16,9 @@
   "feedbackSurveyState": {
     "lastShownTime": 1754083184804
   },
-  "model": "opusplan"
+  "model": "opusplan",
+  "statusLine": {
+    "type": "command",
+    "command": "~/.claude/statusline-command.sh"
+  }
 }
