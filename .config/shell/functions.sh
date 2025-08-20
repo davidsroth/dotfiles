@@ -130,6 +130,109 @@ EOF
 }
 
 # ============================================================================
+# Clipboard Utilities
+# ============================================================================
+
+# Run a command and copy both stdout and stderr to the macOS clipboard
+# Usage: pb <command> [args...]
+pb() {
+    # Require macOS pbcopy
+    if ! command -v pbcopy >/dev/null 2>&1; then
+        echo "pb: requires pbcopy (macOS)" >&2
+        return 127
+    fi
+
+    if [ $# -eq 0 ]; then
+        echo "Usage: pb <command> [args...]" >&2
+        return 1
+    fi
+
+    # Support leading VAR=VALUE environment assignments
+    local -a env_kv=()
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            [A-Za-z_][A-Za-z0-9_]*=*) env_kv+=("$1"); shift ;;
+            *) break ;;
+        esac
+    done
+
+    if [ $# -eq 0 ]; then
+        echo "pb: missing command after env assignments" >&2
+        return 1
+    fi
+
+    if [ -n "${ZSH_VERSION:-}" ]; then
+        env "${env_kv[@]}" "$@" |& pbcopy
+        local rc=${pipestatus[1]}
+        return $rc
+    else
+        # bash and others
+        env "${env_kv[@]}" "$@" |& pbcopy
+        local rc=${PIPESTATUS[0]:-$?}
+        return $rc
+    fi
+}
+
+# Include invoking command in clipboard along with result
+# Works with the global alias `CTC` which pipes into this function.
+# Behavior: prints original result to stdout; copies "<CMD> -> <RESULT>" to clipboard.
+_ctc_capture() {
+    # Stream to terminal while capturing to a temp file
+    local tmp
+    tmp=$(mktemp 2>/dev/null || mktemp -t ctc)
+    # Pass-through output to stdout and capture to file (streams live)
+    tee "$tmp"
+
+    # Determine the last executed command line (zsh preexec preferred)
+    local cmdline="${COD_LAST_CMDLINE:-}"
+    if [ -z "$cmdline" ] && [ -n "${ZSH_VERSION:-}" ]; then
+        # Fallback: fetch last history entry (best-effort)
+        cmdline=$(fc -ln -1 2>/dev/null || true)
+    fi
+
+    # Remove trailing CTC token, or expanded pipeline to _ctc_capture, and trailing whitespace
+    if [ -n "$cmdline" ]; then
+        cmdline=$(printf "%s" "$cmdline" | command sed -E \
+            -e 's/[[:space:]]+CTC$//' \
+            -e 's/[[:space:]]*\|\&?[[:space:]]*_ctc_capture$//' \
+            -e 's/[[:space:]]+$//')
+    fi
+
+    # Copy decorated content to clipboard when available
+    if command -v pbcopy >/dev/null 2>&1; then
+        if [ -n "$cmdline" ]; then
+            { printf '`%s` -> ' "$cmdline"; cat "$tmp"; } | pbcopy
+        else
+            cat "$tmp" | pbcopy
+        fi
+    else
+        printf "%s\n" "ctc: pbcopy not available" >&2
+        rm -f "$tmp"
+        return 127
+    fi
+
+    rm -f "$tmp"
+}
+
+# Register a zsh preexec hook to capture the raw command line for CTC
+if [ -n "${ZSH_VERSION:-}" ]; then
+    _ctc_preexec_capture() {
+        # $1 is the full command line about to be executed
+        COD_LAST_CMDLINE="$1"
+    }
+    # Prefer add-zsh-hook when available; otherwise append to preexec_functions
+    if typeset -f add-zsh-hook >/dev/null 2>&1; then
+        add-zsh-hook preexec _ctc_preexec_capture 2>/dev/null || true
+    else
+        typeset -ga preexec_functions 2>/dev/null || true
+        case " ${preexec_functions[*]} " in
+            *" _ctc_preexec_capture "*) ;;
+            *) preexec_functions+=( _ctc_preexec_capture ) ;;
+        esac
+    fi
+fi
+
+# ============================================================================
 # File Operations
 # ============================================================================
 
@@ -300,40 +403,134 @@ glog() {
 }
 
 # Create a new git worktree and tmux session with auto-generated name
+# Opens the new session at the matching subdirectory of the new worktree
 tmux_worktree_session() {
     # Check if we're in a git repository
     if ! git rev-parse --git-dir >/dev/null 2>&1; then
-        echo "Error: Not in a git repository"
+        local msg="Not in a git repository"
+        echo "Error: $msg"
+        if [[ -n "$TMUX" ]]; then
+            tmux display-message "Prefix W: $msg"
+        fi
         return 1
     fi
-    
+
     # Generate branch name based on current date and time
     local branch="work/$(date +%Y%m%d-%H%M%S)"
-    
+
     # Get the current repository root and name
     local git_root="$(git rev-parse --show-toplevel)"
     local repo_name="$(basename "$git_root")"
     local parent_dir="$(dirname "$git_root")"
     local worktree_dir="$parent_dir/${repo_name}-${branch//\//-}"
-    
-    git worktree add -b "$branch" "$worktree_dir" >/dev/null 2>&1
-    
-    if [[ $? -ne 0 ]]; then
+
+    # Try to create the worktree and capture any error output
+    local wt_out
+    if ! wt_out=$(git worktree add -b "$branch" "$worktree_dir" 2>&1); then
         echo "Error: Failed to create worktree"
+        echo "$wt_out" >&2
+        if [[ -n "$TMUX" ]]; then
+            # Show only the first line of the git error to the tmux status line
+            local first_line
+            first_line=$(printf "%s" "$wt_out" | sed -n '1p')
+            tmux display-message "Prefix W: worktree add failed — ${first_line}"
+        fi
         return 1
     fi
-    
+
+    # Determine matching subdirectory inside the new worktree for current PWD
+    # Example: if PWD is repo_root/apps/api, target becomes new_worktree/apps/api
+    local rel_path
+    rel_path="$(git rev-parse --show-prefix 2>/dev/null || true)"
+    rel_path="${rel_path%/}"
+
+    local target_dir="$worktree_dir"
+    if [[ -n "$rel_path" && -d "$worktree_dir/$rel_path" ]]; then
+        target_dir="$worktree_dir/$rel_path"
+    fi
+
     # Create tmux session with branch name (replace slashes with dashes)
     local session_name="${repo_name}-${branch//\//-}"
-    
+
     # Check if we're in tmux
     if [[ -n "$TMUX" ]]; then
-        # Create new session detached, then switch to it
-        tmux new-session -d -s "$session_name" -c "$worktree_dir" 2>/dev/null
+        # Create new session detached, then switch to it (no status message)
+        tmux new-session -d -s "$session_name" -c "$target_dir" 2>/dev/null
         tmux switch-client -t "$session_name" 2>/dev/null
     else
         # Not in tmux, just create and attach
-        tmux new-session -s "$session_name" -c "$worktree_dir" 2>/dev/null
+        tmux new-session -s "$session_name" -c "$target_dir" 2>/dev/null
+    fi
+}
+
+# Create a new tmux session for an existing branch's worktree
+# Usage: tmux_worktree_session_for_branch <branch>
+tmux_worktree_session_for_branch() {
+    local branch="$1"
+
+    if [[ -z "$branch" ]]; then
+        echo "Usage: tmux_worktree_session_for_branch <branch>"
+        return 1
+    fi
+
+    # Ensure we're in a git repository
+    if git rev-parse --git-dir >/dev/null 2>&1; then
+        :
+    else
+        local msg="Not in a git repository"
+        echo "Error: $msg"
+        if [[ -n "$TMUX" ]]; then
+            tmux display-message "Worktree: $msg"
+        fi
+        return 1
+    fi
+
+    # Repo info
+    local git_root
+    git_root="$(git rev-parse --show-toplevel)"
+    local repo_name
+    repo_name="$(basename "$git_root")"
+    local parent_dir
+    parent_dir="$(dirname "$git_root")"
+    local worktree_dir
+    worktree_dir="$parent_dir/${repo_name}-${branch//\//-}"
+
+    # Try to create the worktree (branch already exists)
+    local wt_out
+    if ! wt_out=$(git worktree add "$worktree_dir" "$branch" 2>&1); then
+        # Continue if worktree already exists; otherwise surface the error
+        if printf "%s" "$wt_out" | grep -qiE "already exists|worktree .* is already registered|Another worktree is already|file exists"; then
+            : # proceed
+        else
+            echo "Error: Failed to create worktree"
+            echo "$wt_out" >&2
+            if [[ -n "$TMUX" ]]; then
+                local first_line
+                first_line=$(printf "%s" "$wt_out" | sed -n '1p')
+                tmux display-message "Worktree add failed — ${first_line}"
+            fi
+            return 1
+        fi
+    fi
+
+    # Determine matching subdirectory inside the new worktree for current PWD
+    local rel_path
+    rel_path="$(git rev-parse --show-prefix 2>/dev/null || true)"
+    rel_path="${rel_path%/}"
+    local target_dir="$worktree_dir"
+    if [[ -n "$rel_path" && -d "$worktree_dir/$rel_path" ]]; then
+        target_dir="$worktree_dir/$rel_path"
+    fi
+
+    # Create/switch tmux session
+    local session_name
+    session_name="${repo_name}-${branch//\//-}"
+    if [[ -n "$TMUX" ]]; then
+        tmux has-session -t "$session_name" 2>/dev/null || tmux new-session -d -s "$session_name" -c "$target_dir" 2>/dev/null
+        # If session exists, ensure there is at least one window and cwd
+        tmux switch-client -t "$session_name" 2>/dev/null
+    else
+        tmux new-session -s "$session_name" -c "$target_dir" 2>/dev/null
     fi
 }
 
