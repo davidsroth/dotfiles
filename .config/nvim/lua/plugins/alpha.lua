@@ -14,7 +14,7 @@ return {
 
     dashboard.section.header.val = vim.split(logo, "\n")
     dashboard.section.buttons.val = {
-      dashboard.button("e", " " .. " Open current directory", ":Neotree<CR>"),
+      dashboard.button("e", " " .. " Open current directory", ":lua require('oil').open_float()<CR>"),
       dashboard.button("f", " " .. " Find file", ":Telescope find_files <CR>"),
       dashboard.button("n", " " .. " New file", ":ene <BAR> startinsert <CR>"),
       dashboard.button("r", " " .. " Recent files", ":Telescope oldfiles <CR>"),
