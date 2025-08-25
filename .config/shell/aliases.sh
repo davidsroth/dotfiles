@@ -113,6 +113,8 @@ alias j='z'  # zoxide jump
 
 # Claude Code
 alias claudec='claude --continue'
+# OpenCode shortcut
+alias oc='opencode'
 
 # Logs - view today's log
 alias tlog-view='${EDITOR:-nvim} /tmp/$(date +"%Y%m%d")/log'
