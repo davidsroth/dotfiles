@@ -1,0 +1,47 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "agent": {
+    "plan": {
+      "model": "openai/gpt-5",
+      "reasoningEffort": "high"
+    },
+    "build": {
+      "model": "openai/gpt-5"
+    }
+  },
+  "agents": [
+    {
+      "id": "search",
+      "description": "Web research and local code reading; no writes or shell",
+      "mode": "primary",
+      "model": { "default": "openai/gpt-5" },
+      "tools": {
+        "bash": true,
+        "read": true,
+        "grep": true,
+        "glob": true,
+        "list": true,
+        "webfetch": true,
+        "write": false,
+        "edit": false,
+        "patch": false
+      },
+      "permissions": {
+        "edit": "deny",
+        "webfetch": "allow"
+      },
+      "prompt": "You are a web search agent equipped with web access.\n\n- Browse the web to collect authoritative sources and summarize concisely.\n- Read local files to provide precise, file-referenced answers.\n- When uncertain, state assumptions and suggest verification steps.\n"
+    }
+  ],
+  "mcp": {
+    "sunsama": {
+      "type": "local",
+      "enabled": true,
+      "command": [
+        "bash",
+        "-lc",
+        "/Users/davidroth/projects/mcp-sunsama/start-with-auth.sh"
+      ]
+    }
+  }
+}
