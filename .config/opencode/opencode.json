@@ -9,8 +9,8 @@
       "model": "openai/gpt-5"
     },
     "search": {
-      "description": "Web research and local code reading; no writes or shell",
-      "mode": "subagent",
+      "description": "Web research and local code reading",
+      "mode": "primary",
       "model": "openai/gpt-5",
       "prompt": "You are a web search agent equipped with web access.\n\n- Browse the web to collect authoritative sources and summarize concisely.\n- Read local files to provide precise, file-referenced answers.\n- When uncertain, state assumptions and suggest verification steps.\n",
       "tools": {
@@ -18,10 +18,6 @@
         "edit": false,
         "patch": false,
         "bash": true,
-        "read": true,
-        "grep": true,
-        "glob": true,
-        "list": true,
         "webfetch": true
       },
       "permission": {
