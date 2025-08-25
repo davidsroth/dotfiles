@@ -3,14 +3,25 @@
   "agent": {
     "plan": {
       "model": "openai/gpt-5",
-      "reasoningEffort": "high"
+      "prompt": "{file:./prompts/main.md}",
+      "reasoningEffort": "high",
+      "tools": {
+        "write": false,
+        "edit": false,
+        "bash": true
+      }
     },
     "build": {
-      "model": "openai/gpt-5"
+      "model": "openai/gpt-5",
+      "prompt": "{file:./prompts/main.md}",
+      "tools": {
+        "write": true,
+        "edit": true,
+        "bash": true
+      }
     },
     "search": {
       "description": "Web research and local code reading",
-      "mode": "primary",
       "model": "openai/gpt-5",
       "prompt": "You are a web search agent equipped with web access.\n\n- Browse the web to collect authoritative sources and summarize concisely.\n- Read local files to provide precise, file-referenced answers.\n- When uncertain, state assumptions and suggest verification steps.\n",
       "tools": {
