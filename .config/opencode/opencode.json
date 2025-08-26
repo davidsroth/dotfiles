@@ -5,6 +5,7 @@
       "model": "openai/gpt-5",
       "prompt": "{file:./prompts/main.md}",
       "reasoningEffort": "high",
+      "reasoningSummary": "auto",
       "tools": {
         "write": false,
         "edit": false,
@@ -14,6 +15,8 @@
     "build": {
       "model": "openai/gpt-5",
       "prompt": "{file:./prompts/main.md}",
+      "reasoningEffort": "medium",
+      "reasoningSummary": "auto",
       "tools": {
         "write": true,
         "edit": true,
@@ -23,6 +26,8 @@
     "search": {
       "description": "Web research and local code reading",
       "model": "openai/gpt-5",
+      "reasoningEffort": "medium",
+      "reasoningSummary": "auto",
       "prompt": "You are a web search agent equipped with web access.\n\n- Browse the web to collect authoritative sources and summarize concisely.\n- Read local files to provide precise, file-referenced answers.\n- When uncertain, state assumptions and suggest verification steps.\n",
       "tools": {
         "write": false,
