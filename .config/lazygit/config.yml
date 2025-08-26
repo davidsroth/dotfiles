@@ -138,30 +138,25 @@ gui:
   # Show file icons for better visual experience
   showFileIcons: true
   # ============================================================================
-  # Theme Configuration
+  # Theme Configuration (Catppuccin Mocha)
   # ============================================================================
 
-  # Active border highlighting
-  activeBorderColor:
-    - blue
-    - bold
-  # Inactive border color
-  inactiveBorderColor:
-    - white
-  # Selected line background
-  selectedLineBgColor:
-    - blue
-  # Cherry-picked commit colors
-  cherryPickedCommitFgColor:
-    - blue
-  cherryPickedCommitBgColor:
-    - cyan
-  # Unstaged changes color
-  unstagedChangesColor:
-    - red
-  # Default foreground color
-  defaultFgColor:
-    - white
+  theme:
+    lightTheme: false
+    # Borders
+    activeBorderColor: [ "#89b4fa", bold ]      # Blue
+    inactiveBorderColor: [ "#a6adc8" ]          # Subtext0
+    # Text / options
+    optionsTextColor: [ "#cdd6f4" ]             # Text
+    defaultFgColor: [ "#cdd6f4" ]               # Text
+    # Selection / highlights
+    selectedLineBgColor: [ "#313244" ]          # Surface0
+    # Git-specific accents
+    cherryPickedCommitFgColor: [ "#94e2d5" ]    # Teal
+    cherryPickedCommitBgColor: [ "#45475a" ]    # Surface1
+    markedBaseCommitFgColor: [ "#f9e2af" ]      # Yellow
+    markedBaseCommitBgColor: [ "#45475a" ]      # Surface1
+    unstagedChangesColor: [ "#f38ba8" ]         # Red
   # Author colors
   authorColors:
     "*": "#999999" # default color for unknown authors
