@@ -13,15 +13,15 @@ vim.api.nvim_create_autocmd("TextYankPost", {
 })
 
 -- Auto-save on focus lost (uncomment to enable)
--- vim.api.nvim_create_autocmd("FocusLost", {
---   pattern = "*",
---   command = "silent! wa",
--- })
+vim.api.nvim_create_autocmd("FocusLost", {
+  pattern = "*",
+  command = "silent! wa",
+})
 
 -- Format on save for specific filetypes (uncomment to enable)
--- vim.api.nvim_create_autocmd("BufWritePre", {
---   pattern = { "*.py", "*.lua", "*.js", "*.ts" },
---   callback = function()
---     vim.lsp.buf.format({ async = false })
---   end,
--- })
+vim.api.nvim_create_autocmd("BufWritePre", {
+  pattern = { "*.py", "*.lua", "*.js", "*.ts" },
+  callback = function()
+    vim.lsp.buf.format({ async = false })
+  end,
+})

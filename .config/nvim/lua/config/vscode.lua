@@ -39,32 +39,36 @@ keymap("v", "<M-Down>", ":m '>+1<CR>gv=gv")
 keymap("v", "<M-Up>", ":m '<-2<CR>gv=gv")
 
 -- VSCode command integration
-if vim.fn.exists('g:vscode') == 1 then
+if vim.fn.exists("g:vscode") == 1 then
   -- Save
   keymap("n", "<leader>ww", "<Cmd>call VSCodeNotify('workbench.action.files.save')<CR>")
-  keymap("n", "<leader>wq", "<Cmd>call VSCodeNotify('workbench.action.files.save')<CR><Cmd>call VSCodeNotify('workbench.action.closeActiveEditor')<CR>")
-  
+  keymap(
+    "n",
+    "<leader>wq",
+    "<Cmd>call VSCodeNotify('workbench.action.files.save')<CR><Cmd>call VSCodeNotify('workbench.action.closeActiveEditor')<CR>"
+  )
+
   -- File navigation
   keymap("n", "<leader>ff", "<Cmd>call VSCodeNotify('workbench.action.quickOpen')<CR>")
   keymap("n", "<leader>fg", "<Cmd>call VSCodeNotify('workbench.action.findInFiles')<CR>")
-  
+
   -- Code actions
   keymap("n", "<leader>r", "<Cmd>call VSCodeNotify('editor.action.rename')<CR>")
   keymap("n", "gd", "<Cmd>call VSCodeNotify('editor.action.revealDefinition')<CR>")
   keymap("n", "gr", "<Cmd>call VSCodeNotify('editor.action.goToReferences')<CR>")
   keymap("n", "gi", "<Cmd>call VSCodeNotify('editor.action.goToImplementation')<CR>")
-  
+
   -- Format
   keymap("n", "<leader>cf", "<Cmd>call VSCodeNotify('editor.action.formatDocument')<CR>")
   keymap("v", "<leader>cf", "<Cmd>call VSCodeNotifyVisual('editor.action.formatSelection', 1)<CR>")
-  
+
   -- Commentary
   keymap("n", "gcc", "<Cmd>call VSCodeNotify('editor.action.commentLine')<CR>")
   keymap("v", "gc", "<Cmd>call VSCodeNotifyVisual('editor.action.commentLine', 1)<CR>")
-  
+
   -- Terminal
   keymap("n", "<leader>t", "<Cmd>call VSCodeNotify('workbench.action.terminal.toggleTerminal')<CR>")
-  
+
   -- Command palette
   keymap("n", "<leader>p", "<Cmd>call VSCodeNotify('workbench.action.showCommands')<CR>")
 end

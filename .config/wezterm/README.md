@@ -173,5 +173,5 @@ wezterm -n --config-file ~/.config/wezterm/wezterm.lua
 ## See Also
 
 - [WezTerm Documentation](https://wezfurlong.org/wezterm/)
-- [Font Configuration Guide](https://wezfurlong.org/wezterm/config/fonts.html)
-- [Key Binding Reference](https://wezfurlong.org/wezterm/config/keys.html)
+- [Font Configuration Guide](https://wezfurlong.org/wezterm/configuration/fonts.html)
+- [Key Binding Reference](https://wezfurlong.org/wezterm/configuration/keys.html)

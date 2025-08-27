@@ -2,8 +2,9 @@
 # https://github.com/Homebrew/homebrew-bundle
 
 # Taps
-tap "homebrew/services"
-tap "zen-browser/zen-browser"
+# Note: Removed deprecated/broken taps:
+# - homebrew/services (deprecated and empty)
+# - zen-browser/zen-browser (tap removed upstream; cask installs from core)
 
 # Command Line Tools
 # =================
@@ -37,6 +38,7 @@ brew "tree"
 brew "jq"
 brew "wget"
 brew "curl"
+brew "rsync"           # Modern rsync (faster, secure)
 brew "httpie"          # Better curl for APIs
 brew "glow"            # Markdown renderer
 brew "dust"            # Better du
@@ -44,6 +46,9 @@ brew "duf"             # Better df
 brew "gping"           # Graphical ping
 brew "procs"           # Better ps
 brew "sd"              # Better sed
+brew "gnu-sed"         # GNU sed (fast, compatible)
+brew "grep"            # GNU grep (faster, broadly compatible)
+brew "gawk"            # GNU awk (feature-rich, broadly compatible)
 brew "choose-rust"     # Better cut (choose-rust)
 brew "jless"           # JSON viewer
 brew "btop"            # Modern system monitor

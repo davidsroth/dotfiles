@@ -14,11 +14,12 @@ set -E
 trap 'echo "Error on line ${LINENO:-?}: Command \"${BASH_COMMAND:-?}\" failed with exit code $?" >&2' ERR
 
 # Script metadata
-readonly SCRIPT_NAME="$(basename "$0")"
-readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+# shellcheck disable=SC2034 # SCRIPT_NAME is informational; may be used in logs
+SCRIPT_NAME="$(basename "${BASH_SOURCE[0]:-$0}")"; readonly SCRIPT_NAME
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"; readonly SCRIPT_DIR
 readonly DOTFILES_DIR="${DOTFILES_DIR:-$HOME/dotfiles}"
-readonly BACKUP_DIR="$HOME/.dotfiles-backup/$(date +%Y%m%d-%H%M%S)"
-readonly LOG_FILE="/tmp/dotfiles-install-$(date +%Y%m%d-%H%M%S).log"
+BACKUP_DIR="$HOME/.dotfiles-backup/$(date +%Y%m%d-%H%M%S)"; readonly BACKUP_DIR
+LOG_FILE="/tmp/dotfiles-install-$(date +%Y%m%d-%H%M%S).log"; readonly LOG_FILE
 
 # GitHub repository (update this with your username)
 readonly GITHUB_USER="${GITHUB_USER:-davidroth}"
@@ -53,7 +54,7 @@ show_help() {
   cat <<EOF
 Dotfiles Bootstrap Script v2.0
 
-Usage: $0 [OPTIONS]
+Usage: $SCRIPT_NAME [OPTIONS]
 
 Options:
     -h, --help      Show this help message
@@ -202,7 +203,8 @@ check_platform() {
   fi
 
   # Detect architecture
-  local arch="$(uname -m)"
+  local arch
+  arch="$(uname -m)"
   if [[ "$arch" == "arm64" ]]; then
     info "Apple Silicon Mac detected"
     export HOMEBREW_PREFIX="/opt/homebrew"
@@ -286,11 +288,11 @@ install_homebrew() {
       # Add to shell profile for persistence (avoid duplicates)
       if [[ "$SHELL" == *"zsh"* ]]; then
         if ! grep -q "brew shellenv" ~/.zprofile 2>/dev/null; then
-          echo 'eval "$('"$HOMEBREW_PREFIX"'/bin/brew shellenv)"' >>~/.zprofile
+          echo "eval \"\$(\"$HOMEBREW_PREFIX\"/bin/brew shellenv)\"" >> ~/.zprofile
         fi
       else
         if ! grep -q "brew shellenv" ~/.bash_profile 2>/dev/null; then
-          echo 'eval "$('"$HOMEBREW_PREFIX"'/bin/brew shellenv)"' >>~/.bash_profile
+          echo "eval \"\$(\"$HOMEBREW_PREFIX\"/bin/brew shellenv)\"" >> ~/.bash_profile
         fi
       fi
     fi
@@ -384,6 +386,10 @@ install_packages_fallback() {
     "starship"
     "fzf"
     "ripgrep"
+    "gnu-sed"
+    "grep"
+    "gawk"
+    "rsync"
   )
 
   for pkg in "${essentials[@]}"; do
@@ -483,7 +489,8 @@ setup_dotfiles_repo() {
     if confirm "Pull latest changes from repository?" "y"; then
       cd "$DOTFILES_DIR"
       # Get current branch name
-      local current_branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "$DEFAULT_BRANCH")
+      local current_branch
+      current_branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "$DEFAULT_BRANCH")
       info "Pulling latest changes from branch: $current_branch"
       if ! git pull origin "$current_branch"; then
         warning "Failed to pull latest changes"
@@ -504,7 +511,8 @@ backup_existing_files() {
 
   # Get list of files that would be stowed
   cd "$DOTFILES_DIR"
-  local conflicts=$(stow -n -v . 2>&1 | grep "existing target is" || true)
+  local conflicts
+  conflicts=$(stow -n -v . 2>&1 | grep "existing target is" || true)
 
   if [[ -n "$conflicts" ]]; then
     warning "Found existing configuration files that would be overwritten"
@@ -590,7 +598,8 @@ post_install_setup() {
 
   # Set shell
   if check_command zsh; then
-    local zsh_path="$(which zsh)"
+    local zsh_path
+    zsh_path="$(command -v zsh)"
     if [[ "$SHELL" != "$zsh_path" ]]; then
       if confirm "Set zsh as default shell?" "y"; then
         chsh -s "$zsh_path" || warning "Failed to set zsh as default shell"

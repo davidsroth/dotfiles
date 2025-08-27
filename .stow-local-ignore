@@ -42,6 +42,12 @@ Brewfile.lock.json
 # Documentation directory
 docs/
 
+# Repo-level automation and reports (do not stow into $HOME)
+^\.codex$
+
+# Logs and transient files that should never be stowed
+^.nvimlog$
+
 # Example files
 .*\.example$
 .*\.example\..*$

@@ -9,7 +9,6 @@
 set -euo pipefail
 
 # Script metadata
-readonly SCRIPT_NAME="$(basename "$0")"
 
 # Colors for output
 readonly RED='\033[0;31m'

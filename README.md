@@ -186,6 +186,37 @@ test -x ~/.tmux/plugins/tpm/tpm && echo 'TPM installed at ~/.tmux/plugins/tpm'
 zsh -l -c 'echo PATH=$PATH | cut -c1-200'
 ```
 
+## Troubleshooting
+
+### brew bundle failures
+
+- Deprecated taps: Remove `tap "homebrew/services"` and `tap "zen-browser/zen-browser"` from `Brewfile`. The installer no longer relies on these; `zen-browser` cask installs from core.
+- Font cask conflicts: If `cask "font-inconsolata-nerd-font"` fails with "It seems the existing Font is different", back up and remove conflicting local fonts, then retry:
+
+  ```bash
+  ts=$(date +%Y%m%d-%H%M%S)
+  mkdir -p "$HOME/.font-backups/$ts"
+  mv "$HOME/Library/Fonts"/InconsolataNerdFont-*.ttf "$HOME/.font-backups/$ts" 2>/dev/null || true
+  brew reinstall --cask font-inconsolata-nerd-font
+  # or: brew bundle --file Brewfile
+  ```
+
+  Note: The installer auto-taps `homebrew/cask-fonts` when `font-` casks are present.
+
+## Maintenance
+
+- Health check: run `just doctor` to print OS, tool versions, and a Stow dry-run preview.
+- Audit: run `just audit` for syntax checks, JSON validation, and conflict scan.
+  - Optional checks included when tools are present:
+    - `shellcheck` for shell script linting
+    - `markdownlint` for Markdown style
+    - `lychee` for link checking (network)
+    - PATH sanity from a login shell
+- Dry-run links: `stow -n -v .` to preview symlinks without changing files.
+- Packages: `brew bundle check --no-upgrade` to verify Brewfile status; `brew bundle install --no-upgrade` to install missing items.
+- Cleanup: `just clean` to remove `.DS_Store` and editor backup files.
+- Report: see latest maintenance notes in `.codex/reports/`.
+
 ## Recent Updates
 
 ### 2025-07-22

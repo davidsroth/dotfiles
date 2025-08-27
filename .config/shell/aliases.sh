@@ -93,7 +93,9 @@ alias cls='clear'
 command -v dust >/dev/null 2>&1 && alias du='dust'
 command -v duf  >/dev/null 2>&1 && alias df='duf'
 command -v procs >/dev/null 2>&1 && alias ps='procs'
-command -v sd    >/dev/null 2>&1 && alias sed='sd'
+# Do not alias sed to sd; sd is not sed-compatible
+# If desired, install gnu-sed and add its gnubin to PATH for GNU-compatible sed
+## command -v sd    >/dev/null 2>&1 && alias sed='sd'
 command -v gping >/dev/null 2>&1 && alias ping='gping'
 command -v doggo >/dev/null 2>&1 && alias dig='doggo'
 command -v btop  >/dev/null 2>&1 && alias top='btop'
