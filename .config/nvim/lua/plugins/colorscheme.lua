@@ -1,8 +1,13 @@
 return {
   {
     "catppuccin/nvim",
-    lazy = true,
+    -- Ensure the theme loads early and is not lazy
+    priority = 1000,
     name = "catppuccin",
+    config = function(_, opts)
+      require("catppuccin").setup(opts or {})
+      vim.cmd.colorscheme("catppuccin")
+    end,
     opts = {
       integrations = {
         aerial = true,

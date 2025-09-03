@@ -21,7 +21,7 @@ vim.opt.rtp:prepend(vim.env.LAZY or lazypath)
 require("lazy").setup({
   spec = {
     -- LazyVim core and plugins
-    { "LazyVim/LazyVim", import = "lazyvim.plugins" },
+    { "LazyVim/LazyVim",                                    import = "lazyvim.plugins" },
 
     -- Development and debugging
     { import = "lazyvim.plugins.extras.dap.core" },
@@ -46,7 +46,7 @@ require("lazy").setup({
   -- Plugin Defaults
   -- ============================================================================
   defaults = {
-    lazy = false, -- Custom plugins load during startup for stability
+    lazy = false,    -- Custom plugins load during startup for stability
     version = false, -- Use latest git commits (recommended for now)
   },
 
@@ -54,14 +54,14 @@ require("lazy").setup({
   -- Installation Settings
   -- ============================================================================
   install = {
-    colorscheme = { "catppuccin", "gruvbox", "habamax" }, -- Fallback colorschemes
+    colorscheme = { "catppuccin", "habamax" }, -- Fallback colorschemes
   },
 
   -- ============================================================================
   -- Maintenance
   -- ============================================================================
   checker = {
-    enabled = true, -- Automatically check for plugin updates
+    enabled = true,   -- Automatically check for plugin updates
     frequency = 3600, -- Check every hour
   },
 
@@ -74,8 +74,8 @@ require("lazy").setup({
     },
     reset_packpath = true, -- Reset packpath to improve startup time
     rtp = {
-      reset = true, -- Reset runtime path for better performance
-      paths = {}, -- Add custom runtime paths if needed
+      reset = true,        -- Reset runtime path for better performance
+      paths = {},          -- Add custom runtime paths if needed
       disabled_plugins = {
         -- Disable built-in plugins for better performance
         "gzip",
@@ -86,13 +86,13 @@ require("lazy").setup({
         "tohtml",
         "tutor",
         "zipPlugin",
-        "rplugin", -- Remote plugin support (rarely needed)
-        "syntax", -- Syntax highlighting (replaced by Treesitter)
-        "synmenu", -- Syntax menu
-        "optwin", -- Options window
-        "compiler", -- Compiler support
+        "rplugin",   -- Remote plugin support (rarely needed)
+        "syntax",    -- Syntax highlighting (replaced by Treesitter)
+        "synmenu",   -- Syntax menu
+        "optwin",    -- Options window
+        "compiler",  -- Compiler support
         "bugreport", -- Bug report
-        "ftplugin", -- File type plugins (handled by LazyVim)
+        "ftplugin",  -- File type plugins (handled by LazyVim)
       },
     },
   },
