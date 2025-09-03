@@ -201,3 +201,6 @@ fi
 # bun
 export BUN_INSTALL="$HOME/.bun"
 export PATH="$BUN_INSTALL/bin:$PATH"
+
+# bun completions
+[ -s "/Users/davidroth/.bun/_bun" ] && source "/Users/davidroth/.bun/_bun"
