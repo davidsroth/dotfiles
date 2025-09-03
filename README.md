@@ -43,12 +43,14 @@ The `install.sh` script provides a fully automated setup:
 ```
 
 Environment variables:
+
 - `GITHUB_USER`: Your GitHub username (default: davidroth)
 - `DOTFILES_DIR`: Installation directory (default: ~/dotfiles)
 - `DEFAULT_BRANCH`: Git branch to use (default: main)
 - `NVM_VERSION`: NVM version to install (default: v0.39.7)
 
 The installer will:
+
 - Install Xcode Command Line Tools
 - Install Homebrew (if not present)
 - Install packages from Brewfile
@@ -103,7 +105,6 @@ stow .
 
 - **Neovim** with LazyVim-based configuration
   - Language support for multiple languages
-  - Note-taking with Telekasten
   - LaTeX editing with VimTeX
   - See `.config/nvim/README.md` for details
 - **Cursor** as secondary editor (VSCode fork)
