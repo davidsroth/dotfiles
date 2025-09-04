@@ -61,13 +61,13 @@ alias gsh='git rev-parse --short HEAD'
 if command -v lazygit >/dev/null 2>&1; then
   alias lz='lazygit'
   alias lg='lazygit'
+fi
+
 # Codex-assisted commit organization (guarded)
 if command -v codex >/dev/null 2>&1; then
   # Organize unstaged changes into neat, organized commits (full trust)
   # Uses Codex CLI's flag to bypass sandbox and approvals.
   alias gorg='codex exec --dangerously-bypass-approvals-and-sandbox "organize the unstaged changes on this branch into neat, organized commits"'
-fi
-
 fi
 
 # ============================================================================
@@ -98,14 +98,14 @@ alias cls='clear'
 # Modern replacements
 # Modern replacements (guarded; only override when available)
 command -v dust >/dev/null 2>&1 && alias du='dust'
-command -v duf  >/dev/null 2>&1 && alias df='duf'
+command -v duf >/dev/null 2>&1 && alias df='duf'
 command -v procs >/dev/null 2>&1 && alias ps='procs'
 # Do not alias sed to sd; sd is not sed-compatible
 # If desired, install gnu-sed and add its gnubin to PATH for GNU-compatible sed
 ## command -v sd    >/dev/null 2>&1 && alias sed='sd'
 command -v gping >/dev/null 2>&1 && alias ping='gping'
 command -v doggo >/dev/null 2>&1 && alias dig='doggo'
-command -v btop  >/dev/null 2>&1 && alias top='btop'
+command -v btop >/dev/null 2>&1 && alias top='btop'
 command -v fastfetch >/dev/null 2>&1 && alias ff='fastfetch'
 
 # ============================================================================
@@ -118,7 +118,7 @@ alias ipy='ipython3'
 alias pip='pip3'
 
 # Navigation
-alias j='z'  # zoxide jump
+alias j='z' # zoxide jump
 
 # Claude Code
 alias claudec='claude --continue'
@@ -172,13 +172,13 @@ fi
 # ============================================================================
 
 if [[ "$OSTYPE" == "darwin"* ]]; then
-    # macOS specific
-    alias flushdns='sudo dscacheutil -flushcache'
-    alias showfiles='defaults write com.apple.finder AppleShowAllFiles YES; killall Finder'
-    alias hidefiles='defaults write com.apple.finder AppleShowAllFiles NO; killall Finder'
-    
-    # Quick Look from terminal
-    alias ql='qlmanage -p'
+  # macOS specific
+  alias flushdns='sudo dscacheutil -flushcache'
+  alias showfiles='defaults write com.apple.finder AppleShowAllFiles YES; killall Finder'
+  alias hidefiles='defaults write com.apple.finder AppleShowAllFiles NO; killall Finder'
+
+  # Quick Look from terminal
+  alias ql='qlmanage -p'
 fi
 
 # ============================================================================
