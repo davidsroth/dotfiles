@@ -61,6 +61,13 @@ alias gsh='git rev-parse --short HEAD'
 if command -v lazygit >/dev/null 2>&1; then
   alias lz='lazygit'
   alias lg='lazygit'
+# Codex-assisted commit organization (guarded)
+if command -v codex >/dev/null 2>&1; then
+  # Organize unstaged changes into neat, organized commits (full trust)
+  # Uses Codex CLI's flag to bypass sandbox and approvals.
+  alias gorg='codex exec --dangerously-bypass-approvals-and-sandbox "organize the unstaged changes on this branch into neat, organized commits"'
+fi
+
 fi
 
 # ============================================================================
