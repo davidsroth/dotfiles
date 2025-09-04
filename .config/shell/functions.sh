@@ -677,3 +677,112 @@ cleanup_tmp() {
     find /tmp -maxdepth 1 -type d -name "[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]" -mtime +$days -exec rm -rf {} +
     echo "✓ Cleaned up temp directories older than $days days"
 }
+
+# ============================================================================
+# Process Utilities
+# ============================================================================
+
+# Run an arbitrary command in the background with logging under /tmp.
+# - Persists after terminal closes (nohup + disown when available)
+# - Runs in an interactive login shell so zsh aliases/functions are available
+# - Logs to /tmp/bgrun/<YYYYMMDD-HHMMSS>-<name>.log and writes a .pid file
+# Usage:
+#   bgrun <cmd> [args...]
+#   bgrun -n <name> <cmd> [args...]
+#   bgrun -- <single shell command string>
+#   bgrun -n <name> -- <single shell command string>
+# Notes:
+# - Both forms load your shell init (zsh: .zshenv, .zprofile, .zshrc) via `-lic`.
+# - For pipelines/redirects, either form works; `--` is simplest.
+bgrun() {
+    if [ "$#" -eq 0 ]; then
+        echo "Usage: bgrun [-n name] <cmd> [args...] | bgrun [-n name] -- \"cmd with pipes\"" >&2
+        return 1
+    fi
+
+    local name=""
+    if [ "${1:-}" = "-n" ] || [ "${1:-}" = "--name" ]; then
+        if [ -z "${2:-}" ]; then
+            echo "bgrun: -n/--name requires a value" >&2
+            return 1
+        fi
+        name="$2"
+        shift 2
+    fi
+
+    local logdir="/tmp/bgrun"
+    mkdir -p "$logdir"
+    local ts
+    ts=$(date +"%Y%m%d-%H%M%S")
+
+    local logfile pid cmd_str
+    if [ "${1:-}" = "--" ]; then
+        shift
+        if [ "$#" -eq 0 ]; then
+            echo "bgrun: missing command string after --" >&2
+            return 1
+        fi
+        [ -z "$name" ] && name="sh"
+        logfile="$logdir/${ts}-${name}.log"
+        cmd_str="$*"
+    else
+        if [ "$#" -eq 0 ]; then
+            echo "bgrun: missing command" >&2
+            return 1
+        fi
+        [ -z "$name" ] && name="${1##*/}"
+        logfile="$logdir/${ts}-${name}.log"
+        # Build a safely quoted command string from argv
+        if [ -n "${ZSH_VERSION:-}" ]; then
+            # zsh-aware quoting
+            local quoted=()
+            local arg
+            for arg in "$@"; do
+                quoted+=("$(printf %q "$arg")")
+            done
+            cmd_str="${(j: :)quoted}"
+        else
+            # POSIX fallback quoting
+            cmd_str=""
+            for arg in "$@"; do
+                # Replace ' with '\'' inside each arg then wrap in single quotes
+                local esc
+                esc=${arg//\'/\'\\\'\'}
+                cmd_str="$cmd_str '$esc'"
+            done
+            cmd_str="${cmd_str# }"
+        fi
+    fi
+
+    # Execute via a non-interactive zsh, but preload aliases/functions explicitly
+    # to avoid TTY-dependent interactive init (compinit) while still expanding aliases.
+    local zsh_prelude='emulate -L zsh; setopt aliases; '
+    zsh_prelude+="[ -f $HOME/.config/shell/aliases.sh ] && source $HOME/.config/shell/aliases.sh; "
+    zsh_prelude+="[ -f $HOME/.config/shell/functions.sh ] && source $HOME/.config/shell/functions.sh; "
+    # Use eval so aliases defined above are expanded during parsing of the command.
+    # Quote the command string safely for eval invocation.
+    local eval_cmd
+    if [ -n "${ZSH_VERSION:-}" ]; then
+        eval_cmd="eval -- ${(q)cmd_str}"
+    else
+        # POSIX quoting fallback
+        eval_cmd="eval -- '"${cmd_str//\'/\'\\\'\'}"'"
+    fi
+    local full_cmd="$zsh_prelude$eval_cmd"
+
+    if [ -n "${ZSH_VERSION:-}" ]; then
+        setopt localoptions nomonitor
+        nohup "${SHELL:-/bin/zsh}" -c "$full_cmd" >>"$logfile" 2>&1 </dev/null &!
+    else
+        nohup "${SHELL:-/bin/zsh}" -c "$full_cmd" >>"$logfile" 2>&1 </dev/null &
+    fi
+
+    pid=$!
+    # Disown in non-zsh shells (zsh &! already disowns)
+    if [ -z "${ZSH_VERSION:-}" ] && command -v disown >/dev/null 2>&1; then
+        disown "$pid" 2>/dev/null || true
+    fi
+
+    printf "bgrun: started PID %s; logging to %s\n" "$pid" "$logfile"
+    printf "%s\n" "$pid" >"${logfile}.pid"
+}
