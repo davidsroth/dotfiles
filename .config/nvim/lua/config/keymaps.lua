@@ -105,16 +105,18 @@ vim.api.nvim_create_user_command("ToggleWarnings", toggle_diagnostics_warnings, 
 -- Add keybinding
 map("n", "<leader>tw", toggle_diagnostics_warnings, { desc = "Toggle diagnostics warnings" })
 
--- Open current file in Finder
-map("n", "<leader>of", function()
-  local file = vim.fn.expand("%:p")
-  if file ~= "" then
-    vim.fn.system({ "open", "-R", file })
-    vim.notify("Opened in Finder: " .. file, vim.log.levels.INFO)
-  else
-    vim.notify("No file to open", vim.log.levels.WARN)
-  end
-end, { desc = "Open file in Finder" })
+-- Open current file in Finder (macOS-only)
+if vim.loop.os_uname().sysname == "Darwin" then
+  map("n", "<leader>of", function()
+    local file = vim.fn.expand("%:p")
+    if file ~= "" then
+      vim.fn.system({ "open", "-R", file })
+      vim.notify("Opened in Finder: " .. file, vim.log.levels.INFO)
+    else
+      vim.notify("No file to open", vim.log.levels.WARN)
+    end
+  end, { desc = "Open file in Finder" })
+end
 
 -- Claude Code: floating popup (mirrors tmux 'c c')
 map("n", "<leader>clc", function()
