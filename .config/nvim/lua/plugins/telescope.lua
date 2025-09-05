@@ -3,6 +3,7 @@
 return {
   {
     "nvim-telescope/telescope.nvim",
+    cmd = "Telescope",
     opts = {
       defaults = {
         -- Show results top-down with prompt at the top
@@ -10,9 +11,19 @@ return {
         layout_config = { prompt_position = "top" },
       },
     },
+    dependencies = {
+      {
+        "nvim-telescope/telescope-fzf-native.nvim",
+        build = "make",
+        config = function()
+          require("telescope").load_extension("fzf")
+        end,
+      },
+    },
     keys = {
       -- Core keybindings (more available via LazyVim defaults)
       { "<leader>ff", "<cmd>Telescope find_files<cr>", desc = "Find Files" },
+      { "<leader>fr", "<cmd>Telescope oldfiles<cr>", desc = "Recent Files" },
       -- Search in lazy.nvim plugin directory
       {
         "<leader>fp",
@@ -21,18 +32,6 @@ return {
         end,
         desc = "Find Plugin File",
       },
-    },
-  },
-  {
-    -- FZF sorter for performance (requires build step)
-    -- Significantly improves search speed for large projects
-    "telescope.nvim",
-    dependencies = {
-      "nvim-telescope/telescope-fzf-native.nvim",
-      build = "make",
-      config = function()
-        require("telescope").load_extension("fzf")
-      end,
     },
   },
 }
