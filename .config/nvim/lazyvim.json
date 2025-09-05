@@ -1,17 +1,5 @@
 {
-  "extras": [
-    "lazyvim.plugins.extras.editor.snacks_explorer",
-    "lazyvim.plugins.extras.formatting.black",
-    "lazyvim.plugins.extras.lang.json",
-    "lazyvim.plugins.extras.lang.markdown",
-    "lazyvim.plugins.extras.lang.python",
-    "lazyvim.plugins.extras.lang.toml",
-    "lazyvim.plugins.extras.ui.smear-cursor",
-    "lazyvim.plugins.extras.util.dot",
-    "lazyvim.plugins.extras.util.mini-hipatterns",
-    "lazyvim.plugins.extras.util.octo",
-    "lazyvim.plugins.extras.vscode"
-  ],
+  "extras": [],
   "install_version": 7,
   "news": {
     "NEWS.md": "10960"

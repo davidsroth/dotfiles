@@ -29,17 +29,28 @@ require("lazy").setup({
     -- Language support
     { import = "lazyvim.plugins.extras.lang.markdown" },
     { import = "lazyvim.plugins.extras.lang.python" },
+    { import = "lazyvim.plugins.extras.lang.json" },
+    { import = "lazyvim.plugins.extras.lang.toml" },
 
     -- UI enhancements
     { import = "lazyvim.plugins.extras.ui.mini-animate" },
     { import = "lazyvim.plugins.extras.ui.alpha" },
+    { import = "lazyvim.plugins.extras.ui.smear-cursor" },
 
     -- Code quality
     { import = "lazyvim.plugins.extras.linting.eslint" },
     { import = "lazyvim.plugins.extras.formatting.prettier" },
 
+    -- Utilities
+    { import = "lazyvim.plugins.extras.util.dot" },
+    { import = "lazyvim.plugins.extras.util.mini-hipatterns" },
+
+    -- VSCode integration (optional)
+    { import = "lazyvim.plugins.extras.vscode" },
+
     -- Custom plugins
     { import = "plugins" },
+    { import = "plugins.lang" },
   },
 
   -- ============================================================================
