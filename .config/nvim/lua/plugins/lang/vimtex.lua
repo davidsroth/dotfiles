@@ -9,3 +9,4 @@ return {
     -- See :help vimtex-default-mappings for full list
   end,
 }
+

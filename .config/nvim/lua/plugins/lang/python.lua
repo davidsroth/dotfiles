@@ -1,6 +1,6 @@
--- ============================================================================
+-- =============================================================================
 -- Python Integration (uv & Poetry)
--- ============================================================================
+-- =============================================================================
 
 return {
   -- Enhanced Python support with uv and Poetry integration
@@ -43,20 +43,20 @@ return {
       poetry_path = vim.fn.expand("~/Library/Caches/pypoetry/virtualenvs"),
       hatch_path = nil,
       venvwrapper_path = nil,
-      
+
       -- Add uv and Poetry venv detection
       name = {
         ".venv",
         "venv",
       },
-      
+
       -- Enable environment detection
       enable_cached_venvs = true,
       cached_venv_automatic_activation = true,
-      
+
       -- Search in parent directories for .venv and pyproject.toml
       parents = 3,
-      
+
       -- uv creates .venv by default, Poetry uses cache directory
       dap_enabled = true,
     },
@@ -76,7 +76,7 @@ return {
     opts = function(_, opts)
       -- Auto-detect uv and Poetry virtual environments
       local util = require("lspconfig.util")
-      
+
       -- Function to find uv venv
       local function get_uv_venv_path(root_dir)
         local venv_path = util.path.join(root_dir, ".venv")
@@ -85,7 +85,7 @@ return {
         end
         return nil
       end
-      
+
       -- Function to find Poetry venv
       local function get_poetry_venv_path(root_dir)
         -- Check if pyproject.toml exists and contains poetry
@@ -99,7 +99,7 @@ return {
               break
             end
           end
-          
+
           if is_poetry_project then
             -- Try to get Poetry env path
             local handle = io.popen("cd '" .. root_dir .. "' && poetry env info --path 2>/dev/null")
@@ -115,7 +115,7 @@ return {
         end
         return nil
       end
-      
+
       -- Override python path detection
       opts.servers = vim.tbl_deep_extend("force", opts.servers or {}, {
         pyright = {
@@ -123,7 +123,7 @@ return {
             local root_dir = config.root_dir
             -- Try uv first, then Poetry
             local venv = get_uv_venv_path(root_dir) or get_poetry_venv_path(root_dir)
-            
+
             if venv then
               config.settings.python.pythonPath = util.path.join(venv, "bin", "python")
               config.settings.python.venvPath = vim.fn.fnamemodify(venv, ":h")
@@ -132,7 +132,7 @@ return {
           end,
         },
       })
-      
+
       return opts
     end,
   },
@@ -199,3 +199,4 @@ return {
     end,
   },
 }
+
