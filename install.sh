@@ -190,6 +190,108 @@ check_command() {
   command -v "$1" &>/dev/null
 }
 
+# Compare two semantic versions using dpkg if available, otherwise sort -V
+# Usage: version_ge A B  -> returns 0 if A >= B
+version_ge() {
+  local a="$1" b="$2"
+  if check_command dpkg; then
+    dpkg --compare-versions "$a" ge "$b"
+    return $?
+  fi
+  # Fallback with sort -V
+  [[ "$(printf '%s\n%s\n' "$b" "$a" | sort -V | tail -n1)" == "$a" ]]
+}
+
+# Get NVIM version (e.g., 0.9.5) or empty
+get_nvim_version() {
+  if check_command nvim; then
+    nvim --version 2>/dev/null | head -n1 | sed -E 's/^NVIM v?([0-9.]+).*/\1/'
+  fi
+}
+
+# Ensure Debian backports repo is present for given codename
+ensure_debian_backports() {
+  local codename="$1"
+  local sources_file="/etc/apt/sources.list.d/${codename}-backports.list"
+  if ! grep -Rqs "${codename}-backports" /etc/apt/sources.list /etc/apt/sources.list.d 2>/dev/null; then
+    info "Adding ${codename}-backports repository"
+    local line="deb http://deb.debian.org/debian ${codename}-backports main contrib non-free non-free-firmware"
+    if command -v sudo >/dev/null 2>&1; then
+      echo "$line" | sudo tee "$sources_file" >/dev/null || warning "Failed to write backports list"
+      sudo apt-get update -y || warning "apt update failed after adding backports"
+    else
+      echo "$line" | tee "$sources_file" >/dev/null || warning "Failed to write backports list"
+      apt-get update -y || warning "apt update failed after adding backports"
+    fi
+  fi
+}
+
+# Install a modern Neovim on Debian/Ubuntu systems
+install_modern_neovim_linux() {
+  local min_ver="0.9.0"
+  local current_ver
+  current_ver="$(get_nvim_version || true)"
+  if [[ -n "$current_ver" ]] && version_ge "$current_ver" "$min_ver"; then
+    [[ "$VERBOSE" == "true" ]] && success "Neovim $current_ver already >= $min_ver" || true
+    return 0
+  fi
+
+  # Detect Debian codename if present
+  local id codename
+  if [[ -r /etc/os-release ]]; then
+    # shellcheck disable=SC1091
+    . /etc/os-release
+    id="${ID:-}"
+    codename="${VERSION_CODENAME:-}"
+  fi
+
+  if [[ "$id" == "debian" && -n "$codename" ]]; then
+    info "Installing Neovim from ${codename}-backports"
+    ensure_debian_backports "$codename"
+    if command -v sudo >/dev/null 2>&1; then
+      sudo apt-get install -y -t "${codename}-backports" neovim || warning "Failed to install neovim from backports"
+    else
+      apt-get install -y -t "${codename}-backports" neovim || warning "Failed to install neovim from backports"
+    fi
+    current_ver="$(get_nvim_version || true)"
+    if [[ -n "$current_ver" ]] && version_ge "$current_ver" "$min_ver"; then
+      success "Neovim $current_ver installed from backports"
+      return 0
+    else
+      warning "Backports did not yield >= $min_ver (got: ${current_ver:-none}). Falling back to portable build."
+    fi
+  fi
+
+  # Fallback: install latest stable portable build to ~/.local
+  info "Installing Neovim portable build (stable) to ~/.local"
+  local url="https://github.com/neovim/neovim/releases/download/stable/nvim-linux64.tar.gz"
+  local tmp_tar="/tmp/nvim-linux64.tar.gz"
+  mkdir -p "$HOME/.local/bin"
+  if curl -fsSL "$url" -o "$tmp_tar"; then
+    # Extract to a versioned dir then atomically move
+    rm -rf "$HOME/.local/nvim-linux64.new"
+    mkdir -p "$HOME/.local"
+    tar -C "$HOME/.local" -xzf "$tmp_tar" || {
+      warning "Failed to extract Neovim tarball"
+      rm -f "$tmp_tar"
+      return 1
+    }
+    rm -f "$tmp_tar"
+    # Ensure symlink in ~/.local/bin
+    ln -sfn "$HOME/.local/nvim-linux64/bin/nvim" "$HOME/.local/bin/nvim"
+    export PATH="$HOME/.local/bin:$PATH"
+    current_ver="$(get_nvim_version || true)"
+    if [[ -n "$current_ver" ]]; then
+      success "Neovim $current_ver installed to ~/.local/bin/nvim"
+    else
+      warning "Neovim installation finished but version check failed"
+    fi
+  else
+    warning "Failed to download Neovim portable build"
+    return 1
+  fi
+}
+
 # Prompt user for confirmation
 # Arguments: prompt message, default value (y/n)
 # Returns: 0 for yes, 1 for no
@@ -374,7 +476,7 @@ install_linux_packages() {
   # Essential packages (names adjusted for Debian/Ubuntu)
   # Note: fd-find provides 'fdfind', bat provides 'batcat'. We create shims later.
   local packages=(
-    zsh stow git neovim tmux ripgrep fzf fd-find bat build-essential
+    zsh stow git tmux ripgrep fzf fd-find bat build-essential
     gawk grep sed rsync python3-pip python3-venv ca-certificates curl
     unzip zip jq git-lfs
   )
@@ -404,6 +506,9 @@ install_linux_packages() {
   fi
 
   success "Apt package installation completed (with possible warnings above)"
+
+  # Ensure a modern Neovim (>= 0.9) is installed
+  install_modern_neovim_linux || true
 }
 
 # Install packages using Brewfile if present
