@@ -3,7 +3,7 @@
 # Dotfiles Bootstrap Script v2.0
 # ==============================
 # Bootstrap script with error handling and idempotency
-# Tested on macOS 15.5 (2025)
+# Supported: macOS (Apple/Intel) and Debian/Ubuntu Linux
 
 # Strict mode - exit on error, undefined variables, and pipe failures
 set -euo pipefail
@@ -191,27 +191,42 @@ confirm() {
 # Check platform compatibility and requirements
 # Returns: 0 on success, exits on failure
 check_platform() {
-  if [[ "$OSTYPE" != "darwin"* ]]; then
-    error "This script is designed for macOS only (detected: $OSTYPE)"
-    exit 1
-  fi
-
-  # Check for required commands
+  # Required common tools
   if ! command -v curl &>/dev/null; then
     error "curl is required but not installed"
     exit 1
   fi
 
-  # Detect architecture
-  local arch
-  arch="$(uname -m)"
-  if [[ "$arch" == "arm64" ]]; then
-    info "Apple Silicon Mac detected"
-    export HOMEBREW_PREFIX="/opt/homebrew"
-  else
-    info "Intel Mac detected"
-    export HOMEBREW_PREFIX="/usr/local"
-  fi
+  case "$OSTYPE" in
+    darwin*)
+      export OS_FAMILY="macos"
+      local arch
+      arch="$(uname -m)"
+      if [[ "$arch" == "arm64" ]]; then
+        info "Apple Silicon Mac detected"
+        export HOMEBREW_PREFIX="/opt/homebrew"
+      else
+        info "Intel Mac detected"
+        export HOMEBREW_PREFIX="/usr/local"
+      fi
+      ;;
+    linux*)
+      export OS_FAMILY="linux"
+      # Prefer Debian/Ubuntu using apt-get
+      if command -v apt-get >/dev/null 2>&1; then
+        export LINUX_PKG_MGR="apt"
+        info "Debian/Ubuntu-like system detected (apt)"
+      else
+        error "Unsupported Linux distro for this script (expects apt-get)."
+        error "You can install Homebrew on Linux then re-run this script."
+        exit 1
+      fi
+      ;;
+    *)
+      error "Unsupported OS: $OSTYPE"
+      exit 1
+      ;;
+  esac
 }
 
 # Install Xcode Command Line Tools if not already installed
@@ -306,70 +321,131 @@ install_homebrew() {
   brew update 2>&1
 }
 
+# Install base packages on Debian/Ubuntu via apt
+# Returns: 0 on success (continues on partial failure)
+install_linux_packages() {
+  step "Installing packages with apt (Debian/Ubuntu)"
+
+  if [[ "${LINUX_PKG_MGR:-}" != "apt" ]]; then
+    warning "Skipping apt install: not a Debian/Ubuntu system"
+    return 0
+  fi
+
+  if [[ "$DRY_RUN" == "true" ]]; then
+    info "[DRY RUN] Would run: sudo apt-get update && sudo apt-get install -y <packages>"
+    return 0
+  fi
+
+  # Update package lists
+  if command -v sudo >/dev/null 2>&1; then
+    sudo apt-get update -y || warning "apt-get update failed"
+  else
+    apt-get update -y || warning "apt-get update failed"
+  fi
+
+  # Essential packages (names adjusted for Debian/Ubuntu)
+  # Note: fd-find provides 'fdfind', bat provides 'batcat'. We create shims later.
+  local packages=(
+    zsh stow git neovim tmux ripgrep fzf fd-find bat build-essential
+    gawk grep sed rsync python3-pip python3-venv ca-certificates curl
+    unzip zip jq git-lfs
+  )
+
+  local apt_install=(apt-get install -y --no-install-recommends)
+  if command -v sudo >/dev/null 2>&1; then
+    sudo "${apt_install[@]}" "${packages[@]}" || warning "Some apt packages failed to install"
+  else
+    "${apt_install[@]}" "${packages[@]}" || warning "Some apt packages failed to install"
+  fi
+
+  # Create ~/.local/bin and add shims for fd/bat if needed
+  mkdir -p "$HOME/.local/bin"
+  if command -v fdfind >/dev/null 2>&1; then
+    ln -sf "$(command -v fdfind)" "$HOME/.local/bin/fd" || true
+  fi
+  if command -v batcat >/dev/null 2>&1; then
+    ln -sf "$(command -v batcat)" "$HOME/.local/bin/bat" || true
+  fi
+
+  # Starship and zoxide are available in many Debian/Ubuntu repos; try to install if present
+  if apt-cache show starship >/dev/null 2>&1; then
+    if command -v sudo >/dev/null 2>&1; then sudo apt-get install -y starship || true; else apt-get install -y starship || true; fi
+  fi
+  if apt-cache show zoxide >/dev/null 2>&1; then
+    if command -v sudo >/dev/null 2>&1; then sudo apt-get install -y zoxide || true; else apt-get install -y zoxide || true; fi
+  fi
+
+  success "Apt package installation completed (with possible warnings above)"
+}
+
 # Install packages using Brewfile if present
 # Falls back to essential packages if no Brewfile found
 # Returns: 0 on success (continues on partial failure)
 install_packages() {
-  step "Installing packages from Brewfile"
+  if [[ "${OS_FAMILY:-}" == "macos" ]]; then
+    step "Installing packages from Brewfile"
 
-  if [[ ! -f "$DOTFILES_DIR/Brewfile" ]]; then
-    warning "Brewfile not found at $DOTFILES_DIR/Brewfile"
-    warning "Falling back to individual package installation"
-    install_packages_fallback
-    return
-  fi
-
-  info "Running brew bundle..."
-  cd "$DOTFILES_DIR"
-
-  # Check if all Brewfile dependencies are already satisfied (use exit code)
-  if [[ "$VERBOSE" == "true" ]]; then
-    info "Checking Brewfile dependencies..."
-    if brew bundle check --no-upgrade --verbose; then
-      success "All Brewfile packages already installed"
-      return 0
-    fi
-  else
-    info "Checking installed packages..."
-    if brew bundle check --no-upgrade >/dev/null 2>&1; then
-      success "All Brewfile packages already installed"
-      return 0
-    fi
-  fi
-
-  # Install everything from Brewfile
-  if confirm "Install packages from Brewfile?" "y"; then
-    # Ensure fonts tap if Brewfile includes font casks
-    if grep -qE '^cask\s+"font-' "$DOTFILES_DIR/Brewfile" 2>/dev/null; then
-      info "Ensuring homebrew/cask-fonts tap for font casks..."
-      brew tap homebrew/cask-fonts 2>/dev/null || true
+    if [[ ! -f "$DOTFILES_DIR/Brewfile" ]]; then
+      warning "Brewfile not found at $DOTFILES_DIR/Brewfile"
+      warning "Falling back to individual package installation"
+      install_packages_fallback
+      return
     fi
 
-    # Run brew bundle with no-upgrade to be idempotent
-    local brew_exit_code=0
+    info "Running brew bundle..."
+    cd "$DOTFILES_DIR"
+
+    # Check if all Brewfile dependencies are already satisfied (use exit code)
     if [[ "$VERBOSE" == "true" ]]; then
-      info "Installing packages (skipping already installed)..."
-      brew bundle install --verbose --no-upgrade || brew_exit_code=$?
+      info "Checking Brewfile dependencies..."
+      if brew bundle check --no-upgrade --verbose; then
+        success "All Brewfile packages already installed"
+        return 0
+      fi
     else
-      info "Installing packages..."
-      brew bundle install --no-upgrade --quiet 2>&1 || brew_exit_code=$?
+      info "Checking installed packages..."
+      if brew bundle check --no-upgrade >/dev/null 2>&1; then
+        success "All Brewfile packages already installed"
+        return 0
+      fi
     fi
 
-    if [[ $brew_exit_code -eq 0 ]]; then
-      success "Brewfile processing completed"
+    # Install everything from Brewfile
+    if confirm "Install packages from Brewfile?" "y"; then
+      # Ensure fonts tap if Brewfile includes font casks
+      if grep -qE '^cask\s+"font-' "$DOTFILES_DIR/Brewfile" 2>/dev/null; then
+        info "Ensuring homebrew/cask-fonts tap for font casks..."
+        brew tap homebrew/cask-fonts 2>/dev/null || true
+      fi
+
+      # Run brew bundle with no-upgrade to be idempotent
+      local brew_exit_code=0
+      if [[ "$VERBOSE" == "true" ]]; then
+        info "Installing packages (skipping already installed)..."
+        brew bundle install --verbose --no-upgrade || brew_exit_code=$?
+      else
+        info "Installing packages..."
+        brew bundle install --no-upgrade --quiet 2>&1 || brew_exit_code=$?
+      fi
+
+      if [[ $brew_exit_code -eq 0 ]]; then
+        success "Brewfile processing completed"
+      else
+        # Don't fail the whole script if some packages have issues
+        warning "Some Brewfile entries had issues (exit code: $brew_exit_code)"
+
+        # Show what's installed vs what failed
+        info "Checking final state..."
+        brew bundle check --verbose || true
+
+        # Continue anyway - idempotent scripts should be resilient
+        info "Continuing despite package issues..."
+      fi
     else
-      # Don't fail the whole script if some packages have issues
-      warning "Some Brewfile entries had issues (exit code: $brew_exit_code)"
-
-      # Show what's installed vs what failed
-      info "Checking final state..."
-      brew bundle check --verbose || true
-
-      # Continue anyway - idempotent scripts should be resilient
-      info "Continuing despite package issues..."
+      info "Skipping Brewfile installation"
     fi
   else
-    info "Skipping Brewfile installation"
+    install_linux_packages
   fi
 }
 
@@ -681,7 +757,11 @@ main() {
   echo "Dotfiles Bootstrap Script v2.0"
   echo "=============================="
   echo
-  info "This script will set up your macOS development environment"
+  if [[ "${OSTYPE}" == darwin* ]]; then
+    info "This script will set up your macOS development environment"
+  else
+    info "This script will set up your Debian/Ubuntu development environment"
+  fi
   info "All actions will be logged to: $LOG_FILE"
 
   if [[ "$DRY_RUN" == "true" ]]; then
@@ -697,15 +777,23 @@ main() {
 
   # Start installation
   check_platform
-  install_xcode_tools
-  install_homebrew
+  if [[ "${OS_FAMILY}" == "macos" ]]; then
+    install_xcode_tools
+    install_homebrew
+  fi
   setup_dotfiles_repo
-  install_packages
+  if [[ "${OS_FAMILY}" == "macos" ]]; then
+    install_packages
+  else
+    install_linux_packages
+  fi
   install_additional_tools
   backup_existing_files
   setup_dotfiles
   post_install_setup
-  setup_macos_defaults
+  if [[ "${OS_FAMILY}" == "macos" ]]; then
+    setup_macos_defaults
+  fi
   show_summary
 }
 
