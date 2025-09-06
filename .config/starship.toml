@@ -7,21 +7,9 @@ command_timeout = 1500  # ms
 scan_timeout = 30       # ms for scanning files
 add_newline = true
 
-# Format - only show essential modules
+# Format - shape prompt as: user@host in dir (BRANCH_SYMBOL) branch [status]
 format = """
-$username\
-$hostname\
-$directory\
-$git_branch\
-$git_state\
-$git_status\
-$python\
-$nodejs\
-$rust\
-$golang\
-$docker_context\
-$line_break\
-$character"""
+$username$hostname in $directory$git_branch$git_status$line_break$character"""
 
 # ============================================================================
 # Module Configurations
@@ -42,8 +30,9 @@ read_only_style = "red"
 home_symbol = "~"
 
 [git_branch]
-format = "[$symbol$branch(:$remote_branch)]($style) "
-symbol = " "
+# e.g. "() main "
+symbol = " "
+format = "[($symbol)]($style) [$branch]($style) "
 style = "purple"
 truncation_length = 20
 
@@ -113,12 +102,13 @@ disabled = true
 # Show short host (before first dot). Set ssh_only=true to show only on SSH.
 trim_at = "."
 ssh_only = true
-format = "[$hostname]($style) "
+format = "[@$hostname]($style) "
 style = "bold purple"
 disabled = false
 
 [username]
 # Show username in the prompt (always visible)
+format = "[$user]($style) "
 show_always = true
 disabled = false
 
