@@ -6,9 +6,9 @@
 # only be configured once per login session.
 # ============================================================================
 
-# Homebrew setup (Apple Silicon)
-if [[ -f "/opt/homebrew/bin/brew" ]]; then
-    eval "$(/opt/homebrew/bin/brew shellenv)"
+# Homebrew setup (cross-platform)
+if command -v brew >/dev/null 2>&1; then
+    eval "$(brew shellenv)"
 fi
 
 # User-specific binaries
