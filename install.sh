@@ -74,6 +74,16 @@ DRY_RUN=false
 VERBOSE=false
 QUIET=false
 
+# Neovim install controls (override via env)
+# - NVIM_METHOD: auto|tarball|backports|appimage (default: auto → tarball)
+# - NVIM_MIN_VERSION: semantic minimum version to ensure (default: 0.9.0)
+# - NVIM_FORCE_UPDATE: if "true", reinstall even when >= min version (default: false)
+# - NVIM_VERSION_TAG: explicit tag like "v0.10.4" (default: empty → latest)
+NVIM_METHOD="${NVIM_METHOD:-${NVIM_INSTALL_METHOD:-auto}}"
+NVIM_MIN_VERSION="${NVIM_MIN_VERSION:-0.9.0}"
+NVIM_FORCE_UPDATE="${NVIM_FORCE_UPDATE:-false}"
+NVIM_VERSION_TAG="${NVIM_VERSION_TAG:-}"
+
 # Helper functions
 
 # Show help message
@@ -94,6 +104,10 @@ Environment Variables:
     DOTFILES_DIR    Installation directory (default: ~/dotfiles)
     DEFAULT_BRANCH  Git branch to use (default: main)
     NVM_VERSION     NVM version to install (default: v0.39.7)
+    NVIM_METHOD     Neovim method: auto|appimage|tarball|backports (default: auto→appimage on x86_64)
+    NVIM_MIN_VERSION     Ensure Neovim >= this version (default: 0.9.0)
+    NVIM_FORCE_UPDATE    true to force reinstall (default: false)
+    NVIM_VERSION_TAG     Explicit tag like v0.10.4 (default: stable)
 
 Examples:
     # Normal installation
@@ -250,14 +264,20 @@ ensure_debian_backports() {
   fi
 }
 
+# Simplified: removed multi-URL download helper; use a single releases/latest (or tag) URL.
+
 # Install a modern Neovim on Debian/Ubuntu systems
 install_modern_neovim_linux() {
-  local min_ver="0.9.0"
+  local min_ver="$NVIM_MIN_VERSION"
   local current_ver
   current_ver="$(get_nvim_version || true)"
-  if [[ -n "$current_ver" ]] && version_ge "$current_ver" "$min_ver"; then
-    [[ "$VERBOSE" == "true" ]] && success "Neovim $current_ver already >= $min_ver" || true
-    return 0
+  if [[ "$NVIM_FORCE_UPDATE" != "true" ]]; then
+    if [[ -n "$current_ver" ]] && version_ge "$current_ver" "$min_ver"; then
+      [[ "$VERBOSE" == "true" ]] && success "Neovim $current_ver already >= $min_ver" || true
+      return 0
+    fi
+  else
+    info "Forcing Neovim reinstall (NVIM_FORCE_UPDATE=true)"
   fi
 
   # Detect Debian codename if present
@@ -269,55 +289,122 @@ install_modern_neovim_linux() {
     codename="${VERSION_CODENAME:-}"
   fi
 
-  if [[ "$id" == "debian" && -n "$codename" ]]; then
-    info "Installing Neovim from ${codename}-backports"
-    ensure_debian_backports "$codename"
-    if command -v sudo >/dev/null 2>&1; then
-      sudo apt-get install -y -t "${codename}-backports" neovim || warning "Failed to install neovim from backports"
+  # Decide method (default to AppImage on x86_64 Linux to avoid tarball name drift)
+  local method="$NVIM_METHOD"
+  if [[ "$method" == "auto" ]]; then
+    case "$(uname -m)" in
+      x86_64|amd64)
+        method="appimage";;
+      *)
+        method="tarball";;
+    esac
+  fi
+
+  if [[ "$method" == "backports" ]]; then
+    if [[ "$id" == "debian" && -n "$codename" ]]; then
+      info "Installing Neovim from ${codename}-backports"
+      ensure_debian_backports "$codename"
+      if command -v sudo >/dev/null 2>&1; then
+        sudo apt-get install -y -t "${codename}-backports" neovim || warning "Failed to install neovim from backports"
+      else
+        apt-get install -y -t "${codename}-backports" neovim || warning "Failed to install neovim from backports"
+      fi
+      current_ver="$(get_nvim_version || true)"
+      if [[ -n "$current_ver" ]] && version_ge "$current_ver" "$min_ver"; then
+        success "Neovim $current_ver installed from backports"
+        return 0
+      else
+        if [[ "$NVIM_INSTALL_METHOD" == "backports" ]]; then
+          warning "Backports did not yield >= $min_ver (got: ${current_ver:-none})."
+        else
+          warning "Backports did not yield >= $min_ver (got: ${current_ver:-none}). Falling back to portable build."
+        fi
+      fi
     else
-      apt-get install -y -t "${codename}-backports" neovim || warning "Failed to install neovim from backports"
-    fi
-    current_ver="$(get_nvim_version || true)"
-    if [[ -n "$current_ver" ]] && version_ge "$current_ver" "$min_ver"; then
-      success "Neovim $current_ver installed from backports"
-      return 0
-    else
-      warning "Backports did not yield >= $min_ver (got: ${current_ver:-none}). Falling back to portable build."
+      warning "Backports method selected but this is not a Debian system; falling back to portable."
     fi
   fi
 
-  # Fallback: install latest stable portable build to ~/.local
-  info "Installing Neovim portable build (stable) to ~/.local"
-  local url="https://github.com/neovim/neovim/releases/download/stable/nvim-linux64.tar.gz"
-  local tmp_tar="/tmp/nvim-linux64.tar.gz"
-  ensure_user_local_bin_path
-  if curl -fsSL "$url" -o "$tmp_tar"; then
-    # Extract to a versioned dir then atomically move
-    rm -rf "$HOME/.local/nvim-linux64.new"
-    mkdir -p "$HOME/.local"
-    tar -C "$HOME/.local" -xzf "$tmp_tar" || {
-      warning "Failed to extract Neovim tarball"
-      rm -f "$tmp_tar"
-      return 1
-    }
-    rm -f "$tmp_tar"
-    # Ensure symlink in ~/.local/bin and PATH precedence
-    ln -sfn "$HOME/.local/nvim-linux64/bin/nvim" "$HOME/.local/bin/nvim"
+  if [[ "$method" == "tarball" ]]; then
+    info "Installing Neovim tarball to ~/.local"
+    local tmp_tar="/tmp/nvim.tar.gz"
     ensure_user_local_bin_path
-    current_ver="$(get_nvim_version || true)"
-    if [[ -n "$current_ver" ]]; then
-      success "Neovim $current_ver installed to ~/.local/bin/nvim"
-      # If another nvim still takes precedence, inform the user
-      if [[ "$(command -v nvim || true)" != "$HOME/.local/bin/nvim" ]]; then
-        warning "Another nvim is ahead of ~/.local/bin in PATH ($(command -v nvim 2>/dev/null || echo unknown))"
-        info "Open a new shell or run: source ~/.zprofile 2>/dev/null || true; source ~/.profile 2>/dev/null || true"
+    # Determine asset by arch
+    local arch asset tag_path
+    arch="$(uname -m)"
+    case "$arch" in
+      x86_64|amd64) asset="nvim-linux64.tar.gz" ;;
+      aarch64|arm64) asset="nvim-linux-arm64.tar.gz" ;;
+      *) asset="nvim-linux64.tar.gz" ;;
+    esac
+    if [[ -n "$NVIM_VERSION_TAG" ]]; then
+      tag_path="download/${NVIM_VERSION_TAG}"
+      info "Using NVIM_VERSION_TAG=$NVIM_VERSION_TAG"
+    else
+      # Use the stable tag by default to avoid occasional 404s on latest
+      tag_path="download/stable"
+    fi
+    local url="https://github.com/neovim/neovim/releases/${tag_path}/${asset}"
+    if curl -fL --retry 3 --retry-delay 1 -o "$tmp_tar" "$url"; then
+      rm -rf "$HOME/.local/nvim-linux64.new"
+      if [[ "$NVIM_FORCE_UPDATE" == "true" ]]; then
+        rm -rf "$HOME/.local/nvim-linux64"
+      fi
+      mkdir -p "$HOME/.local"
+      local top
+      top="$(tar -tzf "$tmp_tar" 2>/dev/null | head -n1 | cut -d/ -f1)"
+      tar -C "$HOME/.local" -xzf "$tmp_tar" || {
+        warning "Failed to extract Neovim tarball"
+        rm -f "$tmp_tar"
+        return 1
+      }
+      rm -f "$tmp_tar"
+      local bindir
+      if [[ -n "$top" && -d "$HOME/.local/$top/bin" ]]; then
+        bindir="$HOME/.local/$top/bin"
+      else
+        bindir="$HOME/.local/nvim-linux64/bin"
+      fi
+      ln -sfn "$bindir/nvim" "$HOME/.local/bin/nvim"
+      ensure_user_local_bin_path
+      current_ver="$(get_nvim_version || true)"
+      if [[ -n "$current_ver" ]]; then
+        success "Neovim $current_ver installed to ~/.local/bin/nvim"
+        if [[ "$(command -v nvim || true)" != "$HOME/.local/bin/nvim" ]]; then
+          warning "Another nvim is ahead of ~/.local/bin in PATH ($(command -v nvim 2>/dev/null || echo unknown))"
+          info "Open a new shell or run: source ~/.zprofile 2>/dev/null || true; source ~/.profile 2>/dev/null || true"
+        fi
+      else
+        warning "Neovim installation finished but version check failed"
       fi
     else
-      warning "Neovim installation finished but version check failed"
+      warning "Failed to download Neovim tarball from $url"
+      return 1
     fi
-  else
-    warning "Failed to download Neovim portable build"
-    return 1
+    return 0
+  fi
+
+  if [[ "$method" == "appimage" ]]; then
+    info "Installing Neovim AppImage to ~/.local"
+    mkdir -p "$HOME/.local/opt" "$HOME/.local/bin"
+    local tag_path url ai_dest
+    if [[ -n "$NVIM_VERSION_TAG" ]]; then
+      tag_path="download/${NVIM_VERSION_TAG}"
+      info "Using NVIM_VERSION_TAG=$NVIM_VERSION_TAG"
+    else
+      tag_path="latest/download"
+    fi
+    url="https://github.com/neovim/neovim/releases/${tag_path}/nvim.appimage"
+    ai_dest="$HOME/.local/opt/nvim.appimage"
+    if curl -fL --retry 3 --retry-delay 1 -o "$ai_dest" "$url"; then
+      chmod +x "$ai_dest"
+      ln -sfn "$ai_dest" "$HOME/.local/bin/nvim"
+      success "Neovim AppImage installed to $ai_dest"
+      return 0
+    else
+      warning "Failed to download Neovim AppImage from $url"
+      return 1
+    fi
   fi
 }
 
@@ -746,6 +833,29 @@ install_additional_tools() {
         [[ "$VERBOSE" == "true" ]] && success "$tool already installed" || true
       fi
     done
+  fi
+
+  # tree-sitter CLI for nvim-treesitter
+  if check_command tree-sitter; then
+    [[ "$VERBOSE" == "true" ]] && success "tree-sitter CLI already installed" || true
+  else
+    if check_command npm; then
+      info "Installing tree-sitter CLI (user-local via npm)"
+      ensure_user_local_bin_path
+      if npm install -g --prefix "$HOME/.local" tree-sitter-cli; then
+        # Make sure current shell sees the new binary
+        hash -r 2>/dev/null || true
+        if check_command tree-sitter; then
+          success "tree-sitter CLI installed to $HOME/.local/bin/tree-sitter"
+        else
+          warning "tree-sitter CLI installation reported success but binary not found on PATH"
+        fi
+      else
+        warning "Failed to install tree-sitter CLI via npm"
+      fi
+    else
+      warning "npm not found; skipping tree-sitter CLI (needed by nvim-treesitter). Install Node/npm or set NVIM_METHOD=backports and install tree-sitter system-wide."
+    fi
   fi
 }
 
