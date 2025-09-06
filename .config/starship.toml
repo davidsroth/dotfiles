@@ -1,157 +1,190 @@
-# ============================================================================
-# Starship Prompt Configuration - Minimal & Fast
-# ============================================================================
+[aws]
+symbol = "  "
 
-# Global settings
-command_timeout = 1500  # ms
-scan_timeout = 30       # ms for scanning files
-add_newline = true
-palette = "catppuccin_mocha"
+[buf]
+symbol = " "
 
-# Format - shape prompt as: user@host in dir (BRANCH_SYMBOL) branch [status]
-format = """
-$username$hostname in $directory$git_branch$git_status$line_break$character"""
+[bun]
+symbol = " "
 
-# ============================================================================
-# Module Configurations
-# ============================================================================
+[c]
+symbol = " "
 
-[character]
-success_symbol = "[❯](bold fg:green)"
-error_symbol = "[❯](bold fg:red)"
-vimcmd_symbol = "[❮](bold fg:green)"
+[cpp]
+symbol = " "
+
+[cmake]
+symbol = " "
+
+[conda]
+symbol = " "
+
+[crystal]
+symbol = " "
+
+[dart]
+symbol = " "
+
+[deno]
+symbol = " "
 
 [directory]
-truncation_length = 3
-truncate_to_repo = true
-format = "[$path]($style)[$read_only]($read_only_style) "
-style = "bold fg:blue"
-read_only = " 🔒"
-read_only_style = "fg:red"
-home_symbol = "~"
-
-[git_branch]
-# e.g. "() main "
-symbol = ""
-format = "[($symbol)]($style) [$branch]($style) "
-style = "fg:mauve"
-truncation_length = 20
-
-[git_status]
-format = '([\[$all_status$ahead_behind\]]($style) )'
-style = "fg:red"
-conflicted = "="
-ahead = "⇡${count}"
-behind = "⇣${count}"
-diverged = "⇕⇡${ahead_count}⇣${behind_count}"
-untracked = "?"
-stashed = "\\$"
-modified = "!"
-staged = "+"
-renamed = "»"
-deleted = "✘"
-
-[git_state]
-format = '\([$state( $progress_current/$progress_total)]($style)\) '
-style = "fg:peach"
-
-[python]
-format = '[${symbol}${pyenv_prefix}(${version} )(\($virtualenv\) )]($style)'
-symbol = " "
-style = "fg:yellow"
-detect_extensions = ["py"]
-detect_files = ["requirements.txt", "setup.py", "pyproject.toml"]
-
-[nodejs]
-format = "[$symbol($version )]($style)"
-symbol = " "
-style = "fg:green"
-detect_extensions = ["js", "mjs", "cjs", "ts", "mts", "cts"]
-detect_files = ["package.json"]
-
-[rust]
-format = "[$symbol($version )]($style)"
-symbol = " "
-style = "fg:red"
-
-[golang]
-format = "[$symbol($version )]($style)"
-symbol = " "
-style = "fg:sky"
+read_only = " 󰌾"
 
 [docker_context]
-format = "[$symbol$context]($style) "
-symbol = " "
-style = "fg:blue"
-only_with_files = true
-detect_files = ["docker-compose.yml", "docker-compose.yaml", "Dockerfile"]
+symbol = " "
 
-# ============================================================================
-# Disabled Modules (for performance)
-# ============================================================================
+[elixir]
+symbol = " "
 
-[aws]
-disabled = true
+[elm]
+symbol = " "
+
+[fennel]
+symbol = " "
+
+[fossil_branch]
+symbol = " "
 
 [gcloud]
-disabled = true
+symbol = "  "
 
-[cmd_duration]
-disabled = true
+[git_branch]
+symbol = " "
+
+[git_commit]
+tag_symbol = '  '
+
+[golang]
+symbol = " "
+
+[guix_shell]
+symbol = " "
+
+[haskell]
+symbol = " "
+
+[haxe]
+symbol = " "
+
+[hg_branch]
+symbol = " "
 
 [hostname]
-# Show short host (before first dot). Set ssh_only=true to show only on SSH.
-trim_at = "."
-ssh_only = true
-format = "[@$hostname]($style)"
-style = "bold fg:mauve"
-disabled = false
+ssh_symbol = " "
 
-[username]
-# Show username in the prompt (always visible)
-format = "[$user]($style)"
-style_root = "bold fg:red"
-style_user = "bold fg:yellow"
-show_always = true
-disabled = false
+[java]
+symbol = " "
 
-[package]
-disabled = true
+[julia]
+symbol = " "
+
+[kotlin]
+symbol = " "
+
+[lua]
+symbol = " "
 
 [memory_usage]
-disabled = true
+symbol = "󰍛 "
 
-[battery]
-disabled = true
+[meson]
+symbol = "󰔷 "
 
-# ============================================================================
-# Palette - Catppuccin Mocha
-# ============================================================================
+[nim]
+symbol = "󰆥 "
 
-[palettes.catppuccin_mocha]
-text = "#cdd6f4"
-subtext1 = "#bac2de"
-subtext0 = "#a6adc8"
-overlay2 = "#9399b2"
-overlay1 = "#7f849c"
-overlay0 = "#6c7086"
-surface2 = "#585b70"
-surface1 = "#45475a"
-surface0 = "#313244"
-base = "#1e1e2e"
-mantle = "#181825"
-crust = "#11111b"
-blue = "#89b4fa"
-lavender = "#b4befe"
-sapphire = "#74c7ec"
-sky = "#89dceb"
-teal = "#94e2d5"
-green = "#a6e3a1"
-yellow = "#f9e2af"
-peach = "#fab387"
-maroon = "#eba0ac"
-red = "#f38ba8"
-mauve = "#cba6f7"
-pink = "#f5c2e7"
-flamingo = "#f2cdcd"
-rosewater = "#f5e0dc"
+[nix_shell]
+symbol = " "
+
+[nodejs]
+symbol = " "
+
+[ocaml]
+symbol = " "
+
+[os.symbols]
+Alpaquita = " "
+Alpine = " "
+AlmaLinux = " "
+Amazon = " "
+Android = " "
+Arch = " "
+Artix = " "
+CachyOS = " "
+CentOS = " "
+Debian = " "
+DragonFly = " "
+Emscripten = " "
+EndeavourOS = " "
+Fedora = " "
+FreeBSD = " "
+Garuda = "󰛓 "
+Gentoo = " "
+HardenedBSD = "󰞌 "
+Illumos = "󰈸 "
+Kali = " "
+Linux = " "
+Mabox = " "
+Macos = " "
+Manjaro = " "
+Mariner = " "
+MidnightBSD = " "
+Mint = " "
+NetBSD = " "
+NixOS = " "
+Nobara = " "
+OpenBSD = "󰈺 "
+openSUSE = " "
+OracleLinux = "󰌷 "
+Pop = " "
+Raspbian = " "
+Redhat = " "
+RedHatEnterprise = " "
+RockyLinux = " "
+Redox = "󰀘 "
+Solus = "󰠳 "
+SUSE = " "
+Ubuntu = " "
+Unknown = " "
+Void = " "
+Windows = "󰍲 "
+
+[package]
+symbol = "󰏗 "
+
+[perl]
+symbol = " "
+
+[php]
+symbol = " "
+
+[pijul_channel]
+symbol = " "
+
+[pixi]
+symbol = "󰏗 "
+
+[python]
+symbol = " "
+
+[rlang]
+symbol = "󰟔 "
+
+[ruby]
+symbol = " "
+
+[rust]
+symbol = "󱘗 "
+
+[scala]
+symbol = " "
+
+[swift]
+symbol = " "
+
+[zig]
+symbol = " "
+
+[gradle]
+symbol = " "
