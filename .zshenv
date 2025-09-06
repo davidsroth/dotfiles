@@ -15,6 +15,9 @@ export XDG_STATE_HOME="${XDG_STATE_HOME:-$HOME/.local/state}"
 # Ensure essential binary dirs are in PATH for all shells (incl. non-interactive)
 # This allows commands like nvim/cursor to be discoverable when .zprofile/.zshrc
 # are not sourced (e.g., subprocesses launched by TUIs like lazygit).
+if [ -d "$HOME/.local/bin" ] && [[ ":$PATH:" != *":$HOME/.local/bin:"* ]]; then
+  export PATH="$HOME/.local/bin:$PATH"
+fi
 if [ -d "/opt/homebrew/bin" ] && [[ ":$PATH:" != *":/opt/homebrew/bin:"* ]]; then
   export PATH="/opt/homebrew/bin:$PATH"
 fi
