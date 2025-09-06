@@ -32,7 +32,7 @@ home_symbol = "~"
 
 [git_branch]
 # e.g. "() main "
-symbol = ""
+symbol = ""
 format = "[($symbol)]($style) [$branch]($style) "
 style = "fg:mauve"
 truncation_length = 20
