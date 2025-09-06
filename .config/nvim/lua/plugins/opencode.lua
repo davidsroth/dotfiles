@@ -3,10 +3,12 @@ return {
   dependencies = {
     { "folke/snacks.nvim", opts = { input = { enabled = true } } },
   },
-  ---@type opencode.Opts
-  opts = {
-    -- Add your config here if desired; see lua/opencode/config.lua in the plugin
-  },
+  init = function()
+    ---@type opencode.Opts
+    vim.g.opencode_opts = {
+      -- Add your config here if desired; see lua/opencode/config.lua in the plugin
+    }
+  end,
   keys = {
     {
       "<leader>os",
