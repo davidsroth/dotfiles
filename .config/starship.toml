@@ -31,7 +31,7 @@ home_symbol = "~"
 
 [git_branch]
 # e.g. "() main "
-symbol = " "
+symbol = ""
 format = "[($symbol)]($style) [$branch]($style) "
 style = "purple"
 truncation_length = 20
@@ -102,13 +102,13 @@ disabled = true
 # Show short host (before first dot). Set ssh_only=true to show only on SSH.
 trim_at = "."
 ssh_only = true
-format = "[@$hostname]($style) "
+format = "[@$hostname]($style)"
 style = "bold purple"
 disabled = false
 
 [username]
 # Show username in the prompt (always visible)
-format = "[$user]($style) "
+format = "[$user]($style)"
 show_always = true
 disabled = false
 
