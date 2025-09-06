@@ -10,7 +10,13 @@ if [[ -f ~/zsh-defer/zsh-defer.plugin.zsh ]]; then
     source ~/zsh-defer/zsh-defer.plugin.zsh
 else
     # Fallback if zsh-defer is not available
-    function zsh-defer() { eval "$@" }
+    # Emulate basic interface: `zsh-defer -c 'cmd'` executes immediately
+    function zsh-defer() {
+        if [[ "$1" == "-c" ]]; then
+            shift
+        fi
+        eval "$@"
+    }
 fi
 
 # ============================================================================
