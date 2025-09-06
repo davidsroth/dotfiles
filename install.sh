@@ -321,6 +321,35 @@ install_modern_neovim_linux() {
   fi
 }
 
+# Ensure the modern Neovim we installed takes precedence on PATH
+ensure_nvim_precedence() {
+  local min_ver="0.9.0"
+  local portable_nvim="$HOME/.local/bin/nvim"
+  if [[ -x "$portable_nvim" ]]; then
+    local pv
+    pv="$($portable_nvim --version 2>/dev/null | head -n1 | sed -E 's/^NVIM v?([0-9.]+).*/\1/')"
+    if [[ -n "$pv" ]] && version_ge "$pv" "$min_ver"; then
+      # Make sure it's first on PATH for future shells
+      ensure_user_local_bin_path
+      # If current nvim isn't our portable one, offer to link system-wide
+      local current
+      current="$(command -v nvim 2>/dev/null || true)"
+      if [[ "$current" != "$portable_nvim" ]]; then
+        warning "System nvim ($current) precedes portable Neovim ($portable_nvim)"
+        if command -v sudo >/dev/null 2>&1; then
+          if confirm "Point /usr/local/bin/nvim to portable Neovim?" "y"; then
+            sudo ln -sfn "$portable_nvim" /usr/local/bin/nvim && success "Linked /usr/local/bin/nvim -> $portable_nvim" || warning "Failed to link /usr/local/bin/nvim"
+          else
+            info "Skipping system-wide symlink; you can run portable nvim via $portable_nvim or adjust PATH"
+          fi
+        else
+          info "Run as root to link /usr/local/bin/nvim -> $portable_nvim or add ~/.local/bin earlier in PATH"
+        fi
+      fi
+    fi
+  fi
+}
+
 # Prompt user for confirmation
 # Arguments: prompt message, default value (y/n)
 # Returns: 0 for yes, 1 for no
@@ -863,6 +892,11 @@ post_install_setup() {
     info "Creating .gitconfig.local..."
     cp "$DOTFILES_DIR/.gitconfig.local.example" "$HOME/.gitconfig.local"
     warning "Please edit ~/.gitconfig.local with your personal information"
+  fi
+
+  # Ensure modern Neovim is first on PATH if installed portably
+  if [[ "${OS_FAMILY:-}" == "linux" && "${LINUX_PKG_MGR:-}" == "apt" ]]; then
+    ensure_nvim_precedence
   fi
 }
 
