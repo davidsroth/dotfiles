@@ -3,8 +3,8 @@
 # ============================================================================
 
 # Global settings
-command_timeout = 1500  # ms
-scan_timeout = 30       # ms for scanning files
+command_timeout = 1500       # ms
+scan_timeout = 30            # ms for scanning files
 add_newline = true
 palette = "catppuccin_mocha"
 
@@ -24,7 +24,6 @@ vimcmd_symbol = "[❮](bold fg:green)"
 [directory]
 truncation_length = 3
 truncate_to_repo = true
-format = "[$path]($style)[$read_only]($read_only_style) "
 style = "bold fg:blue"
 read_only = " 󰌾"
 read_only_style = "fg:red"
@@ -33,12 +32,10 @@ home_symbol = "~"
 [git_branch]
 # e.g. "() main "
 symbol = " "
-format = "[($symbol)]($style) [$branch]($style) "
 style = "fg:mauve"
 truncation_length = 20
 
 [git_status]
-format = '([\[$all_status$ahead_behind\]]($style) )'
 style = "fg:red"
 conflicted = "="
 ahead = "⇡${count}"
@@ -52,35 +49,29 @@ renamed = "»"
 deleted = "✘"
 
 [git_state]
-format = '\([$state( $progress_current/$progress_total)]($style)\) '
 style = "fg:peach"
 
 [python]
-format = '[${symbol}${pyenv_prefix}(${version} )(\($virtualenv\) )]($style)'
 symbol = " "
 style = "fg:yellow"
 detect_extensions = ["py"]
 detect_files = ["requirements.txt", "setup.py", "pyproject.toml"]
 
 [nodejs]
-format = "[$symbol($version )]($style)"
 symbol = " "
 style = "fg:green"
 detect_extensions = ["js", "mjs", "cjs", "ts", "mts", "cts"]
 detect_files = ["package.json"]
 
 [rust]
-format = "[$symbol($version )]($style)"
 symbol = "󱘗 "
 style = "fg:red"
 
 [golang]
-format = "[$symbol($version )]($style)"
 symbol = " "
 style = "fg:sky"
 
 [docker_context]
-format = "[$symbol$context]($style) "
 symbol = " "
 style = "fg:blue"
 only_with_files = true
