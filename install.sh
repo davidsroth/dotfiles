@@ -521,12 +521,25 @@ install_additional_tools() {
   # pipx for Python tools
   if ! check_command pipx; then
     info "Installing pipx..."
-    if check_command pip3; then
-      pip3 install --user pipx
-      export PATH="$PATH:$HOME/.local/bin"
-      success "pipx installed"
+    if [[ "${OS_FAMILY:-}" == "linux" && "${LINUX_PKG_MGR:-}" == "apt" ]]; then
+      if command -v sudo >/dev/null 2>&1; then
+        sudo apt-get install -y pipx || warning "Failed to install pipx via apt"
+      else
+        apt-get install -y pipx || warning "Failed to install pipx via apt"
+      fi
+    elif check_command pip3; then
+      # On Debian/Ubuntu, system Python may be PEP 668 externally managed; prefer apt install.
+      # Falling back to pip3 --user install only for non-apt systems.
+      pip3 install --user pipx || warning "pipx installation via pip failed (possibly PEP 668). Consider installing via your OS package manager."
     else
       warning "pip3 not found, skipping pipx installation"
+    fi
+
+    # Ensure user bin path is available for pipx-managed apps
+    export PATH="$PATH:$HOME/.local/bin"
+    if check_command pipx; then
+      pipx ensurepath >/dev/null 2>&1 || true
+      success "pipx installed"
     fi
   else
     [[ "$VERBOSE" == "true" ]] && success "pipx already installed" || true
