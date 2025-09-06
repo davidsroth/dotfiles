@@ -34,8 +34,35 @@ readonly MAGENTA='\033[0;35m'
 readonly NC='\033[0m' # No Color
 
 # Progress tracking
-TOTAL_STEPS=10
+TOTAL_STEPS=0
 CURRENT_STEP=0
+
+# Compute total steps dynamically based on OS
+compute_total_steps() {
+  local total=0
+
+  # macOS-only steps
+  if [[ "${OS_FAMILY:-}" == "macos" ]]; then
+    total=$((total + 1)) # install_xcode_tools
+    total=$((total + 1)) # install_homebrew
+  fi
+
+  # Common steps
+  total=$((total + 1))   # setup_dotfiles_repo
+  total=$((total + 1))   # install packages (apt or brew)
+  total=$((total + 1))   # install_additional_tools
+  total=$((total + 1))   # backup_existing_files
+  total=$((total + 1))   # setup_dotfiles
+  total=$((total + 1))   # post_install_setup
+
+  # macOS defaults step
+  if [[ "${OS_FAMILY:-}" == "macos" ]]; then
+    total=$((total + 1)) # setup_macos_defaults
+  fi
+
+  total=$((total + 1))   # show_summary
+  TOTAL_STEPS=$total
+}
 
 # Timeouts and constants
 readonly XCODE_TIMEOUT=300 # 5 minutes
@@ -791,6 +818,8 @@ main() {
 
   # Start installation
   check_platform
+  # Set progress total after platform detection
+  compute_total_steps
   if [[ "${OS_FAMILY}" == "macos" ]]; then
     install_xcode_tools
     install_homebrew
