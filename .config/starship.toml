@@ -118,7 +118,9 @@ style = "bold purple"
 disabled = false
 
 [username]
-disabled = true
+# Show username in the prompt (always visible)
+show_always = true
+disabled = false
 
 [package]
 disabled = true
