@@ -151,7 +151,8 @@ error() {
 # Arguments: step description
 step() {
   [[ "$QUIET" == "true" ]] && return
-  ((CURRENT_STEP++))
+  # Use pre-increment so arithmetic exit status is success under set -e
+  ((++CURRENT_STEP))
   echo -e "\n${MAGENTA}[$CURRENT_STEP/$TOTAL_STEPS]${NC} $1" | tee -a "$LOG_FILE"
 }
 
