@@ -1008,6 +1008,58 @@ post_install_setup() {
   if [[ "${OS_FAMILY:-}" == "linux" && "${LINUX_PKG_MGR:-}" == "apt" ]]; then
     ensure_nvim_precedence
   fi
+
+  # Nerd Font: Fira Code (for Kitty/tmux glyphs)
+  install_fira_code_nerd_font || true
+}
+
+# Install Fira Code Nerd Font for glyph support in terminals (Kitty/tmux)
+# - macOS: handled via Brewfile (cask "font-fira-code-nerd-font").
+# - Linux: download latest release zip from Nerd Fonts and install to user fonts.
+install_fira_code_nerd_font() {
+  if [[ "$DRY_RUN" == "true" ]]; then
+    info "[DRY RUN] Would ensure Fira Code Nerd Font is installed"
+    return 0
+  fi
+
+  if [[ "${OS_FAMILY:-}" == "macos" ]]; then
+    # Brewfile already includes: cask "font-fira-code-nerd-font"
+    # Nothing to do here; brew bundle will install it.
+    return 0
+  fi
+
+  if [[ "${OS_FAMILY:-}" != "linux" ]]; then
+    return 0
+  fi
+
+  step "Installing Fira Code Nerd Font (Linux)"
+
+  # Check if already present
+  if fc-list | rg -qi "Fira.?Code Nerd Font" >/dev/null 2>&1; then
+    success "Fira Code Nerd Font already available"
+    return 0
+  fi
+
+  local font_dir="$HOME/.local/share/fonts/FiraCodeNerdFont"
+  mkdir -p "$font_dir"
+
+  local tmp_zip="/tmp/InconsolataNerdFont-$$.zip"
+  local url_latest="https://github.com/ryanoasis/nerd-fonts/releases/latest/download/FiraCode.zip"
+
+  info "Downloading Fira Code Nerd Font..."
+  if curl -fL "$url_latest" -o "$tmp_zip"; then
+    info "Installing to $font_dir"
+    if unzip -o -q "$tmp_zip" -d "$font_dir"; then
+      rm -f "$tmp_zip"
+      fc-cache -f "$HOME/.local/share/fonts" >/dev/null 2>&1 || true
+      success "Fira Code Nerd Font installed"
+    else
+      warning "Failed to extract Nerd Font archive"
+      rm -f "$tmp_zip" || true
+    fi
+  else
+    warning "Download failed (possibly offline or blocked). You can manually install from: $url_latest"
+  fi
 }
 
 # Apply macOS system preferences if script exists

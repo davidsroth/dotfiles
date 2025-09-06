@@ -92,7 +92,7 @@ cask "microsoft-teams"
 cask "spotify"
 
 # Fonts
-cask "font-inconsolata-nerd-font"
+cask "font-fira-code-nerd-font"
 
 # Mac App Store Apps (requires mas)
 # ==================================

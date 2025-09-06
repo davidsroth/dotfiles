@@ -189,6 +189,11 @@ zsh -l -c 'echo PATH=$PATH | cut -c1-200'
 
 ## Troubleshooting
 
+### Fonts (Kitty/tmux glyphs)
+
+- macOS: The Brewfile installs `font-fira-code-nerd-font` (auto-taps `homebrew/cask-fonts`).
+- Linux: The installer downloads and installs Fira Code Nerd Font to `~/.local/share/fonts/FiraCodeNerdFont` and refreshes the font cache. This enables Nerd Font icons in Kitty and tmux.
+
 ### brew bundle failures
 
 - Deprecated taps: Remove `tap "homebrew/services"` and `tap "zen-browser/zen-browser"` from `Brewfile`. The installer no longer relies on these; `zen-browser` cask installs from core.
