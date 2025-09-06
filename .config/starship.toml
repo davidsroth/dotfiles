@@ -6,50 +6,40 @@
 command_timeout = 1500  # ms
 scan_timeout = 30       # ms for scanning files
 add_newline = true
+palette = "catppuccin_mocha"
 
-# Format - only show essential modules
+# Format - shape prompt as: user@host in dir (BRANCH_SYMBOL) branch [status]
 format = """
-$username\
-$hostname\
-$directory\
-$git_branch\
-$git_state\
-$git_status\
-$python\
-$nodejs\
-$rust\
-$golang\
-$docker_context\
-$line_break\
-$character"""
+$username$hostname in $directory$git_branch$git_status$line_break$character"""
 
 # ============================================================================
 # Module Configurations
 # ============================================================================
 
 [character]
-success_symbol = "[❯](bold green)"
-error_symbol = "[❯](bold red)"
-vimcmd_symbol = "[❮](bold green)"
+success_symbol = "[❯](bold fg:green)"
+error_symbol = "[❯](bold fg:red)"
+vimcmd_symbol = "[❮](bold fg:green)"
 
 [directory]
 truncation_length = 3
 truncate_to_repo = true
 format = "[$path]($style)[$read_only]($read_only_style) "
-style = "cyan bold"
+style = "bold fg:blue"
 read_only = " 🔒"
-read_only_style = "red"
+read_only_style = "fg:red"
 home_symbol = "~"
 
 [git_branch]
-format = "[$symbol$branch(:$remote_branch)]($style) "
-symbol = " "
-style = "purple"
+# e.g. "() main "
+symbol = ""
+format = "[($symbol)]($style) [$branch]($style) "
+style = "fg:mauve"
 truncation_length = 20
 
 [git_status]
 format = '([\[$all_status$ahead_behind\]]($style) )'
-style = "red"
+style = "fg:red"
 conflicted = "="
 ahead = "⇡${count}"
 behind = "⇣${count}"
@@ -63,36 +53,36 @@ deleted = "✘"
 
 [git_state]
 format = '\([$state( $progress_current/$progress_total)]($style)\) '
-style = "yellow"
+style = "fg:peach"
 
 [python]
 format = '[${symbol}${pyenv_prefix}(${version} )(\($virtualenv\) )]($style)'
 symbol = " "
-style = "yellow"
+style = "fg:yellow"
 detect_extensions = ["py"]
 detect_files = ["requirements.txt", "setup.py", "pyproject.toml"]
 
 [nodejs]
 format = "[$symbol($version )]($style)"
 symbol = " "
-style = "green"
+style = "fg:green"
 detect_extensions = ["js", "mjs", "cjs", "ts", "mts", "cts"]
 detect_files = ["package.json"]
 
 [rust]
 format = "[$symbol($version )]($style)"
 symbol = " "
-style = "red"
+style = "fg:red"
 
 [golang]
 format = "[$symbol($version )]($style)"
 symbol = " "
-style = "cyan"
+style = "fg:sky"
 
 [docker_context]
 format = "[$symbol$context]($style) "
 symbol = " "
-style = "blue"
+style = "fg:blue"
 only_with_files = true
 detect_files = ["docker-compose.yml", "docker-compose.yaml", "Dockerfile"]
 
@@ -113,12 +103,17 @@ disabled = true
 # Show short host (before first dot). Set ssh_only=true to show only on SSH.
 trim_at = "."
 ssh_only = true
-format = "[$hostname]($style) "
-style = "bold purple"
+format = "[@$hostname]($style)"
+style = "bold fg:mauve"
 disabled = false
 
 [username]
-disabled = true
+# Show username in the prompt (always visible)
+format = "[$user]($style)"
+style_root = "bold fg:red"
+style_user = "bold fg:yellow"
+show_always = true
+disabled = false
 
 [package]
 disabled = true
@@ -128,3 +123,35 @@ disabled = true
 
 [battery]
 disabled = true
+
+# ============================================================================
+# Palette - Catppuccin Mocha
+# ============================================================================
+
+[palettes.catppuccin_mocha]
+text = "#cdd6f4"
+subtext1 = "#bac2de"
+subtext0 = "#a6adc8"
+overlay2 = "#9399b2"
+overlay1 = "#7f849c"
+overlay0 = "#6c7086"
+surface2 = "#585b70"
+surface1 = "#45475a"
+surface0 = "#313244"
+base = "#1e1e2e"
+mantle = "#181825"
+crust = "#11111b"
+blue = "#89b4fa"
+lavender = "#b4befe"
+sapphire = "#74c7ec"
+sky = "#89dceb"
+teal = "#94e2d5"
+green = "#a6e3a1"
+yellow = "#f9e2af"
+peach = "#fab387"
+maroon = "#eba0ac"
+red = "#f38ba8"
+mauve = "#cba6f7"
+pink = "#f5c2e7"
+flamingo = "#f2cdcd"
+rosewater = "#f5e0dc"

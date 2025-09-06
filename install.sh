@@ -34,8 +34,35 @@ readonly MAGENTA='\033[0;35m'
 readonly NC='\033[0m' # No Color
 
 # Progress tracking
-TOTAL_STEPS=10
+TOTAL_STEPS=0
 CURRENT_STEP=0
+
+# Compute total steps dynamically based on OS
+compute_total_steps() {
+  local total=0
+
+  # macOS-only steps
+  if [[ "${OS_FAMILY:-}" == "macos" ]]; then
+    total=$((total + 1)) # install_xcode_tools
+    total=$((total + 1)) # install_homebrew
+  fi
+
+  # Common steps
+  total=$((total + 1))   # setup_dotfiles_repo
+  total=$((total + 1))   # install packages (apt or brew)
+  total=$((total + 1))   # install_additional_tools
+  total=$((total + 1))   # backup_existing_files
+  total=$((total + 1))   # setup_dotfiles
+  total=$((total + 1))   # post_install_setup
+
+  # macOS defaults step
+  if [[ "${OS_FAMILY:-}" == "macos" ]]; then
+    total=$((total + 1)) # setup_macos_defaults
+  fi
+
+  total=$((total + 1))   # show_summary
+  TOTAL_STEPS=$total
+}
 
 # Timeouts and constants
 readonly XCODE_TIMEOUT=300 # 5 minutes
@@ -161,6 +188,166 @@ step() {
 # Returns: 0 if exists, 1 if not
 check_command() {
   command -v "$1" &>/dev/null
+}
+
+# Ensure ~/.local/bin is in PATH for current session and persistently
+ensure_user_local_bin_path() {
+  mkdir -p "$HOME/.local/bin"
+  # Current session
+  case ":$PATH:" in
+    *:"$HOME/.local/bin":* ) :;;
+    * ) export PATH="$HOME/.local/bin:$PATH";;
+  esac
+
+  # Persist for future shells (avoid duplicates)
+  if [[ -f "$HOME/.zprofile" ]]; then
+    if ! grep -qs '^[^#]*\.local/bin' "$HOME/.zprofile"; then
+      echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$HOME/.zprofile"
+    fi
+  fi
+  if [[ -f "$HOME/.profile" || ! -e "$HOME/.profile" ]]; then
+    # Create if missing
+    touch "$HOME/.profile"
+    if ! grep -qs '^[^#]*\.local/bin' "$HOME/.profile"; then
+      echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$HOME/.profile"
+    fi
+  fi
+}
+
+# Compare two semantic versions using dpkg if available, otherwise sort -V
+# Usage: version_ge A B  -> returns 0 if A >= B
+version_ge() {
+  local a="$1" b="$2"
+  if check_command dpkg; then
+    dpkg --compare-versions "$a" ge "$b"
+    return $?
+  fi
+  # Fallback with sort -V
+  [[ "$(printf '%s\n%s\n' "$b" "$a" | sort -V | tail -n1)" == "$a" ]]
+}
+
+# Get NVIM version (e.g., 0.9.5) or empty
+get_nvim_version() {
+  if check_command nvim; then
+    nvim --version 2>/dev/null | head -n1 | sed -E 's/^NVIM v?([0-9.]+).*/\1/'
+  fi
+}
+
+# Ensure Debian backports repo is present for given codename
+ensure_debian_backports() {
+  local codename="$1"
+  local sources_file="/etc/apt/sources.list.d/${codename}-backports.list"
+  if ! grep -Rqs "${codename}-backports" /etc/apt/sources.list /etc/apt/sources.list.d 2>/dev/null; then
+    info "Adding ${codename}-backports repository"
+    local line="deb http://deb.debian.org/debian ${codename}-backports main contrib non-free non-free-firmware"
+    if command -v sudo >/dev/null 2>&1; then
+      echo "$line" | sudo tee "$sources_file" >/dev/null || warning "Failed to write backports list"
+      sudo apt-get update -y || warning "apt update failed after adding backports"
+    else
+      echo "$line" | tee "$sources_file" >/dev/null || warning "Failed to write backports list"
+      apt-get update -y || warning "apt update failed after adding backports"
+    fi
+  fi
+}
+
+# Install a modern Neovim on Debian/Ubuntu systems
+install_modern_neovim_linux() {
+  local min_ver="0.9.0"
+  local current_ver
+  current_ver="$(get_nvim_version || true)"
+  if [[ -n "$current_ver" ]] && version_ge "$current_ver" "$min_ver"; then
+    [[ "$VERBOSE" == "true" ]] && success "Neovim $current_ver already >= $min_ver" || true
+    return 0
+  fi
+
+  # Detect Debian codename if present
+  local id codename
+  if [[ -r /etc/os-release ]]; then
+    # shellcheck disable=SC1091
+    . /etc/os-release
+    id="${ID:-}"
+    codename="${VERSION_CODENAME:-}"
+  fi
+
+  if [[ "$id" == "debian" && -n "$codename" ]]; then
+    info "Installing Neovim from ${codename}-backports"
+    ensure_debian_backports "$codename"
+    if command -v sudo >/dev/null 2>&1; then
+      sudo apt-get install -y -t "${codename}-backports" neovim || warning "Failed to install neovim from backports"
+    else
+      apt-get install -y -t "${codename}-backports" neovim || warning "Failed to install neovim from backports"
+    fi
+    current_ver="$(get_nvim_version || true)"
+    if [[ -n "$current_ver" ]] && version_ge "$current_ver" "$min_ver"; then
+      success "Neovim $current_ver installed from backports"
+      return 0
+    else
+      warning "Backports did not yield >= $min_ver (got: ${current_ver:-none}). Falling back to portable build."
+    fi
+  fi
+
+  # Fallback: install latest stable portable build to ~/.local
+  info "Installing Neovim portable build (stable) to ~/.local"
+  local url="https://github.com/neovim/neovim/releases/download/stable/nvim-linux64.tar.gz"
+  local tmp_tar="/tmp/nvim-linux64.tar.gz"
+  ensure_user_local_bin_path
+  if curl -fsSL "$url" -o "$tmp_tar"; then
+    # Extract to a versioned dir then atomically move
+    rm -rf "$HOME/.local/nvim-linux64.new"
+    mkdir -p "$HOME/.local"
+    tar -C "$HOME/.local" -xzf "$tmp_tar" || {
+      warning "Failed to extract Neovim tarball"
+      rm -f "$tmp_tar"
+      return 1
+    }
+    rm -f "$tmp_tar"
+    # Ensure symlink in ~/.local/bin and PATH precedence
+    ln -sfn "$HOME/.local/nvim-linux64/bin/nvim" "$HOME/.local/bin/nvim"
+    ensure_user_local_bin_path
+    current_ver="$(get_nvim_version || true)"
+    if [[ -n "$current_ver" ]]; then
+      success "Neovim $current_ver installed to ~/.local/bin/nvim"
+      # If another nvim still takes precedence, inform the user
+      if [[ "$(command -v nvim || true)" != "$HOME/.local/bin/nvim" ]]; then
+        warning "Another nvim is ahead of ~/.local/bin in PATH ($(command -v nvim 2>/dev/null || echo unknown))"
+        info "Open a new shell or run: source ~/.zprofile 2>/dev/null || true; source ~/.profile 2>/dev/null || true"
+      fi
+    else
+      warning "Neovim installation finished but version check failed"
+    fi
+  else
+    warning "Failed to download Neovim portable build"
+    return 1
+  fi
+}
+
+# Ensure the modern Neovim we installed takes precedence on PATH
+ensure_nvim_precedence() {
+  local min_ver="0.9.0"
+  local portable_nvim="$HOME/.local/bin/nvim"
+  if [[ -x "$portable_nvim" ]]; then
+    local pv
+    pv="$($portable_nvim --version 2>/dev/null | head -n1 | sed -E 's/^NVIM v?([0-9.]+).*/\1/')"
+    if [[ -n "$pv" ]] && version_ge "$pv" "$min_ver"; then
+      # Make sure it's first on PATH for future shells
+      ensure_user_local_bin_path
+      # If current nvim isn't our portable one, offer to link system-wide
+      local current
+      current="$(command -v nvim 2>/dev/null || true)"
+      if [[ "$current" != "$portable_nvim" ]]; then
+        warning "System nvim ($current) precedes portable Neovim ($portable_nvim)"
+        if command -v sudo >/dev/null 2>&1; then
+          if confirm "Point /usr/local/bin/nvim to portable Neovim?" "y"; then
+            sudo ln -sfn "$portable_nvim" /usr/local/bin/nvim && success "Linked /usr/local/bin/nvim -> $portable_nvim" || warning "Failed to link /usr/local/bin/nvim"
+          else
+            info "Skipping system-wide symlink; you can run portable nvim via $portable_nvim or adjust PATH"
+          fi
+        else
+          info "Run as root to link /usr/local/bin/nvim -> $portable_nvim or add ~/.local/bin earlier in PATH"
+        fi
+      fi
+    fi
+  fi
 }
 
 # Prompt user for confirmation
@@ -347,7 +534,7 @@ install_linux_packages() {
   # Essential packages (names adjusted for Debian/Ubuntu)
   # Note: fd-find provides 'fdfind', bat provides 'batcat'. We create shims later.
   local packages=(
-    zsh stow git neovim tmux ripgrep fzf fd-find bat build-essential
+    zsh stow git tmux ripgrep fzf fd-find bat build-essential
     gawk grep sed rsync python3-pip python3-venv ca-certificates curl
     unzip zip jq git-lfs
   )
@@ -360,7 +547,7 @@ install_linux_packages() {
   fi
 
   # Create ~/.local/bin and add shims for fd/bat if needed
-  mkdir -p "$HOME/.local/bin"
+  ensure_user_local_bin_path
   if command -v fdfind >/dev/null 2>&1; then
     ln -sf "$(command -v fdfind)" "$HOME/.local/bin/fd" || true
   fi
@@ -377,6 +564,9 @@ install_linux_packages() {
   fi
 
   success "Apt package installation completed (with possible warnings above)"
+
+  # Ensure a modern Neovim (>= 0.9) is installed
+  install_modern_neovim_linux || true
 }
 
 # Install packages using Brewfile if present
@@ -521,12 +711,25 @@ install_additional_tools() {
   # pipx for Python tools
   if ! check_command pipx; then
     info "Installing pipx..."
-    if check_command pip3; then
-      pip3 install --user pipx
-      export PATH="$PATH:$HOME/.local/bin"
-      success "pipx installed"
+    if [[ "${OS_FAMILY:-}" == "linux" && "${LINUX_PKG_MGR:-}" == "apt" ]]; then
+      if command -v sudo >/dev/null 2>&1; then
+        sudo apt-get install -y pipx || warning "Failed to install pipx via apt"
+      else
+        apt-get install -y pipx || warning "Failed to install pipx via apt"
+      fi
+    elif check_command pip3; then
+      # On Debian/Ubuntu, system Python may be PEP 668 externally managed; prefer apt install.
+      # Falling back to pip3 --user install only for non-apt systems.
+      pip3 install --user pipx || warning "pipx installation via pip failed (possibly PEP 668). Consider installing via your OS package manager."
     else
       warning "pip3 not found, skipping pipx installation"
+    fi
+
+    # Ensure user bin path is available for pipx-managed apps (current + persistent)
+    ensure_user_local_bin_path
+    if check_command pipx; then
+      pipx ensurepath >/dev/null 2>&1 || true
+      success "pipx installed"
     fi
   else
     [[ "$VERBOSE" == "true" ]] && success "pipx already installed" || true
@@ -690,6 +893,11 @@ post_install_setup() {
     cp "$DOTFILES_DIR/.gitconfig.local.example" "$HOME/.gitconfig.local"
     warning "Please edit ~/.gitconfig.local with your personal information"
   fi
+
+  # Ensure modern Neovim is first on PATH if installed portably
+  if [[ "${OS_FAMILY:-}" == "linux" && "${LINUX_PKG_MGR:-}" == "apt" ]]; then
+    ensure_nvim_precedence
+  fi
 }
 
 # Apply macOS system preferences if script exists
@@ -778,6 +986,8 @@ main() {
 
   # Start installation
   check_platform
+  # Set progress total after platform detection
+  compute_total_steps
   if [[ "${OS_FAMILY}" == "macos" ]]; then
     install_xcode_tools
     install_homebrew
