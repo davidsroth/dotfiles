@@ -190,6 +190,30 @@ check_command() {
   command -v "$1" &>/dev/null
 }
 
+# Ensure ~/.local/bin is in PATH for current session and persistently
+ensure_user_local_bin_path() {
+  mkdir -p "$HOME/.local/bin"
+  # Current session
+  case ":$PATH:" in
+    *:"$HOME/.local/bin":* ) :;;
+    * ) export PATH="$HOME/.local/bin:$PATH";;
+  esac
+
+  # Persist for future shells (avoid duplicates)
+  if [[ -f "$HOME/.zprofile" ]]; then
+    if ! grep -qs '^[^#]*\.local/bin' "$HOME/.zprofile"; then
+      echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$HOME/.zprofile"
+    fi
+  fi
+  if [[ -f "$HOME/.profile" || ! -e "$HOME/.profile" ]]; then
+    # Create if missing
+    touch "$HOME/.profile"
+    if ! grep -qs '^[^#]*\.local/bin' "$HOME/.profile"; then
+      echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$HOME/.profile"
+    fi
+  fi
+}
+
 # Compare two semantic versions using dpkg if available, otherwise sort -V
 # Usage: version_ge A B  -> returns 0 if A >= B
 version_ge() {
@@ -266,7 +290,7 @@ install_modern_neovim_linux() {
   info "Installing Neovim portable build (stable) to ~/.local"
   local url="https://github.com/neovim/neovim/releases/download/stable/nvim-linux64.tar.gz"
   local tmp_tar="/tmp/nvim-linux64.tar.gz"
-  mkdir -p "$HOME/.local/bin"
+  ensure_user_local_bin_path
   if curl -fsSL "$url" -o "$tmp_tar"; then
     # Extract to a versioned dir then atomically move
     rm -rf "$HOME/.local/nvim-linux64.new"
@@ -277,12 +301,17 @@ install_modern_neovim_linux() {
       return 1
     }
     rm -f "$tmp_tar"
-    # Ensure symlink in ~/.local/bin
+    # Ensure symlink in ~/.local/bin and PATH precedence
     ln -sfn "$HOME/.local/nvim-linux64/bin/nvim" "$HOME/.local/bin/nvim"
-    export PATH="$HOME/.local/bin:$PATH"
+    ensure_user_local_bin_path
     current_ver="$(get_nvim_version || true)"
     if [[ -n "$current_ver" ]]; then
       success "Neovim $current_ver installed to ~/.local/bin/nvim"
+      # If another nvim still takes precedence, inform the user
+      if [[ "$(command -v nvim || true)" != "$HOME/.local/bin/nvim" ]]; then
+        warning "Another nvim is ahead of ~/.local/bin in PATH ($(command -v nvim 2>/dev/null || echo unknown))"
+        info "Open a new shell or run: source ~/.zprofile 2>/dev/null || true; source ~/.profile 2>/dev/null || true"
+      fi
     else
       warning "Neovim installation finished but version check failed"
     fi
@@ -489,7 +518,7 @@ install_linux_packages() {
   fi
 
   # Create ~/.local/bin and add shims for fd/bat if needed
-  mkdir -p "$HOME/.local/bin"
+  ensure_user_local_bin_path
   if command -v fdfind >/dev/null 2>&1; then
     ln -sf "$(command -v fdfind)" "$HOME/.local/bin/fd" || true
   fi
@@ -667,8 +696,8 @@ install_additional_tools() {
       warning "pip3 not found, skipping pipx installation"
     fi
 
-    # Ensure user bin path is available for pipx-managed apps
-    export PATH="$PATH:$HOME/.local/bin"
+    # Ensure user bin path is available for pipx-managed apps (current + persistent)
+    ensure_user_local_bin_path
     if check_command pipx; then
       pipx ensurepath >/dev/null 2>&1 || true
       success "pipx installed"
