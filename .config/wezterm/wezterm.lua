@@ -237,6 +237,18 @@ config.keys = {
 		mods = "CMD",
 		action = wezterm.action.SendKey({ key = "g", mods = "CTRL" }),
 	},
+
+	-- Switch tmux windows with Cmd+[ / Cmd+] by sending Alt+[ / Alt+]
+	{
+		key = "[",
+		mods = "CMD",
+		action = wezterm.action.SendKey({ key = "[", mods = "ALT" }),
+	},
+	{
+		key = "]",
+		mods = "CMD",
+		action = wezterm.action.SendKey({ key = "]", mods = "ALT" }),
+	},
 }
 
 -- ============================================================================
