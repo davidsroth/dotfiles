@@ -37,7 +37,7 @@ hs.pathwatcher.new(hs.configdir, hs.reload):start()
 hs.application.enableSpotlightForNameSearches(true)
 
 local launchKeys = {
-	i = "kitty",
+	i = "WezTerm",
 	m = "Slack",
 	s = "Spotify",
 	c = "Sunsama",
