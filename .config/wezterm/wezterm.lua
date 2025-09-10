@@ -14,16 +14,7 @@ local config = wezterm.config_builder and wezterm.config_builder() or {}
 -- Appearance & Theme Configuration
 -- ============================================================================
 
--- Dynamic theme switching based on system appearance
-local function scheme_for_appearance(appearance)
-	if appearance:find("Dark") then
-		return "Catppuccin Mocha"
-	else
-		return "Catppuccin Latte"
-	end
-end
-
--- Use dynamic theme switching or fallback to your preferred theme
+-- Keep dark mode only
 config.color_scheme = "Catppuccin Mocha"
 
 -- ============================================================================
@@ -32,16 +23,14 @@ config.color_scheme = "Catppuccin Mocha"
 
 -- Primary font configuration with fallbacks for Nerd Font glyphs
 config.font = wezterm.font_with_fallback({
-  "Monaco",
-  "JetBrainsMono Nerd Font Mono",
-  "FiraCode Nerd Font Mono",
-  "Menlo",
+	"Fira Code Retina",
+	"Monaco",
+	"JetBrainsMono Nerd Font Mono",
+	"Menlo",
 })
 config.font_size = 12.0
 
 -- Font rendering optimizations
-config.freetype_load_target = "Light"
-config.freetype_render_target = "HorizontalLcd"
 
 -- Disable missing glyph warnings (you had this)
 config.warn_about_missing_glyphs = false
@@ -52,7 +41,7 @@ config.warn_about_missing_glyphs = false
 
 -- Use WebGPU for better performance
 config.front_end = "WebGpu"
-config.max_fps = 60
+config.max_fps = 120
 
 -- ============================================================================
 -- Window & Tab Configuration
