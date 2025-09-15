@@ -42,10 +42,8 @@ local launchKeys = {
 	s = "Spotify",
 	c = "Sunsama",
 	f = "Finder",
-	b = "1Password",
 	u = "Zen",
 	v = "Cursor",
-	d = "DataGrip",
 	t = "Microsoft Teams",
 }
 
