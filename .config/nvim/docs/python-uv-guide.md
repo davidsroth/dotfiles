@@ -35,7 +35,7 @@
 
 ### Formatting & Linting
 - Auto-format on save with ruff
-- Real-time linting with ruff-lsp
+- Diagnostics provided by Pyright
 - `<leader>cf` - Format buffer
 
 ## Troubleshooting
