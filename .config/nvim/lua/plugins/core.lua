@@ -22,7 +22,7 @@ return {
     },
   },
   {
-    "echasnovski/mini.surround",
+    "nvim-mini/mini.surround",
     opts = {
       mappings = {
         add = "gsa",
@@ -35,8 +35,8 @@ return {
       },
     },
   },
-  { "echasnovski/mini.ai", version = false },
-  { "echasnovski/mini.bufremove", version = false },
+  { "nvim-mini/mini.ai", version = false },
+  { "nvim-mini/mini.bufremove", version = false },
   {
     "folke/todo-comments.nvim",
     event = "BufRead",

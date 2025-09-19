@@ -1,9 +1,8 @@
 return {
   {
-    "echasnovski/mini.animate",
+    "nvim-mini/mini.animate",
     enabled = function()
       return not vim.g.vscode
     end,
   },
 }
-
