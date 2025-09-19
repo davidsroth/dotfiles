@@ -16,6 +16,8 @@ return {
         typescriptreact = true,
         javascriptreact = true,
         json = true,
+        markdown = true,
+        telekasten = true,
         toml = true,
         yaml = true,
       }
@@ -33,6 +35,22 @@ return {
       opts = opts or {}
       -- Keep default format options used by LazyVim when formatting
       opts.default_format_opts = { timeout_ms = 500, lsp_fallback = true }
+
+      opts.formatters_by_ft = opts.formatters_by_ft or {}
+
+      local markdown_default = { "prettierd", "prettier" }
+      local markdown_formatters = opts.formatters_by_ft.markdown or markdown_default
+      opts.formatters_by_ft.markdown = markdown_formatters
+      opts.formatters_by_ft["markdown.mdx"] = opts.formatters_by_ft["markdown.mdx"] or markdown_formatters
+      if opts.formatters_by_ft.telekasten == nil then
+        opts.formatters_by_ft.telekasten = function()
+          local configured = opts.formatters_by_ft.markdown
+          if type(configured) == "function" then
+            configured = configured()
+          end
+          return configured or markdown_default
+        end
+      end
       return opts
     end,
   },
