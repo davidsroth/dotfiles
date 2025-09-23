@@ -75,17 +75,11 @@ vim.opt.fillchars = { fold = " " } -- Clean fold fill character
 -- Diagnostic Configuration
 -- ============================================================================
 
--- Show only errors by default (hide warnings)
+-- Show all diagnostics by default; use ToggleWarnings to narrow to errors only
 vim.diagnostic.config({
-  virtual_text = {
-    severity = { min = vim.diagnostic.severity.ERROR },
-  },
-  signs = {
-    severity = { min = vim.diagnostic.severity.ERROR },
-  },
-  underline = {
-    severity = { min = vim.diagnostic.severity.ERROR },
-  },
+  virtual_text = true,
+  signs = true,
+  underline = true,
   update_in_insert = false,
   severity_sort = true,
 })
