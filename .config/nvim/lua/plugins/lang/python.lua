@@ -101,14 +101,46 @@ return {
           end
 
           if is_poetry_project then
-            -- Try to get Poetry env path
-            local handle = io.popen("cd '" .. root_dir .. "' && poetry env info --path 2>/dev/null")
-            if handle then
-              local result = handle:read("*a")
-              handle:close()
-              local venv_path = result:gsub("^%s+", ""):gsub("%s+$", "")
-              if venv_path ~= "" and vim.fn.isdirectory(venv_path) == 1 then
-                return venv_path
+            if vim.fn.executable("poetry") ~= 1 then
+              return nil
+            end
+
+            local function trim(str)
+              return (str:gsub("^%s+", ""):gsub("%s+$", ""))
+            end
+
+            if vim.system then
+              local res = vim.system({ "poetry", "env", "info", "--path" }, {
+                cwd = root_dir,
+                text = true,
+              }):wait()
+              if res and res.code == 0 and res.stdout then
+                local venv_path = trim(res.stdout)
+                if venv_path ~= "" and vim.fn.isdirectory(venv_path) == 1 then
+                  return venv_path
+                end
+              end
+            else
+              local stdout = {}
+              local job = vim.fn.jobstart({ "poetry", "env", "info", "--path" }, {
+                cwd = root_dir,
+                stdout_buffered = true,
+                on_stdout = function(_, data)
+                  if not data then
+                    return
+                  end
+                  for _, line in ipairs(data) do
+                    if line ~= nil then
+                      table.insert(stdout, line)
+                    end
+                  end
+                end,
+              })
+              if job > 0 and vim.fn.jobwait({ job })[1] == 0 then
+                local venv_path = trim(table.concat(stdout, "\n"))
+                if venv_path ~= "" and vim.fn.isdirectory(venv_path) == 1 then
+                  return venv_path
+                end
               end
             end
           end
