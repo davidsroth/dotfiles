@@ -88,7 +88,7 @@ require("lazy").setup({
       reset = true, -- Reset runtime path for better performance
       paths = {}, -- Add custom runtime paths if needed
       disabled_plugins = {
-        -- Disable built-in plugins for better performance
+        -- Disable slow rarely used built-ins
         "gzip",
         "matchit",
         "matchparen",
@@ -97,13 +97,6 @@ require("lazy").setup({
         "tohtml",
         "tutor",
         "zipPlugin",
-        "rplugin", -- Remote plugin support (rarely needed)
-        "syntax", -- Syntax highlighting (replaced by Treesitter)
-        "synmenu", -- Syntax menu
-        "optwin", -- Options window
-        "compiler", -- Compiler support
-        "bugreport", -- Bug report
-        "ftplugin", -- File type plugins (handled by LazyVim)
       },
     },
   },
