@@ -1,0 +1,6 @@
+{
+  // Disable line-length rule for all markdownlint runs
+  "config": {
+    "MD013": false
+  }
+}

@@ -22,6 +22,34 @@ return {
     end,
     config = function(_, opts)
       require("telekasten").setup(opts)
+
+      local group = vim.api.nvim_create_augroup("telekasten_markdown_ft", { clear = true })
+      vim.api.nvim_create_autocmd("FileType", {
+        group = group,
+        pattern = "telekasten",
+        callback = function(event)
+          local buf = event.buf
+          if vim.bo[buf].filetype ~= "telekasten" then
+            return
+          end
+
+          vim.schedule(function()
+            if not vim.api.nvim_buf_is_valid(buf) then
+              return
+            end
+            if vim.bo[buf].filetype ~= "telekasten" then
+              return
+            end
+            vim.api.nvim_set_option_value("filetype", "telekasten.markdown", { buf = buf })
+          end)
+        end,
+      })
+
+      pcall(function()
+        local language = require("nvim-treesitter.language")
+        language.register("markdown", "telekasten")
+        language.register("markdown", "telekasten.markdown")
+      end)
     end,
     keys = {
       { "<leader>z",  "<cmd>Telekasten panel<cr>",          desc = "Telekasten Panel" },
