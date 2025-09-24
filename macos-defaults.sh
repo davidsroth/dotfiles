@@ -57,10 +57,18 @@ success "Reduced transparency"
 
 info "Configuring Trackpad settings..."
 
-# Enable three finger drag
-defaults write com.apple.driver.AppleBluetoothMultitouch.trackpad TrackpadThreeFingerDrag -bool true
-defaults write com.apple.AppleMultitouchTrackpad TrackpadThreeFingerDrag -bool true
-success "Enabled three finger drag"
+# Disable three finger drag; prefer system gestures for Mission Control instead
+defaults write com.apple.driver.AppleBluetoothMultitouch.trackpad TrackpadThreeFingerDrag -bool false
+defaults write com.apple.AppleMultitouchTrackpad TrackpadThreeFingerDrag -bool false
+success "Disabled three finger drag"
+
+# Map three finger swipe to Mission Control/App Exposé
+defaults write com.apple.driver.AppleBluetoothMultitouch.trackpad TrackpadThreeFingerVertSwipeGesture -int 2
+defaults write com.apple.AppleMultitouchTrackpad TrackpadThreeFingerVertSwipeGesture -int 2
+defaults write com.apple.driver.AppleBluetoothMultitouch.trackpad TrackpadThreeFingerHorizSwipeGesture -int 2
+defaults write com.apple.AppleMultitouchTrackpad TrackpadThreeFingerHorizSwipeGesture -int 2
+defaults write com.apple.dock showMissionControlGestureEnabled -int 1
+success "Enabled three finger Mission Control gesture"
 
 # =============================================================================
 # Keyboard
