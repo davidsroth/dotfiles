@@ -87,8 +87,8 @@ alias dpsa='docker ps -a'
 
 # Homebrew maintenance (guarded)
 if command -v brew >/dev/null 2>&1; then
-  alias brwu='brew update && brew upgrade && brew cleanup'
-  alias brewup='brew update && brew upgrade && brew cleanup'
+  alias brwu='brew update && brew upgrade && brew cleanup && rm -f ~/.cache/zsh/brew-shellenv.zsh ~/.cache/zsh/gnu-paths.zsh && echo "✓ Regenerated zsh brew caches"'
+  alias brewup='brew update && brew upgrade && brew cleanup && rm -f ~/.cache/zsh/brew-shellenv.zsh ~/.cache/zsh/gnu-paths.zsh && echo "✓ Regenerated zsh brew caches"'
 fi
 
 # Quick clear
@@ -165,6 +165,8 @@ if [ -n "$ZSH_VERSION" ] && command -v pbcopy >/dev/null 2>&1; then
   alias -g CT='|& tee >(pbcopy)'
   # Print to screen; copy "<CMD> -> <RESULT>" to clipboard
   alias -g CTC='|& _ctc_capture'
+  # Print to screen; copy "<CMD> -> <RESULT>" to clipboard AND log to /tmp
+  alias -g CTCT='|& _ctct_capture_to_log'
 fi
 
 # ============================================================================

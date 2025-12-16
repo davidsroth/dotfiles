@@ -66,10 +66,10 @@ This repo uses GNU Stow to create symlinks into your home directory. A `.stowrc`
 
 ```bash
 # Preview the links (no changes)
-stow -n -v .
+stow -n -v core zsh git-config
 
 # Create or update links
-stow -R .
+stow -R core zsh git-config
 ```
 
 Files and directories that should not be linked (e.g., scripts, docs) are excluded via `.stow-local-ignore`.
@@ -87,7 +87,7 @@ brew install stow
 
 # Create symlinks
 cd ~/dotfiles
-stow .
+stow core zsh git-config
 ```
 
 ## Key Features
@@ -133,6 +133,9 @@ stow .
   - Multiple aliases and custom settings
   - LFS support
 - **Lazygit** - Terminal UI for Git
+- **Opencode** - AI coding assistant integration
+  - Neovim plugin
+  - Shell aliases and tools
 - Python management with **pyenv**
 - Node.js management with **nvm** (lazy-loaded)
 
@@ -140,21 +143,24 @@ stow .
 
 ```
 dotfiles/
-├── .config/               # XDG config directory
-│   ├── git/              # Git configuration
-│   ├── kitty/            # Kitty terminal config
-│   ├── lazygit/          # Lazygit configuration
-│   ├── nvim/             # Neovim configuration
-│   ├── shell/            # Modular shell configs
-│   ├── starship.toml     # Starship prompt
-│   ├── tmux/             # tmux configuration
-│   └── wezterm/          # WezTerm configuration
-├── .hammerspoon/         # Hammerspoon automation
-├── .claude/              # Claude Code settings
-├── .zshrc               # Main Zsh config
-├── .zshenv              # Environment variables
-├── .zprofile            # Login shell PATH
-├── .gitconfig           # Git configuration
+├── core/
+│   ├── .config/           # XDG config directory
+│   │   ├── git/          # Git configuration
+│   │   ├── kitty/        # Kitty terminal config
+│   │   ├── lazygit/      # Lazygit configuration
+│   │   ├── nvim/         # Neovim configuration
+│   │   ├── shell/        # Modular shell configs
+│   │   ├── starship.toml # Starship prompt
+│   │   ├── tmux/         # tmux configuration
+│   │   └── wezterm/      # WezTerm configuration
+│   └── .hammerspoon/     # Hammerspoon automation
+├── zsh/
+│   ├── .zshrc           # Main Zsh config
+│   ├── .zshenv          # Environment variables
+│   └── .zprofile        # Login shell PATH
+├── git-config/
+│   ├── .gitconfig       # Git configuration
+│   └── .gitconfig.local.example
 └── docs/                # Additional documentation
 ```
 
@@ -162,10 +168,10 @@ dotfiles/
 
 Component documentation:
 
-- [Neovim Configuration](.config/nvim/README.md)
-- [WezTerm Configuration](.config/wezterm/README.md)
-- [Shell Configuration](.config/shell/README.md)
-- [Kitty Configuration](.config/kitty/README.md)
+- [Neovim Configuration](core/.config/nvim/README.md)
+- [WezTerm Configuration](core/.config/wezterm/README.md)
+- [Shell Configuration](core/.config/shell/README.md)
+- [Kitty Configuration](core/.config/kitty/README.md)
 
 ## Requirements
 
@@ -218,7 +224,7 @@ zsh -l -c 'echo PATH=$PATH | cut -c1-200'
     - `markdownlint` for Markdown style
     - `lychee` for link checking (network)
     - PATH sanity from a login shell
-- Dry-run links: `stow -n -v .` to preview symlinks without changing files.
+- Dry-run links: `stow -n -v core zsh git-config` to preview symlinks without changing files.
 - Packages: `brew bundle check --no-upgrade` to verify Brewfile status; `brew bundle install --no-upgrade` to install missing items.
 - Cleanup: `just clean` to remove `.DS_Store` and editor backup files.
 - Report: see latest maintenance notes in `.codex/reports/`.

@@ -12,11 +12,11 @@ install *args:
 
 # Symlink dotfiles into $HOME using stow.
 stow:
-  stow -v .
+  stow -v core zsh git-config
 
 # Restow (relink) dotfiles, useful after updates.
 stow-restow:
-  stow -R -v .
+  stow -R -v core zsh git-config
 
 # Apply macOS defaults (prompts within script handle confirmations).
 macos-defaults:
@@ -25,7 +25,7 @@ macos-defaults:
 # Update repo and restow changes.
 update:
   git pull --rebase --autostash || true
-  stow -R -v .
+  stow -R -v core zsh git-config
 
 # Remove OS cruft and editor backup files
 clean:
@@ -67,16 +67,16 @@ doctor:
   fi
   @echo
   @echo "Stow dry-run preview"
-  @stow -n -v . 2>&1 | grep -E "LINK:|directory" || true
+  @stow -n -v core zsh git-config 2>&1 | grep -E "LINK:|directory" || true
 
 # Run static checks and quick repo audit
 audit:
   @echo "Syntax checks (bash/zsh)"
   @bash -n install.sh && echo "✓ install.sh syntax OK" || echo "✗ install.sh syntax error"
   @bash -n macos-defaults.sh && echo "✓ macos-defaults.sh syntax OK" || echo "✗ macos-defaults.sh syntax error"
-  @zsh -n .zshrc && echo "✓ .zshrc syntax OK" || echo "✗ .zshrc syntax error"
-  @zsh -n .zshenv && echo "✓ .zshenv syntax OK" || echo "✗ .zshenv syntax error"
-  @zsh -n .zprofile && echo "✓ .zprofile syntax OK" || echo "✗ .zprofile syntax error"
+  @zsh -n zsh/.zshrc && echo "✓ .zshrc syntax OK" || echo "✗ .zshrc syntax error"
+  @zsh -n zsh/.zshenv && echo "✓ .zshenv syntax OK" || echo "✗ .zshenv syntax error"
+  @zsh -n zsh/.zprofile && echo "✓ .zprofile syntax OK" || echo "✗ .zprofile syntax error"
   @echo
   @echo "ShellCheck (optional)"
   @if command -v shellcheck >/dev/null 2>&1; then \
@@ -112,7 +112,7 @@ audit:
   @find . -type l ! -exec test -e {} \; -print | sed -n '1,200p' || true
   @echo
   @echo "Stow conflicts"
-  @stow -n -v . 2>&1 | grep -E "existing target is" || true
+  @stow -n -v core zsh git-config 2>&1 | grep -E "existing target is" || true
   @echo
   @echo "PATH sanity (login shell)"
   @zsh -l -c 'echo PATH=$PATH' | cut -c1-200

@@ -43,7 +43,7 @@ local launchKeys = {
 	c = "Sunsama",
 	f = "Finder",
 	u = "Zen",
-	v = "Cursor",
+	v = "Antigravity",
 	t = "Microsoft Teams",
 }
 

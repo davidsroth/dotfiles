@@ -908,7 +908,7 @@ backup_existing_files() {
   # Get list of files that would be stowed
   cd "$DOTFILES_DIR"
   local conflicts
-  conflicts=$(stow -n -v . 2>&1 | grep "existing target is" || true)
+  conflicts=$(stow -n -v core zsh git-config 2>&1 | grep "existing target is" || true)
 
   if [[ -n "$conflicts" ]]; then
     warning "Found existing configuration files that would be overwritten"
@@ -949,14 +949,14 @@ setup_dotfiles() {
   cd "$DOTFILES_DIR"
 
   if [[ "$DRY_RUN" == "true" ]]; then
-    info "[DRY RUN] Would run: stow -v ."
+    info "[DRY RUN] Would run: stow -v core zsh git-config"
     # Show what would be stowed
     info "Preview of what would be linked:"
-    stow -n -v . 2>&1 | grep -E "LINK:|directory" || true
+    stow -n -v core zsh git-config 2>&1 | grep -E "LINK:|directory" || true
     success "[DRY RUN] Dotfiles would be linked"
   else
     info "Running stow..."
-    if stow -v .; then
+    if stow -v core zsh git-config; then
       success "Dotfiles linked successfully"
     else
       error "Stow failed. Check the error messages above"
@@ -1004,9 +1004,9 @@ post_install_setup() {
   fi
 
   # Local git config
-  if [[ ! -f "$HOME/.gitconfig.local" ]] && [[ -f "$DOTFILES_DIR/.gitconfig.local.example" ]]; then
+  if [[ ! -f "$HOME/.gitconfig.local" ]] && [[ -f "$DOTFILES_DIR/git-config/.gitconfig.local.example" ]]; then
     info "Creating .gitconfig.local..."
-    cp "$DOTFILES_DIR/.gitconfig.local.example" "$HOME/.gitconfig.local"
+    cp "$DOTFILES_DIR/git-config/.gitconfig.local.example" "$HOME/.gitconfig.local"
     warning "Please edit ~/.gitconfig.local with your personal information"
   fi
 
@@ -1122,7 +1122,7 @@ show_summary() {
 
   echo
   info "To update dotfiles in the future:"
-  echo "  cd $DOTFILES_DIR && git pull && stow -R ."
+  echo "  cd $DOTFILES_DIR && git pull && stow -R core zsh git-config"
 }
 
 # Main installation flow

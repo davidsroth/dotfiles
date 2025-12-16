@@ -1,0 +1,12 @@
+{
+  "log": {
+    "prefix": "log",
+    "body": "- [$CURRENT_HOUR:$CURRENT_MINUTE] ",
+    "description": "Log entry with current time"
+  },
+  "logdate": {
+    "prefix": "logdate",
+    "body": "- [$CURRENT_YEAR-$CURRENT_MONTH-$CURRENT_DATE $CURRENT_HOUR:$CURRENT_MINUTE] ",
+    "description": "Log entry with date and time"
+  }
+}

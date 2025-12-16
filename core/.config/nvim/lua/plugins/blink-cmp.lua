@@ -1,6 +1,9 @@
 return {
   {
     "saghen/blink.cmp",
+    dependencies = {
+      "L3MON4D3/LuaSnip",
+    },
     opts = {
       -- Explicitly define sources without any AI/LLM providers
       sources = {
@@ -18,12 +21,16 @@ return {
           snippets = {
             name = "Snippets",
             module = "blink.cmp.sources.snippets",
+            score_offset = 3, -- Prioritize snippets slightly
           },
           buffer = {
             name = "Buffer",
             module = "blink.cmp.sources.buffer",
           },
         },
+      },
+      snippets = {
+        preset = "luasnip",
       },
       -- Keep similar keymaps to your nvim-cmp config
       keymap = {

@@ -29,9 +29,12 @@ fi
 # Completion System
 # ============================================================================
 
-# Add zsh-completions to fpath before compinit
-if type brew &>/dev/null; then
-    FPATH=$(brew --prefix)/share/zsh-completions:$FPATH
+# Add zsh-completions to fpath before compinit - use cached brew prefix
+if [[ -z "$HOMEBREW_PREFIX" ]] && command -v brew >/dev/null 2>&1; then
+  export HOMEBREW_PREFIX="$(brew --prefix)"
+fi
+if [[ -n "$HOMEBREW_PREFIX" ]]; then
+  FPATH="$HOMEBREW_PREFIX/share/zsh-completions:$FPATH"
 fi
 
 # Ensure cache directory exists
@@ -155,10 +158,10 @@ fi
 # ============================================================================
 
 # Zsh autosuggestions - suggests commands as you type (guard brew and defer)
-zsh-defer -c 'command -v brew >/dev/null 2>&1 && source "$(brew --prefix)/share/zsh-autosuggestions/zsh-autosuggestions.zsh"'
+zsh-defer -c '[[ -n "$HOMEBREW_PREFIX" ]] && source "$HOMEBREW_PREFIX/share/zsh-autosuggestions/zsh-autosuggestions.zsh"'
 
 # Zsh syntax highlighting - must be loaded last (guard brew and defer)
-zsh-defer -c 'command -v brew >/dev/null 2>&1 && source "$(brew --prefix)/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh"'
+zsh-defer -c '[[ -n "$HOMEBREW_PREFIX" ]] && source "$HOMEBREW_PREFIX/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh"'
 
 # ============================================================================
 # Performance Settings
@@ -179,8 +182,8 @@ fi
 # ============================================================================
 
 # Load history substring search after syntax highlighting
-if [ -f /opt/homebrew/share/zsh-history-substring-search/zsh-history-substring-search.zsh ]; then
-    source /opt/homebrew/share/zsh-history-substring-search/zsh-history-substring-search.zsh
+if [[ -n "$HOMEBREW_PREFIX" && -f "$HOMEBREW_PREFIX/share/zsh-history-substring-search/zsh-history-substring-search.zsh" ]]; then
+    source "$HOMEBREW_PREFIX/share/zsh-history-substring-search/zsh-history-substring-search.zsh"
     
     # Bind arrow keys for history search
     bindkey '^[[A' history-substring-search-up
@@ -210,3 +213,6 @@ export PATH="$BUN_INSTALL/bin:$PATH"
 
 # bun completions
 [ -s "/Users/davidroth/.bun/_bun" ] && source "/Users/davidroth/.bun/_bun"
+
+# Added by Antigravity
+export PATH="/Users/davidroth/.antigravity/antigravity/bin:$PATH"

@@ -214,6 +214,54 @@ _ctc_capture() {
     rm -f "$tmp"
 }
 
+# Include invoking command in clipboard along with result AND log to /tmp.
+# Works with the global alias `CTCT` which pipes into this function.
+# Behavior: prints original result to stdout; copies "<CMD> -> <RESULT>" to clipboard;
+#           logs "<CMD> -> <RESULT>" to /tmp/YYYYMMDD/log.
+_ctct_capture_to_log() {
+    # Stream to terminal while capturing to a temp file
+    local tmp
+    tmp=$(mktemp 2>/dev/null || mktemp -t ctct)
+    # Pass-through output to stdout and capture to file (streams live)
+    tee "$tmp"
+
+    # Determine the last executed command line (zsh preexec preferred)
+    local cmdline="${COD_LAST_CMDLINE:-}"
+    if [ -z "$cmdline" ] && [ -n "${ZSH_VERSION:-}" ]; then
+        # Fallback: fetch last history entry (best-effort)
+        cmdline=$(fc -ln -1 2>/dev/null || true)
+    fi
+
+    # Remove trailing CTCT token, or expanded pipeline to _ctct_capture_to_log, and trailing whitespace
+    if [ -n "$cmdline" ]; then
+        cmdline=$(printf "%s" "$cmdline" | command sed -E \
+            -e 's/[[:space:]]+CTCT$//' \
+            -e 's/[[:space:]]*\|\&?[[:space:]]*_ctct_capture_to_log$//' \
+            -e 's/[[:space:]]+$//')
+    fi
+
+    local formatted_output=""
+    if [ -n "$cmdline" ]; then
+        formatted_output=$(printf '`%s` -> %s' "$cmdline" "$(cat "$tmp")")
+    else
+        formatted_output=$(cat "$tmp")
+    fi
+
+    # Copy decorated content to clipboard when available
+    if command -v pbcopy >/dev/null 2>&1; then
+        printf "%s" "$formatted_output" | pbcopy
+    else
+        printf "%s\n" "ctct: pbcopy not available" >&2
+        rm -f "$tmp"
+        return 127
+    fi
+
+    # Log to /tmp/YYYYMMDD/log using the tlog function
+    printf "%s" "$formatted_output" | tlog "CTCT Capture"
+
+    rm -f "$tmp"
+}
+
 # Register a zsh preexec hook to capture the raw command line for CTC
 if [ -n "${ZSH_VERSION:-}" ]; then
     _ctc_preexec_capture() {

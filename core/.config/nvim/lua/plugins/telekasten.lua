@@ -16,8 +16,8 @@ return {
       return {
         home = home,
         dailies = home .. "/daily",
-        -- You can add templates later, e.g.:
-        -- templates = home .. "/templates",
+        templates = home .. "/templates",
+        template_new_daily = home .. "/templates/daily.md",
       }
     end,
     config = function(_, opts)
@@ -53,12 +53,45 @@ return {
     end,
     keys = {
       { "<leader>z",  "<cmd>Telekasten panel<cr>",          desc = "Telekasten Panel" },
-      { "<leader>zf", "<cmd>Telekasten find_notes<cr>",     desc = "Find Notes" },
-      { "<leader>zg", "<cmd>Telekasten search_notes<cr>",   desc = "Search Notes (Grep)" },
-      { "<leader>zd", "<cmd>Telekasten find_daily_notes<cr>", desc = "Find Daily Notes" },
+      -- Use Telescope directly for finding (much faster than telekasten's wrapper)
+      { "<leader>zf", function()
+          require("telescope.builtin").find_files({
+            prompt_title = "Find Notes",
+            cwd = vim.fn.expand("~/notes"),
+            find_command = { "fd", "--type", "f", "--extension", "md" },
+          })
+        end,
+        desc = "Find Notes"
+      },
+      { "<leader>zg", function()
+          require("telescope.builtin").live_grep({
+            prompt_title = "Search Notes",
+            cwd = vim.fn.expand("~/notes"),
+          })
+        end,
+        desc = "Search Notes (Grep)"
+      },
+      { "<leader>zd", function()
+          require("telescope.builtin").find_files({
+            prompt_title = "Find Daily Notes",
+            cwd = vim.fn.expand("~/notes/daily"),
+            find_command = { "fd", "--type", "f", "--extension", "md" },
+          })
+        end,
+        desc = "Find Daily Notes"
+      },
       { "<leader>zD", "<cmd>Telekasten goto_today<cr>",     desc = "Open Today" },
       { "<leader>zn", "<cmd>Telekasten new_note<cr>",       desc = "New Note" },
       { "<leader>zc", "<cmd>Telekasten show_calendar<cr>",  desc = "Show Calendar" },
+      -- Custom log entry shortcut
+      { "<leader>zl", function()
+          local time = os.date("%H:%M")
+          local text = string.format("- [%s] ", time)
+          vim.api.nvim_put({text}, "", true, true)
+        end,
+        desc = "Insert log entry",
+        mode = { "n", "i" }
+      },
     },
   },
 }
