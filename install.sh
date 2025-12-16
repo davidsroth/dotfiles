@@ -216,6 +216,7 @@ ensure_user_local_bin_path() {
   # Persist for future shells (avoid duplicates)
   if [[ -f "$HOME/.zprofile" ]]; then
     if ! grep -qs '^[^#]*\.local/bin' "$HOME/.zprofile"; then
+      # shellcheck disable=SC2016
       echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$HOME/.zprofile"
     fi
   fi
@@ -223,6 +224,7 @@ ensure_user_local_bin_path() {
     # Create if missing
     touch "$HOME/.profile"
     if ! grep -qs '^[^#]*\.local/bin' "$HOME/.profile"; then
+      # shellcheck disable=SC2016
       echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$HOME/.profile"
     fi
   fi
@@ -425,7 +427,11 @@ ensure_nvim_precedence() {
         warning "System nvim ($current) precedes portable Neovim ($portable_nvim)"
         if command -v sudo >/dev/null 2>&1; then
           if confirm "Point /usr/local/bin/nvim to portable Neovim?" "y"; then
-            sudo ln -sfn "$portable_nvim" /usr/local/bin/nvim && success "Linked /usr/local/bin/nvim -> $portable_nvim" || warning "Failed to link /usr/local/bin/nvim"
+            if sudo ln -sfn "$portable_nvim" /usr/local/bin/nvim; then
+              success "Linked /usr/local/bin/nvim -> $portable_nvim"
+            else
+              warning "Failed to link /usr/local/bin/nvim"
+            fi
           else
             info "Skipping system-wide symlink; you can run portable nvim via $portable_nvim or adjust PATH"
           fi
@@ -573,7 +579,7 @@ install_homebrew() {
 
     # Add Homebrew to PATH
     if [[ -f "$HOMEBREW_PREFIX/bin/brew" ]]; then
-      eval "$($HOMEBREW_PREFIX/bin/brew shellenv)"
+      eval "$("$HOMEBREW_PREFIX"/bin/brew shellenv)"
 
       # Add to shell profile for persistence (avoid duplicates)
       if [[ "$SHELL" == *"zsh"* ]]; then
