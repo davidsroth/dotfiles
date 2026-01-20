@@ -1,0 +1,62 @@
+# macOS
+.DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# Tmux plugins (managed by TPM)
+core/.config/tmux/plugins/tpm/
+core/.config/tmux/plugins/tmux-sensible/
+core/.config/tmux/plugins/tmux-yank/
+core/.config/tmux/plugins/tmux-sessionist/
+core/.config/tmux/plugins/vim-tmux-navigator/
+core/.config/tmux/plugins/tmux-fzf/
+
+# Hammerspoon
+core/.hammerspoon/bin/*
+!core/.hammerspoon/bin/.gitkeep
+core/.hammerspoon/Spoons/*
+!core/.hammerspoon/Spoons/.gitkeep
+
+# Karabiner generated backups (not for version control)
+core/.config/karabiner/automatic_backups/
+
+# Editor temporary files
+*.swp
+*.swo
+*~
+.netrwhist
+
+# Local overrides
+*.local
+!*.local.example
+core/.config/nvim/.luarc.json
+core/.config/gh-dash/config.local.yml
+
+# Logs
+.nvimlog
+
+# Claude Agent / AI Memory
+core/.claude/
+
+# Notes (Personal vault)
+notes/
+
+# App Configs (ignoring potentially sensitive or large generated dirs)
+core/.config/raycast/
+core/.config/sunsama/
+
+# Root level dotfiles that might be stow conflicts or local
+.gitconfig
+core/.config/espanso/config/local.yml
+core/.config/espanso/.local_email
+core/.config/espanso/.local_address
+core/.config/gh/hosts.yml
+
+# Machine-specific configurations
+core/.config/gh/config.yml
+core/.config/k9s/config.yaml
+core/.config/gh-dash/config.yml

@@ -28,8 +28,7 @@ defaults:
 
 repoPaths:
   # Machine-specific example; adjust or remove if not present
-  DistylAI/distillery: /Volumes/git/distillery
-  # Use home-relative path to your dotfiles
+  # owner/repo: /path/to/repo
   davidsroth/dotfiles: ~/dotfiles
 
 keybindings:

@@ -204,15 +204,12 @@ fi
 # Uncomment the line below to see startup performance report
 # zprof
 
-# bun completions (if installed)
-[ -s "$HOME/.bun/_bun" ] && source "$HOME/.bun/_bun"
-
 # bun
 export BUN_INSTALL="$HOME/.bun"
 export PATH="$BUN_INSTALL/bin:$PATH"
 
 # bun completions
-[ -s "/Users/davidroth/.bun/_bun" ] && source "/Users/davidroth/.bun/_bun"
+[ -s "$HOME/.bun/_bun" ] && source "$HOME/.bun/_bun"
 
 # Added by Antigravity
-export PATH="/Users/davidroth/.antigravity/antigravity/bin:$PATH"
+export PATH="$HOME/.antigravity/antigravity/bin:$PATH"
