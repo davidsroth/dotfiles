@@ -9,6 +9,7 @@ return {
       vim.cmd.colorscheme("catppuccin")
     end,
     opts = {
+      flavour = "mocha",
       integrations = {
         aerial = true,
         alpha = true,
