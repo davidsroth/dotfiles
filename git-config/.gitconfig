@@ -212,3 +212,5 @@
 [includeIf "gitdir:~/work/"]
 	# Include work-specific config when in work directories
 	path = ~/.gitconfig.work
+[maintenance]
+	auto = true
