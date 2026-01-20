@@ -1,0 +1,41 @@
+# espanso match file
+
+# For a complete introduction, visit the official docs at: https://espanso.org/docs/
+
+matches:
+  # Date without separators (YYYYMMDD)
+  - trigger: ";date"
+    replace: "{{mydate}}"
+    vars:
+      - name: mydate
+        type: date
+        params:
+          format: "%Y%m%d"
+
+  # Random 32-bit hex string (8 characters)
+  - trigger: ";rnd"
+    replace: "{{output}}"
+    vars:
+      - name: output
+        type: shell
+        params:
+          cmd: "openssl rand -hex 4"
+
+  # Email address (checks for local override or defaults to Gmail)
+  - trigger: ";mail"
+    replace: "{{output}}"
+    vars:
+      - name: output
+        type: shell
+        params:
+          cmd: "cat ~/.config/espanso/.local_email 2>/dev/null || echo 'davidsamuelroth@gmail.com'"
+
+  # Home Address (reads from ignored file)
+  - trigger: ";addr"
+    replace: "{{output}}"
+    vars:
+      - name: output
+        type: shell
+        params:
+          cmd: "cat ~/.config/espanso/.local_address 2>/dev/null"
+

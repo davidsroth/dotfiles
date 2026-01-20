@@ -1,0 +1,14 @@
+views:
+  v1/pods:
+    sortColumn: AGE:asc
+    columns:
+      - NAMESPACE
+      - NAME
+      - READY
+      - STATUS
+      - AGE
+      - RESTARTS
+      - CPU
+      - MEM
+      - IP|W
+      - NODE|W

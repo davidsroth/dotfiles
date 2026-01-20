@@ -60,3 +60,4 @@ core/.config/gh/hosts.yml
 core/.config/gh/config.yml
 core/.config/k9s/config.yaml
 core/.config/gh-dash/config.yml
+core/.config/cagent/.cagent_first_run

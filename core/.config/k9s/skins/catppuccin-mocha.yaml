@@ -1,0 +1,86 @@
+k9s:
+  body:
+    fgColor: '#cdd6f4' # text
+    bgColor: default # Match terminal background
+    logoColor: '#cba6f7' # mauve
+  # ClusterInfoView styles
+  info:
+    fgColor: '#f5c2e7' # pink
+    sectionColor: '#cdd6f4' # text
+  # Dialog styles
+  dialog:
+    fgColor: '#cdd6f4' # text
+    bgColor: default
+    buttonFgColor: '#cdd6f4' # text
+    buttonBgColor: '#cba6f7' # mauve
+    buttonFocusFgColor: '#f9e2af' # yellow
+    buttonFocusBgColor: '#f5c2e7' # pink
+    labelFgColor: '#fab387' # peach
+    fieldFgColor: '#cdd6f4' # text
+  # Borders styles
+  frame:
+    border:
+      fgColor: '#45475a' # surface1
+      focusColor: '#a6adc8' # subtext0
+    menu:
+      fgColor: '#cdd6f4' # text
+      keyColor: '#f5c2e7' # pink
+      numKeyColor: '#f5c2e7' # pink
+    # CrumbView attributes for history navigation
+    crumbs:
+      fgColor: '#cdd6f4' # text
+      bgColor: default
+      activeColor: '#a6adc8' # subtext0
+    # Resource status and update styles
+    status:
+      newColor: '#89dceb' # sky
+      modifyColor: '#cba6f7' # mauve
+      addColor: '#a6e3a1' # green
+      errorColor: '#f38ba8' # red
+      highlightcolor: '#fab387' # peach
+      killColor: '#6c7086' # overlay0
+      completedColor: '#6c7086' # overlay0
+    # Border title styles
+    title:
+      fgColor: '#cdd6f4' # text
+      bgColor: default
+      highlightColor: '#fab387' # peach
+      counterColor: '#cba6f7' # mauve
+      filterColor: '#f5c2e7' # pink
+  views:
+    # Charts skins
+    charts:
+      bgColor: default
+      defaultDialColors:
+        - '#cba6f7' # mauve
+        - '#f38ba8' # red
+      defaultChartColors:
+        - '#cba6f7' # mauve
+        - '#f38ba8' # red
+    # TableView attributes
+    table:
+      fgColor: '#cdd6f4' # text
+      bgColor: default
+      cursorFgColor: '#1e1e2e' # base (dark text for high contrast on mauve)
+      cursorBgColor: '#cba6f7' # mauve
+    # Header row styles
+    header:
+      fgColor: '#cdd6f4' # text
+      bgColor: default
+      sorterColor: '#89dceb' # sky
+    # Xray view attributes
+    xray:
+      fgColor: '#cdd6f4' # text
+      bgColor: default
+      cursorColor: '#45475a' # surface1
+      graphicColor: '#cba6f7' # mauve
+      showIcons: false
+    # YAML info styles
+    yaml:
+      keyColor: '#f5c2e7' # pink
+      colonColor: '#cba6f7' # mauve
+      valueColor: '#cdd6f4' # text
+    # Logs styles
+    logs:
+      fgColor: '#cdd6f4' # text
+      bgColor: default
