@@ -27,6 +27,62 @@ update:
   git pull --rebase --autostash || true
   stow -R -v core zsh git-config
 
+# Run full system maintenance (Brew, plugins, system updates)
+maintenance:
+  @echo "🚀 Starting system maintenance..."
+  @echo "--------------------------------"
+
+  @echo "\n📦 Updating Homebrew..."
+  brew update
+  brew upgrade
+  brew cleanup
+
+  @echo "\n🥟 Updating Bun..."
+  @command -v bun >/dev/null 2>&1 && bun upgrade || echo "Skipping bun (not found)"
+
+  @echo "\n🐍 Updating Pipx..."
+  @command -v pipx >/dev/null 2>&1 && pipx upgrade-all || echo "Skipping pipx (not found)"
+
+  @echo "\n📝 Updating Neovim plugins..."
+  @command -v nvim >/dev/null 2>&1 && nvim --headless "+Lazy! sync" +qa || echo "Skipping neovim (not found)"
+
+  @echo "\n📟 Updating Tmux plugins..."
+  @[ -x "$HOME/.tmux/plugins/tpm/bin/update_plugins" ] && "$HOME/.tmux/plugins/tpm/bin/update_plugins" all || echo "Skipping TPM (not found)"
+
+  @echo "\n🐚 Updating zsh-defer..."
+  @[ -d "$HOME/zsh-defer/.git" ] && git -C "$HOME/zsh-defer" pull || echo "Skipping zsh-defer (not found)"
+
+  @echo "\n🐳 Cleaning Docker..."
+  @if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then \
+    docker system prune -f; \
+  else \
+    echo "Skipping Docker cleanup (daemon not running or docker not found)"; \
+  fi
+
+  @echo "\n📦 Cleaning pnpm store..."
+  @command -v pnpm >/dev/null 2>&1 && pnpm store prune || echo "Skipping pnpm (not found)"
+
+  @echo "\n📜 Cleaning NPM & Yarn..."
+  @command -v npm >/dev/null 2>&1 && { npm cache clean --force; rm -rf ~/.npm/_logs; } || echo "Skipping NPM cleanup"
+  @command -v yarn >/dev/null 2>&1 && yarn cache clean || echo "Skipping Yarn cleanup"
+
+  @echo "\n🐹 Cleaning Go cache..."
+  @command -v go >/dev/null 2>&1 && go clean -modcache || echo "Skipping Go cleanup"
+
+  @echo "\n☀️ Cleaning uv cache..."
+  @command -v uv >/dev/null 2>&1 && uv cache clean || echo "Skipping uv cleanup"
+
+  @echo "\n💎 Cleaning Ruby Gems..."
+  @command -v gem >/dev/null 2>&1 && gem cleanup || echo "Skipping gem cleanup"
+
+  @echo "\n🍎 Checking macOS updates..."
+  softwareupdate -l
+
+  @echo "\n🧹 Cleaning up..."
+  just clean
+
+  @echo "\n✨ Maintenance complete!"
+
 # Remove OS cruft and editor backup files
 clean:
   @echo "Removing .DS_Store files and editor backups..."
