@@ -124,6 +124,11 @@ alias j='z' # zoxide jump
 alias claudec='claude --continue'
 # OpenCode shortcut
 alias oc='opencode'
+# Gemini CLI
+if command -v gemini >/dev/null 2>&1; then
+  alias gmn='gemini'
+  alias gmnr='gemini -r'
+fi
 
 # Logs - view today's log
 alias tlog-view='${EDITOR:-nvim} /tmp/$(date +"%Y%m%d")/log'
