@@ -31,7 +31,7 @@ This is David Roth's personal dotfiles repository for macOS development environm
 - **Plugins**:
   - VimTeX for LaTeX editing
   - Language support
-- **Secondary Editor**: Cursor (launched via `cursor` command)
+- **Secondary Editor**: Antigravity (launched via `antigravity` command)
 
 ### Terminal & Multiplexing
 
@@ -123,7 +123,7 @@ All dotfiles are managed via symlinks from home directory to this repository:
 ### When Working with Configs
 
 - Always use absolute paths for file operations
-- Open files in Cursor after editing: `cursor /path/to/file`
+- Open files in Antigravity after editing: `antigravity /path/to/file`
 - Use Zen browser for links: `open -a "Zen" "URL"`
 
 ### Common Tasks

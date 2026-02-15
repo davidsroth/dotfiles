@@ -128,6 +128,33 @@
                                 "type": "basic"
                             }
                         ]
+                    },
+                    {
+                        "description": "Map Option dead-keys to F-keys (avoid glyphs)",
+                        "manipulators": [
+                            {
+                                "type": "basic",
+                                "from": {
+                                    "key_code": "i",
+                                    "modifiers": {
+                                        "mandatory": ["option"],
+                                        "optional": ["shift"]
+                                    }
+                                },
+                                "to": [ { "key_code": "f18" } ]
+                            },
+                            {
+                                "type": "basic",
+                                "from": {
+                                    "key_code": "u",
+                                    "modifiers": {
+                                        "mandatory": ["option"],
+                                        "optional": ["shift"]
+                                    }
+                                },
+                                "to": [ { "key_code": "f19" } ]
+                            }
+                        ]
                     }
                 ]
             },

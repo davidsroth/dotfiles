@@ -3,7 +3,28 @@
 # For a complete introduction, visit the official docs at: https://espanso.org/docs/
 
 matches:
-  # Date without separators (YYYYMMDD)
+  - trigger: ";gh"
+    replace: "https://github.com/davidsroth"
+
+  - trigger: ";git"
+    replace: "https://github.com/davidsroth"
+
+  - trigger: ";mysite"
+    replace: "https://www.davidroth.me/"
+
+  - trigger: ";li"
+    replace: "https://www.linkedin.com/in/david-s-roth/"
+
+  - trigger: ";@@"
+    replace: "davidsamuelroth@gmail.com"
+
+  - trigger: ";##"
+    replace: "2016153785"
+
+  - trigger: ";addr"
+    replace: "715 Saint Marks Avenue"
+
+  # Print the current date
   - trigger: ";date"
     replace: "{{mydate}}"
     vars:
@@ -11,31 +32,17 @@ matches:
         type: date
         params:
           format: "%Y%m%d"
-
-  # Random 32-bit hex string (8 characters)
-  - trigger: ";rnd"
+  - trigger: ";dtime"
+    replace: "{{mydate}}"
+    vars:
+      - name: mydate
+        type: date
+        params:
+          format: "%Y-%m-%dT%H:%M:%S%z"
+  - trigger: ";uuid"
     replace: "{{output}}"
     vars:
       - name: output
         type: shell
         params:
-          cmd: "openssl rand -hex 4"
-
-  # Email address (checks for local override or defaults to Gmail)
-  - trigger: ";mail"
-    replace: "{{output}}"
-    vars:
-      - name: output
-        type: shell
-        params:
-          cmd: "cat ~/.config/espanso/.local_email 2>/dev/null || echo 'davidsamuelroth@gmail.com'"
-
-  # Home Address (reads from ignored file)
-  - trigger: ";addr"
-    replace: "{{output}}"
-    vars:
-      - name: output
-        type: shell
-        params:
-          cmd: "cat ~/.config/espanso/.local_address 2>/dev/null"
-
+          cmd: "head -c6 /dev/urandom | base64 | tr -d '\n='"

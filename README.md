@@ -126,16 +126,19 @@ stow core zsh git-config
   - Window management
 - **Karabiner-Elements** - Keyboard customization
 
-### 🔧 Development Tools
+### Development Tools
 
 - **Git** - Configuration includes:
   - Global gitignore in `.config/git/ignore`
   - Multiple aliases and custom settings
   - LFS support
+  - Delta for diffs
 - **Lazygit** - Terminal UI for Git
 - **Opencode** - AI coding assistant integration
   - Neovim plugin
   - Shell aliases and tools
+- **Antigravity** - Secondary editor
+- **Zen Browser** - Primary browser
 - Python management with **pyenv**
 - Node.js management with **nvm** (lazy-loaded)
 

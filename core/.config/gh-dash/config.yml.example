@@ -55,8 +55,8 @@ keybindings:
       name: "Lazygit (popup)"
       command: "tmux display-popup -d {{.RepoPath}} -xC -yC -w 80% -h 80% 'gh pr checkout {{.PrNumber}} && lazygit'"
     - key: "v"
-      name: "Cursor (new window)"
-      command: "tmux new-window -c {{.RepoPath}} 'gh pr checkout {{.PrNumber}} && first_file=$(gh pr diff {{.PrNumber}} --name-only | head -1) && cursor . ${first_file:-.}'"
+      name: "Antigravity (new window)"
+      command: "tmux new-window -c {{.RepoPath}} 'gh pr checkout {{.PrNumber}} && first_file=$(gh pr diff {{.PrNumber}} --name-only | head -1) && antigravity . ${first_file:-.}'"
   issues:
     - key: "o"
       name: "Open in browser"

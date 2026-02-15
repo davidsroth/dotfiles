@@ -75,7 +75,7 @@ cask "kitty"
 cask "iterm2"
 
 # Development
-cask "cursor"
+cask "antigravity"
 cask "datagrip"
 cask "docker-desktop"
 

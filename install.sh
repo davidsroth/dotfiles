@@ -1017,6 +1017,48 @@ post_install_setup() {
 
   # Nerd Font: Fira Code (for Kitty/tmux glyphs)
   install_fira_code_nerd_font || true
+
+  # Shared agent skills
+  setup_agent_skills || true
+}
+
+# Link shared agent skills to AI coding assistants
+# Creates symlinks from ~/.gemini/skills, ~/.cursor/skills, etc. to dotfiles/.agent/skills
+setup_agent_skills() {
+  local agent_dir="$DOTFILES_DIR/.agent"
+  local skills_source="$agent_dir/skills"
+
+  if [[ ! -d "$skills_source" ]]; then
+    [[ "$VERBOSE" == "true" ]] && info "No .agent/skills directory found, skipping" || true
+    return 0
+  fi
+
+  info "Linking shared agent skills..."
+
+  # Link skills to various AI tool directories
+  # Note: .claude/skills is handled via internal symlink in dotfiles/.claude/skills -> ../.agent/skills
+  local targets=(
+    "$HOME/.gemini/skills"
+    "$HOME/.cursor/skills"
+    "$HOME/.codex/skills"
+  )
+
+  for target in "${targets[@]}"; do
+    if [[ -L "$target" ]]; then
+      [[ "$VERBOSE" == "true" ]] && success "$target (already linked)" || true
+    elif [[ -d "$target" ]]; then
+      warning "$target exists as directory - skipping"
+    else
+      mkdir -p "$(dirname "$target")"
+      ln -s "$skills_source" "$target"
+      success "Linked $target"
+    fi
+  done
+
+  # Verify .claude/skills internal symlink
+  if [[ -L "$DOTFILES_DIR/.claude/skills" ]]; then
+    [[ "$VERBOSE" == "true" ]] && success "~/.claude/skills (via dotfiles)" || true
+  fi
 }
 
 # Install Fira Code Nerd Font for glyph support in terminals (Kitty/tmux)

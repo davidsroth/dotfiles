@@ -50,7 +50,8 @@
       "Bash(lazygit:*)",
       "Read(//Users/davidroth/.local/share/nvim/lazy/telekasten.nvim/**)",
       "Bash(sysctl:*)",
-      "Bash(diskutil:*)"
+      "Bash(diskutil:*)",
+      "Bash(sqlite3:*)"
     ],
     "deny": []
   },
