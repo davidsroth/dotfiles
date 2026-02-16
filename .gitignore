@@ -49,6 +49,7 @@ notes/
 # App Configs (ignoring potentially sensitive or large generated dirs)
 core/.config/raycast/
 core/.config/sunsama/
+core/.config/op/
 
 # Root level dotfiles that might be stow conflicts or local
 .gitconfig
