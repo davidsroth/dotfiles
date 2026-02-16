@@ -63,3 +63,4 @@ docs/
 .claude/\.claude/settings\.local\.json
 ^\.config/gh-dash/config\.local\.yml$
 ^\.config/gh-dash/config\.local\.example\.yml$
+.*\.local\.lua$
