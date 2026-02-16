@@ -41,6 +41,7 @@ core/.config/gh-dash/config.local.yml
 
 # Claude Agent / AI Memory
 core/.claude/
+core/.codex/
 
 # Notes (Personal vault)
 notes/
