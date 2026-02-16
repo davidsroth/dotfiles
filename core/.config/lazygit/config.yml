@@ -39,8 +39,8 @@ customCommands:
     # ============================================================================
 
     context: "files"
-    command: "git {{if .SelectedFile.HasUnstagedChanges}} add {{else}} reset {{end}} {{.SelectedFile.Name | quote}}"
-    description: "Toggle file staged"
+    command: 'if [ -n "$(git status --porcelain {{.SelectedPath | quote}} | grep "^.[^ ]")" ]; then git add -u -- {{.SelectedPath | quote}}; else git reset -- {{.SelectedPath | quote}}; fi'
+    description: "Toggle tracked changes (node/file)"
   # Show file history
   - key: "H"
     context: "files"

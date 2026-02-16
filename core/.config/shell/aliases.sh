@@ -126,8 +126,8 @@ alias claudec='claude --continue'
 alias oc='opencode'
 # Gemini CLI
 if command -v gemini >/dev/null 2>&1; then
-  alias gmn='gemini'
-  alias gmnr='gemini -r'
+  alias gmi='gemini'
+  alias gmir='gemini -r'
 fi
 
 # Logs - view today's log
