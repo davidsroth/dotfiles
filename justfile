@@ -109,6 +109,8 @@ doctor:
   @echo
   @echo "Configs"
   @test -f "$HOME/.gitconfig.local" && echo "✓ ~/.gitconfig.local present" || echo "✗ ~/.gitconfig.local missing (copy from .gitconfig.local.example)"
+  @test -L "$HOME/.hammerspoon" && echo "✓ Hammerspoon linked" || echo "✗ Hammerspoon not linked"
+  @test -f "core/.hammerspoon/init.local.lua" && echo "✓ Hammerspoon local config present" || echo "• Hammerspoon local config missing (optional)"
   @test -x "$HOME/.tmux/plugins/tpm/tpm" && echo "✓ TPM installed" || echo "✗ TPM missing (~/.tmux/plugins/tpm/tpm)"
   @echo
   @echo "Brewfile status"
@@ -133,6 +135,13 @@ audit:
   @zsh -n zsh/.zshrc && echo "✓ .zshrc syntax OK" || echo "✗ .zshrc syntax error"
   @zsh -n zsh/.zshenv && echo "✓ .zshenv syntax OK" || echo "✗ .zshenv syntax error"
   @zsh -n zsh/.zprofile && echo "✓ .zprofile syntax OK" || echo "✗ .zprofile syntax error"
+  @echo
+  @echo "Lua syntax check (luac)"
+  @if command -v luac >/dev/null 2>&1; then \
+    find core -name "*.lua" -exec luac -p {} \; && echo "✓ Lua files syntax OK" || echo "✗ Lua syntax errors found"; \
+  else \
+    echo "luac: not found (skipping Lua check)"; \
+  fi
   @echo
   @echo "ShellCheck (optional)"
   @if command -v shellcheck >/dev/null 2>&1; then \
