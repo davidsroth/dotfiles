@@ -1057,7 +1057,7 @@ setup_agent_skills() {
 
   # Verify .claude/skills internal symlink
   if [[ -L "$DOTFILES_DIR/.claude/skills" ]]; then
-    [[ "$VERBOSE" == "true" ]] && success "~/.claude/skills (via dotfiles)" || true
+    [[ "$VERBOSE" == "true" ]] && success "$HOME/.claude/skills (via dotfiles)" || true
   fi
 }
 

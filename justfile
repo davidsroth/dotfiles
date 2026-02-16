@@ -152,14 +152,14 @@ audit:
   @echo
   @echo "JSON validation (jq)"
   @if command -v jq >/dev/null 2>&1; then \
-    rg -uu --files -g "*.json" | while IFS= read -r f; do jq -e . "$f" >/dev/null 2>&1 && echo "OK  $f" || echo "ERR $f"; done; \
+    rg -uu --files -g "*.json" -g '!**/.claude/**' -g '!**/.codex/**' | while IFS= read -r f; do jq -e . "$f" >/dev/null 2>&1 && echo "OK  $f" || echo "ERR $f"; done; \
   else \
     echo "jq: not found"; \
   fi
   @echo
   @echo "Markdown lint (optional)"
   @if command -v markdownlint >/dev/null 2>&1; then \
-    FILES=$(rg -uu --files -g '!**/.git/**' -g '!**/.config/tmux/plugins/**' -g '*.md' | tr '\n' ' '); \
+    FILES=$(rg -uu --files -g '!**/.git/**' -g '!**/.config/tmux/plugins/**' -g '!**/.claude/**' -g '!**/.codex/**' -g '*.md' | tr '\n' ' '); \
     if [ -n "$FILES" ]; then markdownlint -q $FILES || true; else echo "no markdown files"; fi; \
   else \
     echo "markdownlint: not found"; \
@@ -167,14 +167,14 @@ audit:
   @echo
   @echo "Link check (optional)"
   @if command -v lychee >/dev/null 2>&1; then \
-    FILES=$(rg -uu --files -g '!**/.git/**' -g '!**/.config/tmux/plugins/**' -g '*.md' | tr '\n' ' '); \
+    FILES=$(rg -uu --files -g '!**/.git/**' -g '!**/.config/tmux/plugins/**' -g '!**/.claude/**' -g '!**/.codex/**' -g '*.md' | tr '\n' ' '); \
     if [ -n "$FILES" ]; then lychee --no-progress --quiet $FILES || true; else echo "no markdown files"; fi; \
   else \
     echo "lychee: not found"; \
   fi
   @echo
   @echo "Broken symlinks"
-  @find . -type l ! -exec test -e {} \; -print | sed -n '1,200p' || true
+  @find . -name ".claude" -prune -o -name ".codex" -prune -o -type l ! -exec test -e {} \; -print | sed -n '1,200p' || true
   @echo
   @echo "Stow conflicts"
   @stow -n -v core zsh git-config 2>&1 | grep -E "existing target is" || true
