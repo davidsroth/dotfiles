@@ -1,0 +1,16 @@
+-- Example local configuration for Hammerspoon
+-- Save this as core/.hammerspoon/init.local.lua (it is git-ignored)
+
+local M = {}
+
+M.launchKeys = {
+    -- Override existing or add new ones
+    -- i = "Ghostty",
+    -- k = "Slack",
+}
+
+M.alts = {
+    -- m = "Discord",
+}
+
+return M

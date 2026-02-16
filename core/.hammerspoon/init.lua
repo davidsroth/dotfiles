@@ -32,7 +32,7 @@ local function launchOrFocusOrRotate(app)
 end
 
 -- Reload on changes in dotfiles repo and in the active Hammerspoon config dir
-hs.pathwatcher.new(os.getenv("HOME") .. "/dotfiles/.hammerspoon/", hs.reload):start()
+hs.pathwatcher.new(os.getenv("HOME") .. "/dotfiles/core/.hammerspoon/", hs.reload):start()
 hs.pathwatcher.new(hs.configdir, hs.reload):start()
 hs.application.enableSpotlightForNameSearches(true)
 
@@ -50,6 +50,20 @@ local launchKeys = {
 local alts = {
 	m = "Slack",
 }
+
+-- Load local overrides from init.local.lua if it exists
+local localConfigPath = hs.configdir .. "/init.local.lua"
+if hs.fs.attributes(localConfigPath) then
+    local localConfig = loadfile(localConfigPath)()
+    if localConfig then
+        if localConfig.launchKeys then
+            for k, v in pairs(localConfig.launchKeys) do launchKeys[k] = v end
+        end
+        if localConfig.alts then
+            for k, v in pairs(localConfig.alts) do alts[k] = v end
+        end
+    end
+end
 
 for key, app in pairs(launchKeys) do
     hs.hotkey.bind({ "alt" }, key, function()

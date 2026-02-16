@@ -32,6 +32,7 @@ core/.config/karabiner/automatic_backups/
 
 # Local overrides
 *.local
+*.local.lua
 !*.local.example
 core/.config/nvim/.luarc.json
 core/.config/gh-dash/config.local.yml
