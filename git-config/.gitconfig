@@ -4,7 +4,7 @@
 
 [core]
 	# Default editor for commit messages and interactive commands
-	editor = nvim --wait
+	editor = nvim
 	
 	# Better diff settings configured in [diff]
 	
