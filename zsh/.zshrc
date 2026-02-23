@@ -67,6 +67,9 @@ setopt PUSHD_SILENT         # Don't print directory stack
 setopt CORRECT              # Spelling correction for commands
 setopt INTERACTIVE_COMMENTS # Allow comments in interactive shell
 
+# Disable flow control (C-s/C-q) so keys are available for tmux/vim
+stty -ixon
+
 # ============================================================================
 # Critical Immediate Loads
 # ============================================================================
@@ -95,7 +98,6 @@ zsh-defer -c '[ -f ~/.fzf.zsh ] && source ~/.fzf.zsh'
 
 # History options for better experience
 setopt EXTENDED_HISTORY          # Save timestamp of command in history
-setopt INC_APPEND_HISTORY        # Write to history file immediately
 setopt SHARE_HISTORY             # Share history between all sessions
 setopt HIST_EXPIRE_DUPS_FIRST    # Expire duplicates first when trimming
 setopt HIST_IGNORE_DUPS          # Don't record duplicate of previous event
@@ -137,7 +139,7 @@ add-zsh-hook preexec load_nvm
 # Neovim remote support
 
 # Neovim remote support - override both when inside neovim
-if [ -n "$NVIM_LISTEN_ADDRESS" ]; then
+if [ -n "$NVIM" ]; then
     # Use neovim-remote when inside neovim to avoid nested instances
     alias nvim='nvr -cc split --remote-wait +'"'"'set bufhidden=wipe'"'"
     export VISUAL="nvr -cc split --remote-wait +'set bufhidden=wipe'"
