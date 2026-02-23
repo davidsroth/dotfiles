@@ -316,7 +316,7 @@ install_modern_neovim_linux() {
         success "Neovim $current_ver installed from backports"
         return 0
       else
-        if [[ "$NVIM_INSTALL_METHOD" == "backports" ]]; then
+        if [[ "$NVIM_METHOD" == "backports" ]]; then
           warning "Backports did not yield >= $min_ver (got: ${current_ver:-none})."
         else
           warning "Backports did not yield >= $min_ver (got: ${current_ver:-none}). Falling back to portable build."
@@ -696,12 +696,6 @@ install_packages() {
 
     # Install everything from Brewfile
     if confirm "Install packages from Brewfile?" "y"; then
-      # Ensure fonts tap if Brewfile includes font casks
-      if grep -qE '^cask\s+"font-' "$DOTFILES_DIR/Brewfile" 2>/dev/null; then
-        info "Ensuring homebrew/cask-fonts tap for font casks..."
-        brew tap homebrew/cask-fonts 2>/dev/null || true
-      fi
-
       # Run brew bundle with no-upgrade to be idempotent
       local brew_exit_code=0
       if [[ "$VERBOSE" == "true" ]]; then
@@ -1091,7 +1085,7 @@ install_fira_code_nerd_font() {
   local font_dir="$HOME/.local/share/fonts/FiraCodeNerdFont"
   mkdir -p "$font_dir"
 
-  local tmp_zip="/tmp/InconsolataNerdFont-$$.zip"
+  local tmp_zip="/tmp/FiraCodeNerdFont-$$.zip"
   local url_latest="https://github.com/ryanoasis/nerd-fonts/releases/latest/download/FiraCode.zip"
 
   info "Downloading Fira Code Nerd Font..."
