@@ -33,7 +33,7 @@ function M.open(cmd, opts)
     if file_dir ~= nil and file_dir ~= "" then
       cwd = file_dir
     else
-      cwd = vim.loop.cwd()
+      cwd = vim.uv.cwd()
     end
   end
 
@@ -53,7 +53,8 @@ function M.open(cmd, opts)
     cmd_to_run = vim.o.shell
   end
 
-  vim.fn.termopen(cmd_to_run, {
+  vim.fn.jobstart(cmd_to_run, {
+    term = true,
     cwd = cwd,
     on_exit = function(_, code)
       if opts.close_on_exit ~= false then

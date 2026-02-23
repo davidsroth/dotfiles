@@ -26,7 +26,8 @@ function M.open()
   local buf = vim.api.nvim_get_current_buf()
   vim.bo[buf].bufhidden = "wipe"
 
-  vim.fn.termopen({ shell, "-ic", full_cmd }, {
+  vim.fn.jobstart({ shell, "-ic", full_cmd }, {
+    term = true,
     on_exit = function(_, code)
       if code ~= 0 then
         vim.schedule(function()

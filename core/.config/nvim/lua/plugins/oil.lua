@@ -19,7 +19,7 @@ return {
     {
       "<leader>fE",
       function()
-        require("oil").open(vim.loop.cwd())
+        require("oil").open(vim.uv.cwd())
       end,
       desc = "Explorer (oil) cwd",
     },

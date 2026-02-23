@@ -106,7 +106,7 @@ vim.api.nvim_create_user_command("ToggleWarnings", toggle_diagnostics_warnings, 
 map("n", "<leader>tw", toggle_diagnostics_warnings, { desc = "Toggle diagnostics warnings" })
 
 -- Open current file in Finder (macOS-only)
-if vim.loop.os_uname().sysname == "Darwin" then
+if vim.uv.os_uname().sysname == "Darwin" then
   map("n", "<leader>of", function()
     local file = vim.fn.expand("%:p")
     if file ~= "" then

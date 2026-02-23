@@ -3,7 +3,7 @@
 -- ============================================================================
 
 local lazypath = vim.fn.stdpath("data") .. "/lazy/lazy.nvim"
-if not vim.loop.fs_stat(lazypath) then
+if not vim.uv.fs_stat(lazypath) then
   -- Bootstrap lazy.nvim with optimized clone
   -- stylua: ignore
   vim.fn.system({
