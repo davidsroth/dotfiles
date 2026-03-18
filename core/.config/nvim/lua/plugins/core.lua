@@ -8,7 +8,7 @@ return {
       })
     end,
   },
-  { "ellisonleao/gruvbox.nvim" },
+  { "ellisonleao/gruvbox.nvim", lazy = true },
   {
     "NumToStr/Navigator.nvim",
     config = function()

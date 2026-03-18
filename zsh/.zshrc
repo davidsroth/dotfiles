@@ -183,22 +183,16 @@ fi
 # History Substring Search Configuration
 # ============================================================================
 
-# Load history substring search after syntax highlighting
-if [[ -n "$HOMEBREW_PREFIX" && -f "$HOMEBREW_PREFIX/share/zsh-history-substring-search/zsh-history-substring-search.zsh" ]]; then
+# Load history substring search after syntax highlighting (deferred)
+zsh-defer -c 'if [[ -n "$HOMEBREW_PREFIX" && -f "$HOMEBREW_PREFIX/share/zsh-history-substring-search/zsh-history-substring-search.zsh" ]]; then
     source "$HOMEBREW_PREFIX/share/zsh-history-substring-search/zsh-history-substring-search.zsh"
-    
-    # Bind arrow keys for history search
-    bindkey '^[[A' history-substring-search-up
-    bindkey '^[[B' history-substring-search-down
-    
-    # Also bind in vi mode
-    bindkey -M vicmd 'k' history-substring-search-up
-    bindkey -M vicmd 'j' history-substring-search-down
-    
-    # Bind for Emacs mode (default)
-    bindkey '^P' history-substring-search-up
-    bindkey '^N' history-substring-search-down
-fi
+    bindkey "^[[A" history-substring-search-up
+    bindkey "^[[B" history-substring-search-down
+    bindkey -M vicmd "k" history-substring-search-up
+    bindkey -M vicmd "j" history-substring-search-down
+    bindkey "^P" history-substring-search-up
+    bindkey "^N" history-substring-search-down
+fi'
 
 # ============================================================================
 # Performance Profiling Output

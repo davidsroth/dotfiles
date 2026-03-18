@@ -35,8 +35,9 @@
 	path = ~/.gitconfig.local
 
 [credential]
-	# Use macOS keychain for storing credentials securely
-	helper = osxkeychain
+	# Credential helper is platform-specific; set in ~/.gitconfig.local
+	# macOS: helper = osxkeychain
+	# Linux: helper = store  (or helper = /usr/lib/git-core/git-credential-libsecret)
 
 [push]
 	# Only push the current branch to its upstream branch
@@ -79,7 +80,8 @@
 	
 	# Show moved lines in different color
 	colorMoved = zebra
-	
+	colorMovedWS = allow-indentation-change
+
 	# Use more descriptive diff headers
 	mnemonicprefix = true
 
@@ -212,5 +214,9 @@
 [includeIf "gitdir:~/work/"]
 	# Include work-specific config when in work directories
 	path = ~/.gitconfig.work
+[branch]
+	sort = -committerdate
+
 [maintenance]
 	auto = true
+	strategy = incremental

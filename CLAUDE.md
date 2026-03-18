@@ -44,7 +44,7 @@ This is David Roth's personal dotfiles repository for macOS development environm
   - Vim-like keybindings in `.config/tmux/keybindings.conf`
   - Settings and plugins
   - Session management with tmux-resurrect
-- **Font**: Inconsolata Nerd Font
+- **Font**: Fira Code Nerd Font
 
 ### Window & Keyboard Management
 
@@ -69,10 +69,15 @@ This is David Roth's personal dotfiles repository for macOS development environm
 All dotfiles are managed via symlinks from home directory to this repository:
 
 ```
-~/.zshrc → ~/dotfiles/.zshrc
-~/.config/nvim → ~/dotfiles/.config/nvim
-~/.hammerspoon → ~/dotfiles/.hammerspoon
+~/.zshrc → ~/dotfiles/zsh/.zshrc
+~/.zshenv → ~/dotfiles/zsh/.zshenv
+~/.zprofile → ~/dotfiles/zsh/.zprofile
+~/.config/ → ~/dotfiles/core/.config/
+~/.hammerspoon → ~/dotfiles/core/.hammerspoon
+~/.gitconfig → ~/dotfiles/git-config/.gitconfig
 ```
+
+Stow packages: `core`, `zsh`, `git-config`
 
 ### Key Directories
 
@@ -147,16 +152,21 @@ All dotfiles are managed via symlinks from home directory to this repository:
 - Test changes before committing
 - Maintain symlinks when adding new tools
 
-## Recent Changes (2025-07-18)
+## Recent Changes (2026-03-18)
 
-- Modularized shell configuration into `.config/shell/`
-- Added `.zshenv` for environment variables (all shells)
-- Added `.zprofile` for PATH setup (login shells)
-- Added Kitty terminal configuration with Catppuccin theme
-- Reorganized tmux config with separate keybindings file
-- Added global gitignore at `.config/git/ignore`
-- Created documentation for components
-- Added Starship prompt configuration
+- Reorganized into stow packages: `core`, `zsh`, `git-config` (2025-10)
+- Switched font to Fira Code Nerd Font (2025-09)
+- Switched default terminal back to WezTerm (2025-09)
+- Added Debian/Ubuntu cross-platform support to install script (2025-09)
+- Replaced nvim-cmp with blink.cmp for completion (2025-08)
+- Replaced neo-tree with oil.nvim for file management (2025-08)
+- Added tmux worktree management functions and keybindings (2025-08)
+- Added bgrun background process runner to shell functions (2025-08)
+- Added Catppuccin Mocha theme across all tools (tmux, lazygit, starship, WezTerm, Kitty)
+- Added configurations for bottom, espanso, and k9s (2025-10)
+- Added Hammerspoon local config override support (2025-10)
+- Fixed deprecated Neovim APIs (vim.loop, termopen) (2026-02)
+- Cleaned up repo: removed bundles, stale logs, untracked opencode deps (2026-03)
 
 ## Git Workflow
 
