@@ -1012,6 +1012,12 @@ post_install_setup() {
   # Nerd Font: Fira Code (for Kitty/tmux glyphs)
   install_fira_code_nerd_font || true
 
+  # OpenCode plugin dependencies
+  if [[ -f "$HOME/.config/opencode/package.json" ]]; then
+    info "Installing OpenCode plugin dependencies..."
+    (cd "$HOME/.config/opencode" && npm install --silent) && success "OpenCode dependencies installed" || warning "OpenCode npm install failed"
+  fi
+
   # Shared agent skills
   setup_agent_skills || true
 }

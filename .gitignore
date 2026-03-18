@@ -39,6 +39,11 @@ core/.config/gh-dash/config.local.yml
 
 # Logs
 .nvimlog
+lazygit_error.log
+nvim-profile*.log
+
+# Bundles
+*.bundle
 
 # Claude Agent / AI Memory
 core/.claude/
@@ -58,6 +63,9 @@ core/.config/espanso/config/local.yml
 core/.config/espanso/.local_email
 core/.config/espanso/.local_address
 core/.config/gh/hosts.yml
+
+# OpenCode vendored dependencies (installed via post-install)
+core/.config/opencode/node_modules/
 
 # Machine-specific configurations
 core/.config/gh/config.yml
