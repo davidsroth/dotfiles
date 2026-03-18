@@ -67,7 +67,7 @@ compute_total_steps() {
 # Timeouts and constants
 readonly XCODE_TIMEOUT=300 # 5 minutes
 readonly DEFAULT_BRANCH="${DEFAULT_BRANCH:-main}"
-readonly NVM_VERSION="${NVM_VERSION:-v0.39.7}"
+readonly NVM_VERSION="${NVM_VERSION:-v0.40.1}"
 
 # Script options
 DRY_RUN=false
@@ -103,7 +103,7 @@ Environment Variables:
     GITHUB_USER     Your GitHub username (default: davidroth)
     DOTFILES_DIR    Installation directory (default: ~/dotfiles)
     DEFAULT_BRANCH  Git branch to use (default: main)
-    NVM_VERSION     NVM version to install (default: v0.39.7)
+    NVM_VERSION     NVM version to install (default: v0.40.1)
     NVIM_METHOD     Neovim method: auto|appimage|tarball|backports (default: auto→appimage on x86_64)
     NVIM_MIN_VERSION     Ensure Neovim >= this version (default: 0.9.0)
     NVIM_FORCE_UPDATE    true to force reinstall (default: false)
@@ -1083,7 +1083,7 @@ install_fira_code_nerd_font() {
   step "Installing Fira Code Nerd Font (Linux)"
 
   # Check if already present
-  if fc-list | rg -qi "Fira.?Code Nerd Font" >/dev/null 2>&1; then
+  if fc-list | grep -Eqi "Fira.?Code Nerd Font" >/dev/null 2>&1; then
     success "Fira Code Nerd Font already available"
     return 0
   fi

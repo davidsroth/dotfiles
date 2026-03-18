@@ -1,17 +1,3 @@
-function toggle_application(name)
-	local app = hs.application.get(name)
-	if not app then
-		-- The application isn't running, start it
-		hs.application.launchOrFocus(name)
-	elseif app:isFrontmost() then
-		-- The application is running and is foremost, hide it
-		app:hide()
-	else
-		-- The application is running but not foremost, focus it
-		hs.application.launchOrFocus(name)
-	end
-end
-
 -- launch, focus or rotate application
 local function launchOrFocusOrRotate(app)
 	local focusedWindow = hs.window.focusedWindow()

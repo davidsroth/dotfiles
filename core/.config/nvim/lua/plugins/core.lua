@@ -23,6 +23,7 @@ return {
   },
   {
     "nvim-mini/mini.surround",
+    version = false,
     opts = {
       mappings = {
         add = "gsa",

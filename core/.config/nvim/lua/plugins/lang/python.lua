@@ -40,7 +40,9 @@ return {
       anaconda_envs_path = nil,
       pyenv_path = vim.fn.expand("~/.pyenv/versions"),
       pipenv_path = nil,
-      poetry_path = vim.fn.expand("~/Library/Caches/pypoetry/virtualenvs"),
+      poetry_path = vim.fn.has("mac") == 1
+        and vim.fn.expand("~/Library/Caches/pypoetry/virtualenvs")
+        or vim.fn.expand("~/.cache/pypoetry/virtualenvs"),
       hatch_path = nil,
       venvwrapper_path = nil,
 

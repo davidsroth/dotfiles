@@ -24,7 +24,7 @@ customCommands:
     # ============================================================================
 
     context: "commits"
-    command: "open $(git remote get-url origin | sed 's/\\.git$//' | sed 's/git@github.com:/https:\\/\\/github.com\\//')/commit/{{.SelectedLocalCommit.Hash}}"
+    command: "url=$(git remote get-url origin | sed 's/\\.git$//' | sed 's/git@github.com:/https:\\/\\/github.com\\//'); if [ \"$(uname)\" = \"Darwin\" ]; then open \"$url/commit/{{.SelectedLocalCommit.Hash}}\"; else xdg-open \"$url/commit/{{.SelectedLocalCommit.Hash}}\"; fi"
     description: "Open commit in GitHub"
   # Open GitHub Dashboard
   - key: "D"
@@ -90,7 +90,7 @@ customCommands:
   # Copy commit hash to clipboard
   - key: "y"
     context: "commits"
-    command: "echo -n {{.SelectedLocalCommit.Hash}} | pbcopy"
+    command: "printf '%s' {{.SelectedLocalCommit.Hash}} | sh -c 'if [ \"$(uname)\" = \"Darwin\" ]; then pbcopy; else xclip -selection clipboard; fi'"
     description: "Copy commit hash"
   # Revert commit
   - key: "R"
