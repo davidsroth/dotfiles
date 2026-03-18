@@ -60,8 +60,7 @@ brew "yazi"            # Terminal file manager
 # Language Managers
 brew "pyenv"
 brew "pyenv-virtualenv"
-brew "node"
-brew "pnpm"
+# Node managed via NVM; pnpm installed via npm/corepack under NVM
 
 # Container Tools
 brew "docker"
