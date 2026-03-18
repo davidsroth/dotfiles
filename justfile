@@ -151,8 +151,8 @@ audit:
   @zsh -n zsh/.zshrc && echo "✓ .zshrc syntax OK" || echo "✗ .zshrc syntax error"
   @zsh -n zsh/.zshenv && echo "✓ .zshenv syntax OK" || echo "✗ .zshenv syntax error"
   @zsh -n zsh/.zprofile && echo "✓ .zprofile syntax OK" || echo "✗ .zprofile syntax error"
-  @bash -n core/.config/shell/aliases.sh && echo "✓ aliases.sh syntax OK" || echo "✗ aliases.sh syntax error"
-  @bash -n core/.config/shell/functions.sh && echo "✓ functions.sh syntax OK" || echo "✗ functions.sh syntax error"
+  @zsh -n core/.config/shell/aliases.sh && echo "✓ aliases.sh syntax OK" || echo "✗ aliases.sh syntax error"
+  @zsh -n core/.config/shell/functions.sh && echo "✓ functions.sh syntax OK" || echo "✗ functions.sh syntax error"
   @echo
   @echo "Lua syntax check (luac)"
   @if command -v luac >/dev/null 2>&1; then \

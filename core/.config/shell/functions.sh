@@ -84,7 +84,7 @@ EOF
     cat >>"$file" <<EOF
 ## $timestamp
 
-$(pbpaste)
+$(_clippaste)
 
 ---
 
@@ -133,12 +133,43 @@ EOF
 # Clipboard Utilities
 # ============================================================================
 
-# Run a command and copy both stdout and stderr to the macOS clipboard
+# Cross-platform clipboard helpers
+# Usage: _clipcopy (reads stdin), _clippaste (writes stdout)
+_clipcopy() {
+    if command -v pbcopy >/dev/null 2>&1; then
+        pbcopy
+    elif command -v wl-copy >/dev/null 2>&1; then
+        wl-copy
+    elif command -v xclip >/dev/null 2>&1; then
+        xclip -selection clipboard
+    elif command -v xsel >/dev/null 2>&1; then
+        xsel --clipboard --input
+    else
+        printf "clipboard: no copy command found\n" >&2
+        return 127
+    fi
+}
+
+_clippaste() {
+    if command -v pbpaste >/dev/null 2>&1; then
+        pbpaste
+    elif command -v wl-paste >/dev/null 2>&1; then
+        wl-paste
+    elif command -v xclip >/dev/null 2>&1; then
+        xclip -selection clipboard -o
+    elif command -v xsel >/dev/null 2>&1; then
+        xsel --clipboard --output
+    else
+        printf "clipboard: no paste command found\n" >&2
+        return 127
+    fi
+}
+
+# Run a command and copy both stdout and stderr to clipboard
 # Usage: pb <command> [args...]
 pb() {
-    # Require macOS pbcopy
-    if ! command -v pbcopy >/dev/null 2>&1; then
-        echo "pb: requires pbcopy (macOS)" >&2
+    if ! _clipcopy </dev/null >/dev/null 2>&1; then
+        echo "pb: no clipboard command found" >&2
         return 127
     fi
 
@@ -162,12 +193,12 @@ pb() {
     fi
 
     if [ -n "${ZSH_VERSION:-}" ]; then
-        env "${env_kv[@]}" "$@" |& pbcopy
+        env "${env_kv[@]}" "$@" 2>&1 | _clipcopy
         local rc=${pipestatus[1]}
         return $rc
     else
         # bash and others
-        env "${env_kv[@]}" "$@" |& pbcopy
+        env "${env_kv[@]}" "$@" 2>&1 | _clipcopy
         local rc=${PIPESTATUS[0]:-$?}
         return $rc
     fi
@@ -198,15 +229,13 @@ _ctc_capture() {
             -e 's/[[:space:]]+$//')
     fi
 
-    # Copy decorated content to clipboard when available
-    if command -v pbcopy >/dev/null 2>&1; then
-        if [ -n "$cmdline" ]; then
-            { printf '`%s` -> ' "$cmdline"; cat "$tmp"; } | pbcopy
-        else
-            cat "$tmp" | pbcopy
-        fi
+    # Copy decorated content to clipboard
+    if [ -n "$cmdline" ]; then
+        { printf '`%s` -> ' "$cmdline"; cat "$tmp"; } | _clipcopy
     else
-        printf "%s\n" "ctc: pbcopy not available" >&2
+        _clipcopy < "$tmp"
+    fi
+    if [ $? -ne 0 ]; then
         rm -f "$tmp"
         return 127
     fi
@@ -247,11 +276,9 @@ _ctct_capture_to_log() {
         formatted_output=$(cat "$tmp")
     fi
 
-    # Copy decorated content to clipboard when available
-    if command -v pbcopy >/dev/null 2>&1; then
-        printf "%s" "$formatted_output" | pbcopy
-    else
-        printf "%s\n" "ctct: pbcopy not available" >&2
+    # Copy decorated content to clipboard
+    printf "%s" "$formatted_output" | _clipcopy
+    if [ $? -ne 0 ]; then
         rm -f "$tmp"
         return 127
     fi

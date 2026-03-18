@@ -162,12 +162,12 @@ fi
 # JSON viewing
 command -v jless >/dev/null 2>&1 && alias json='jless'
 
-# Clipboard helpers (zsh-only, guarded)
-if [ -n "$ZSH_VERSION" ] && command -v pbcopy >/dev/null 2>&1; then
+# Clipboard helpers (zsh-only, cross-platform)
+if [ -n "$ZSH_VERSION" ] && type _clipcopy >/dev/null 2>&1; then
   # Copy stderr+stdout to clipboard at end of pipeline
-  alias -g C='|& pbcopy'
+  alias -g C='|& _clipcopy'
   # Print to screen and copy to clipboard
-  alias -g CT='|& tee >(pbcopy)'
+  alias -g CT='|& tee >(_clipcopy)'
   # Print to screen; copy "<CMD> -> <RESULT>" to clipboard
   alias -g CTC='|& _ctc_capture'
   # Print to screen; copy "<CMD> -> <RESULT>" to clipboard AND log to /tmp

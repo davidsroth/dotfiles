@@ -74,14 +74,19 @@ stty -ixon
 # Critical Immediate Loads
 # ============================================================================
 
-# Zoxide - must be loaded before first use (guarded)
-if command -v zoxide >/dev/null 2>&1; then
-    eval "$(zoxide init zsh)"
+# Zoxide - cached init for performance
+_zoxide_cache="${XDG_CACHE_HOME:-$HOME/.cache}/zsh/zoxide-init.zsh"
+if [[ -f "$_zoxide_cache" && "$_zoxide_cache" -nt "$(command -v zoxide 2>/dev/null)" ]]; then
+    source "$_zoxide_cache"
+elif command -v zoxide >/dev/null 2>&1; then
+    zoxide init zsh > "$_zoxide_cache"
+    source "$_zoxide_cache"
 fi
+unset _zoxide_cache
 
-# Load shell configuration
-[ -f ~/.config/shell/aliases.sh ] && source ~/.config/shell/aliases.sh
+# Load shell configuration (functions first — aliases depend on clipboard helpers)
 [ -f ~/.config/shell/functions.sh ] && source ~/.config/shell/functions.sh
+[ -f ~/.config/shell/aliases.sh ] && source ~/.config/shell/aliases.sh
 
 # ============================================================================
 # Deferred Loads (Performance Optimization)
@@ -150,10 +155,16 @@ fi
 # Prompt Configuration
 # ============================================================================
 
-# Starship - fast, minimal, cross-shell prompt
-if command -v starship >/dev/null 2>&1; then
-  eval "$(starship init zsh)"
+# Starship prompt - cached init for performance
+_starship_cache="${XDG_CACHE_HOME:-$HOME/.cache}/zsh/starship-init.zsh"
+_starship_config="${XDG_CONFIG_HOME:-$HOME/.config}/starship.toml"
+if [[ -f "$_starship_cache" && "$_starship_cache" -nt "$(command -v starship 2>/dev/null)" && ( ! -f "$_starship_config" || "$_starship_cache" -nt "$_starship_config" ) ]]; then
+    source "$_starship_cache"
+elif command -v starship >/dev/null 2>&1; then
+    starship init zsh --print-full-init > "$_starship_cache"
+    source "$_starship_cache"
 fi
+unset _starship_cache _starship_config
 
 # ============================================================================
 # Plugin Loading (Deferred for Performance)
