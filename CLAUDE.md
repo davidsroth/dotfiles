@@ -1,173 +1,33 @@
 # Dotfiles Repository
 
-This is David Roth's personal dotfiles repository for macOS development environment configuration.
+Personal dotfiles for macOS (Apple Silicon) managed with GNU Stow. Some configs include Debian/Ubuntu cross-platform support — write platform-conditional logic accordingly.
 
-## Repository Overview
+## Editing configs
 
-**Purpose**: Centralized configuration management for development tools using a symlink-based approach
-**Structure**: XDG Base Directory compliant with most configs under `.config/`
-**Platform**: macOS (Tahoe 26, Apple M3 Max); also supports Debian/Ubuntu
+- Shell aliases: edit `core/.config/shell/aliases.sh`
+- Shell functions: edit `core/.config/shell/functions.sh`
+- Shell environment: `.zshenv` for env vars, `.zprofile` for PATH, `.zshrc` for interactive config
+- Neovim plugins and config: edit files under `.config/nvim/lua/`
+- Git settings: edit `.gitconfig` or `.config/git/ignore` for the global gitignore
 
-## Key Components
+## Adding new tool configs
 
-### Shell Environment
+Three stow packages exist: `core`, `zsh`, `git-config`.
 
-- **Primary Shell**: Zsh with Starship prompt
-- **Configuration Structure**:
-  - Environment variables in `.zshenv` (sourced for all shells)
-  - PATH setup in `.zprofile` (login shells only)
-  - Interactive config in `.zshrc`
-  - Modular aliases in `.config/shell/aliases.sh`
-  - Modular functions in `.config/shell/functions.sh`
-- **Features**:
-  - Zoxide for directory jumping
-  - FZF for fuzzy finding
-  - Pyenv for Python version management
-  - NVM for Node.js (lazy-loaded for performance)
+- New tool configs that live under `~/.config/` belong in `core/` (at `dotfiles/core/.config/<tool>/`).
+- Run `just stow` from `~/dotfiles/` to symlink all packages. See `justfile` for other maintenance tasks (`stow-restow`, `audit`, `doctor`, `clean`).
+- `CLAUDE.md` is excluded from stow intentionally — do not add it to any package.
 
-### Editor Configuration
+## Git workflow
 
-- **Primary Editor**: Neovim (LazyVim-based setup)
-- **Plugins**:
-  - VimTeX for LaTeX editing
-  - Language support
-- **Secondary Editor**: Antigravity (launched via `antigravity` command)
+Commit directly to main. No secrets in version control.
 
-### Terminal & Multiplexing
+## Commits
 
-- **Primary Terminal**: WezTerm
-  - Configuration documented in `.config/wezterm/README.md`
-- **Alternative Terminal**: Kitty
-  - Configured with Catppuccin Mocha theme
-  - See `.config/kitty/README.md`
-  - Not auto-installed via Brewfile (cask is commented out); maintained manually
-- **Multiplexer**: tmux with modular configuration
-  - Vim-like keybindings in `.config/tmux/keybindings.conf`
-  - Settings and plugins
-  - Session management with `sesh` and tmux-sessionist
-- **Font**: Fira Code Nerd Font
+Short imperative subject line. No Co-Authored-By footer.
 
-### Window & Keyboard Management
+## Claude session files
 
-- **Amethyst**: Tiling window manager (layouts, resize, pane arrangement)
-- **Hammerspoon**: Lua-based macOS automation for app-launch hotkeys, dead-key swallowing, and other non-tiling automation (not window layout)
-- **Karabiner**: Keyboard modifications with multiple profiles
-
-### Development Tools
-
-- **Git**: Global configuration
-  - Global gitignore in `.config/git/ignore`
-  - Multiple aliases and custom settings
-  - LFS support
-- **Lazygit**: Terminal UI for Git
-  - Custom keybindings and commands
-  - UI customizations
-- **Browser**: Zen (preferred, opened with `open -a "Zen"`)
-
-## Installation & Management
-
-### Symlink Structure
-
-All dotfiles are managed via symlinks from home directory to this repository:
-
-```
-~/.zshrc → ~/dotfiles/zsh/.zshrc
-~/.zshenv → ~/dotfiles/zsh/.zshenv
-~/.zprofile → ~/dotfiles/zsh/.zprofile
-~/.config/ → ~/dotfiles/core/.config/
-~/.hammerspoon → ~/dotfiles/core/.hammerspoon
-~/.gitconfig → ~/dotfiles/git-config/.gitconfig
-~/.pi/agent/{AGENTS.md,settings.json,keybindings.json,agents/,packages/,prompts,skills,extensions,themes} → ~/dotfiles/pi/.pi/agent/*
-```
-
-Note: `~/.pi/agent/auth.json` and `~/.pi/agent/sessions/` are intentionally **not** stowed — they stay local (secrets / per-machine session history).
-
-Stow packages: `core`, `zsh`, `git-config`, `pi`, and `linux` (Linux-only: awesome, kmonad)
-
-### Key Directories
-
-- `~/.config/`: XDG config directory for most tools
-- `~/dotfiles/`: This repository location
-
-
-## Working with This Repository
-
-### Making Changes
-
-1. Edit files directly in `~/dotfiles/`
-2. Changes take effect immediately (via symlinks)
-3. Commit changes to track configuration evolution
-
-### Adding New Configurations
-
-1. Place config in appropriate location (preferably under `.config/`)
-2. Create symlink from home directory
-3. Document in this file
-
-## Development Workflow
-
-### Terminal Workflow
-
-1. tmux for session management
-2. Neovim for code editing (with nvr for remote editing)
-3. Lazygit for version control
-4. FZF for file/history searching
-
-### Integrations
-
-- Shell history is deduplicated
-- Neovim can be controlled remotely via `nvr`
-- tmux and Neovim share vim-like navigation
-- Temporary files organized by date
-
-## Performance Optimizations
-
-- NVM lazy loading to speed up shell startup
-- Selective plugin loading in Neovim
-- History deduplication and optimization
-- Starship prompt
-
-## Notes for Claude Code Sessions
-
-### When Working with Configs
-
-- Open files after editing in a tmux window with Neovim: `tmux new-window -c "$(dirname /path/to/file)" -n "$(basename /path/to/file)" "nvim /path/to/file"`
-- If tmux is unavailable, fall back to: `nvim /path/to/file`
-- Use Zen browser for links: `open -a "Zen" "URL"`
-
-### Common Tasks
-
-- **Updating shell config**: Edit `.zshrc` and source it
-- **Adding aliases**: Edit `.config/shell/aliases.sh`
-- **Adding functions**: Edit `.config/shell/functions.sh`
-- **Neovim plugins**: Edit files under `.config/nvim/lua/`
-- **Git config**: Edit `.gitconfig` or `.config/git/ignore`
-
-### Claude Configuration
-
-- **Memory files**: Located in `.claude/memory/`
-- **Commands**: Custom slash commands in `.claude/commands/`
-- **Settings**: `.claude/settings.json` and `.claude/settings.local.json`
-- **Note**: CLAUDE.md is excluded from stow to allow machine-specific overrides
-
-### Repository Maintenance
-
-- Keep configs version control friendly (no secrets)
-- Document changes
-- Test changes before committing
-- Maintain symlinks when adding new tools
-
-## Recent Changes
-
-Consult `git log --oneline` for an authoritative history. Major pivots:
-
-- Stow-based layout with `core`, `zsh`, `git-config` packages (Linux adds `linux`).
-- Neovim completion uses `blink.cmp`; file management uses `oil.nvim` and `yazi`.
-- Terminal: WezTerm primary, Kitty alternative; Fira Code Nerd Font throughout.
-- Shell: cached starship/zoxide/brew init, lazy nvm, zsh-defer for plugins.
-- AI tooling: `opencode` lives at `.config/opencode/`; `claude` (`~/.claude`), `codex` (`~/.codex`), `gemini` (`~/.gemini`) maintain their own home-rooted directories.
-- Window: Amethyst (tiling) + Hammerspoon (app-launch / dead-key swallow).
-
-## Git Workflow
-
-For this personal dotfiles repository, direct commits to the main branch are acceptable. Feature branches are optional and primarily used for organizing related changes.
+- Memory files: `.claude/memory/`
+- Custom slash commands: `.claude/commands/`
+- Settings: `.claude/settings.json` and `.claude/settings.local.json`
