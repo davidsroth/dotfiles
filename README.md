@@ -239,23 +239,6 @@ zsh -l -c 'echo PATH=$PATH | cut -c1-200'
 - Cleanup: `just clean` to remove `.DS_Store` and editor backup files.
 - Report: see latest maintenance notes in `.codex/reports/`.
 
-## Recent Updates
-
-### 2025-07-22
-
-- **Enhanced install.sh**: Added security improvements, dry-run mode, verbose/quiet options
-- **Better error handling**: Timeouts, branch detection, improved git operations
-- **Documentation**: Added comprehensive help system and function documentation
-
-### 2025-07-18
-
-- **Modularized configurations**: Split files into separate components
-- **Shell setup**: Separated aliases and functions into `.config/shell/`
-- **Environment handling**: Added `.zshenv` and `.zprofile` for variable management
-- **Terminal configurations**: Added Kitty config, reorganized WezTerm config
-- **Documentation**: Added READMEs for major components
-- **Git configuration**: Added global gitignore in `.config/git/ignore`
-
 ## Custom Commands
 
 ### Aliases

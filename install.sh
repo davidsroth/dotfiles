@@ -611,7 +611,8 @@ install_linux_packages() {
   # Essential packages (names adjusted for Debian/Ubuntu)
   # Note: fd-find provides 'fdfind', bat provides 'batcat'. We create shims later.
   local packages=(
-    zsh stow git tmux ripgrep fzf fd-find bat build-essential
+    zsh zsh-autosuggestions zsh-syntax-highlighting
+    stow git tmux ripgrep fzf fd-find bat build-essential
     gawk grep sed rsync python3-pip python3-venv ca-certificates curl
     unzip zip jq git-lfs
   )
@@ -978,6 +979,15 @@ post_install_setup() {
     zsh_path="$(command -v zsh)"
     if [[ "$SHELL" != "$zsh_path" ]]; then
       if confirm "Set zsh as default shell?" "y"; then
+        # chsh requires the target shell to be listed in /etc/shells
+        if [[ -r /etc/shells ]] && ! grep -qxF "$zsh_path" /etc/shells; then
+          info "Adding $zsh_path to /etc/shells"
+          if command -v sudo >/dev/null 2>&1; then
+            echo "$zsh_path" | sudo tee -a /etc/shells >/dev/null || warning "Failed to update /etc/shells"
+          else
+            warning "Cannot write /etc/shells without sudo; chsh may fail"
+          fi
+        fi
         chsh -s "$zsh_path" || warning "Failed to set zsh as default shell"
       fi
     fi
@@ -998,10 +1008,16 @@ post_install_setup() {
   # Nerd Font: Fira Code (for Kitty/tmux glyphs)
   install_fira_code_nerd_font || true
 
-  # OpenCode plugin dependencies
+  # OpenCode plugin dependencies (use npm ci when lockfile present for deterministic installs)
   if [[ -f "$HOME/.config/opencode/package.json" ]]; then
     info "Installing OpenCode plugin dependencies..."
-    (cd "$HOME/.config/opencode" && npm install --silent) && success "OpenCode dependencies installed" || warning "OpenCode npm install failed"
+    local npm_cmd="install"
+    [[ -f "$HOME/.config/opencode/package-lock.json" ]] && npm_cmd="ci"
+    if (cd "$HOME/.config/opencode" && npm "$npm_cmd" --silent); then
+      success "OpenCode dependencies installed"
+    else
+      warning "OpenCode npm $npm_cmd failed"
+    fi
   fi
 
   # Shared agent skills
@@ -1068,8 +1084,8 @@ install_fira_code_nerd_font() {
 
   step "Installing Fira Code Nerd Font (Linux)"
 
-  # Check if already present
-  if fc-list | grep -Eqi "Fira.?Code Nerd Font" >/dev/null 2>&1; then
+  # Check if already present (match the Nerd Font family, not plain Fira Code)
+  if fc-list | grep -Fqi "FiraCode Nerd Font" 2>/dev/null; then
     success "Fira Code Nerd Font already available"
     return 0
   fi

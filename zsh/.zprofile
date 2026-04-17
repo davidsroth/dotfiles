@@ -37,6 +37,17 @@ else
   fi
 fi
 
+# Re-prepend user-local bin dirs so pipx/npm-installed tools win over brew.
+# (brew shellenv above prepended /opt/homebrew/bin; we want ~/.local/bin first.)
+for _userdir in \
+  "$XDG_DATA_HOME/bin" \
+  "$HOME/bin" \
+  "$HOME/.local/bin"
+do
+  [[ -d "$_userdir" ]] && path=("$_userdir" $path)
+done
+unset _userdir
+
 # Remove duplicates from PATH
 typeset -U path
 

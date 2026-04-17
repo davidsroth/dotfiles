@@ -57,7 +57,7 @@ require("lazy").setup({
   -- Plugin Defaults
   -- ============================================================================
   defaults = {
-    lazy = false, -- Custom plugins load during startup for stability
+    lazy = true, -- Lazy by default; plugins without triggers inherit them from LazyVim specs
     version = false, -- Use latest git commits (recommended for now)
   },
 
@@ -73,7 +73,7 @@ require("lazy").setup({
   -- ============================================================================
   checker = {
     enabled = true, -- Automatically check for plugin updates
-    frequency = 3600, -- Check every hour
+    frequency = 86400, -- Check once a day
   },
 
   -- ============================================================================

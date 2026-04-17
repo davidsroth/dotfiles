@@ -15,9 +15,6 @@
 	# Handle line endings properly
 	autocrlf = input
 
-	# Enable parallel index operations
-	preloadindex = true
-
 	# Faster operations on macOS
 	untrackedcache = true
 	fsmonitor = true
@@ -167,8 +164,7 @@
 	f = fetch
 	pl = pull
 	ps = push
-	psu = push -u origin HEAD
-	
+
 	# Undoing
 	unstage = reset HEAD --
 	undo = reset --soft HEAD~1
@@ -193,8 +189,8 @@
 	windowMemory = 256m
 
 [gc]
-	# Garbage collection settings
-	auto = 256
+	# Garbage collection settings (defaults raised; avoid excessive auto-gc)
+	auto = 6700
 	autopacklimit = 50
 
 [help]

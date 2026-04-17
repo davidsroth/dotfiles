@@ -48,7 +48,8 @@ This is David Roth's personal dotfiles repository for macOS development environm
 
 ### Window & Keyboard Management
 
-- **Hammerspoon**: Lua-based macOS automation for app switching and window management
+- **Amethyst**: Tiling window manager (layouts, resize, pane arrangement)
+- **Hammerspoon**: Lua-based macOS automation for app-launch hotkeys, dead-key swallowing, and other non-tiling automation (not window layout)
 - **Karabiner**: Keyboard modifications with multiple profiles
 
 ### Development Tools

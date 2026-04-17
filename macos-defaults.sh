@@ -262,7 +262,7 @@ echo
 info "Notable changes:"
 echo "  • Reduce motion is enabled (less animations)"
 echo "  • Transparency is reduced"
-echo "  • Three finger drag is enabled"
+echo "  • Three finger drag is disabled (swipe → Mission Control instead)"
 echo "  • File extensions are shown"
 echo "  • Hidden files are visible"
 echo "  • Dock auto-hides"

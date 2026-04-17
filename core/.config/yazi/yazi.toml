@@ -1,0 +1,53 @@
+[mgr]
+show_hidden = true
+show_symlink = true
+sort_by = "natural"
+sort_dir_first = true
+sort_sensitive = false
+linemode = "size"
+scrolloff = 5
+
+[preview]
+wrap = "yes"
+tab_size = 2
+max_width = 1920
+max_height = 1080
+image_filter = "lanczos3"
+image_quality = 75
+
+# Defining [opener] replaces all defaults, so we redefine the full set
+# plus a custom "browser" opener for Zen.
+[opener]
+edit = [
+  { run = '${EDITOR:-nvim} "$@"', block = true, desc = "Edit", for = "unix" },
+]
+open = [
+  { run = 'open "$@"', desc = "Open (default)", for = "macos" },
+  { run = 'xdg-open "$@"', desc = "Open (default)", for = "linux" },
+]
+play = [
+  { run = 'open "$@"', orphan = true, desc = "Play", for = "macos" },
+  { run = 'mpv "$@"', orphan = true, desc = "Play", for = "linux" },
+]
+browser = [
+  { run = 'open -a "Zen" "$@"', desc = "Open in Zen", for = "macos" },
+]
+reveal = [
+  { run = 'open -R "$@"', orphan = true, desc = "Reveal in Finder", for = "macos" },
+]
+extract = [
+  { run = 'ya pub extract --list "$@"', desc = "Extract here", for = "unix" },
+]
+
+[open]
+prepend_rules = [
+  { mime = "text/html", use = ["browser", "edit"] },
+]
+
+# Disable image preview — tmux can't relay the pixel-dimension probe (CSI 16t)
+# correctly, so response sequences get interpreted as keystrokes.
+# Text/code preview still works fine.
+[plugin]
+prepend_previewers = [
+  { mime = "image/*", run = "noop" },
+]

@@ -48,11 +48,11 @@ map("n", "K", "<c-u>", { desc = "Page up" })
 map("n", "H", "^", { desc = "Move to the beginning of the line" })
 map("n", "L", "$", { desc = "Move to the end of the line" })
 
-map("n", "<m-Down>", ":m .+1<CR>==", { desc = "Swap current line with above" })
+map("n", "<m-Down>", ":m .+1<CR>==", { desc = "Swap current line with below" })
 map("n", "<m-Up>", ":m .-2<CR>==", { desc = "Swap current line with above" })
-map("i", "<m-Down>", "<Esc>:m .+1<CR>==gi", { desc = "Swap current line with above" })
+map("i", "<m-Down>", "<Esc>:m .+1<CR>==gi", { desc = "Swap current line with below" })
 map("i", "<m-Up>", "<Esc>:m .-2<CR>==gi", { desc = "Swap current line with above" })
-map("v", "<m-Down>", ":m '>+1<CR>gv=gv", { desc = "Swap current line with above" })
+map("v", "<m-Down>", ":m '>+1<CR>gv=gv", { desc = "Swap current line with below" })
 map("v", "<m-Up>", ":m '<-2<CR>gv=gv", { desc = "Swap current line with above" })
 
 -- Toggle diagnostics warnings

@@ -111,38 +111,14 @@ return {
               return (str:gsub("^%s+", ""):gsub("%s+$", ""))
             end
 
-            if vim.system then
-              local res = vim.system({ "poetry", "env", "info", "--path" }, {
-                cwd = root_dir,
-                text = true,
-              }):wait()
-              if res and res.code == 0 and res.stdout then
-                local venv_path = trim(res.stdout)
-                if venv_path ~= "" and vim.fn.isdirectory(venv_path) == 1 then
-                  return venv_path
-                end
-              end
-            else
-              local stdout = {}
-              local job = vim.fn.jobstart({ "poetry", "env", "info", "--path" }, {
-                cwd = root_dir,
-                stdout_buffered = true,
-                on_stdout = function(_, data)
-                  if not data then
-                    return
-                  end
-                  for _, line in ipairs(data) do
-                    if line ~= nil then
-                      table.insert(stdout, line)
-                    end
-                  end
-                end,
-              })
-              if job > 0 and vim.fn.jobwait({ job })[1] == 0 then
-                local venv_path = trim(table.concat(stdout, "\n"))
-                if venv_path ~= "" and vim.fn.isdirectory(venv_path) == 1 then
-                  return venv_path
-                end
+            local res = vim.system({ "poetry", "env", "info", "--path" }, {
+              cwd = root_dir,
+              text = true,
+            }):wait()
+            if res and res.code == 0 and res.stdout then
+              local venv_path = trim(res.stdout)
+              if venv_path ~= "" and vim.fn.isdirectory(venv_path) == 1 then
+                return venv_path
               end
             end
           end

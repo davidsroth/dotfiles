@@ -9,10 +9,8 @@ __pycache__/
 
 # Tmux plugins (managed by TPM)
 core/.config/tmux/plugins/tpm/
-core/.config/tmux/plugins/tmux-sensible/
 core/.config/tmux/plugins/tmux-yank/
 core/.config/tmux/plugins/tmux-sessionist/
-core/.config/tmux/plugins/vim-tmux-navigator/
 core/.config/tmux/plugins/tmux-fzf/
 
 # Hammerspoon
