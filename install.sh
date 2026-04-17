@@ -75,7 +75,7 @@ VERBOSE=false
 QUIET=false
 
 # Neovim install controls (override via env)
-# - NVIM_METHOD: auto|tarball|backports|appimage (default: auto → tarball)
+# - NVIM_METHOD: auto|tarball|backports|appimage (default: auto → appimage on x86_64, tarball elsewhere)
 # - NVIM_MIN_VERSION: semantic minimum version to ensure (default: 0.9.0)
 # - NVIM_FORCE_UPDATE: if "true", reinstall even when >= min version (default: false)
 # - NVIM_VERSION_TAG: explicit tag like "v0.10.4" (default: empty → latest)

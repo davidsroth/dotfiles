@@ -6,7 +6,7 @@ macOS development environment configuration.
 
 This repository contains personal dotfiles for macOS, organized following the XDG Base Directory specification. It uses a symlink-based approach for management and version control.
 
-**Platform**: macOS Sequoia 15.5 (Darwin 24.5.0)  
+**Platform**: macOS Tahoe 26 (Darwin 25.x)  
 **Hardware**: MacBook Pro with Apple M3 Max  
 **Architecture**: ARM64
 
@@ -47,7 +47,7 @@ Environment variables:
 - `GITHUB_USER`: Your GitHub username (default: davidroth)
 - `DOTFILES_DIR`: Installation directory (default: ~/dotfiles)
 - `DEFAULT_BRANCH`: Git branch to use (default: main)
-- `NVM_VERSION`: NVM version to install (default: v0.39.7)
+- `NVM_VERSION`: NVM version to install (default: v0.40.1)
 
 The installer will:
 
@@ -120,7 +120,7 @@ stow core zsh git-config
 - **Kitty** - Alternative terminal (configured in `.config/kitty/`)
 - **tmux** - Terminal multiplexer with vim-like keybindings
   - Modular configuration with separate keybindings file
-  - Session management with tmux-resurrect
+  - Session management with `sesh` (TPM plugins: tmux-yank, tmux-sessionist, tmux-fzf)
 
 ### 🎛️ Automation
 
@@ -179,13 +179,14 @@ dotfiles/
 Component documentation:
 
 - [Neovim Configuration](core/.config/nvim/README.md)
+- [tmux Configuration](core/.config/tmux/README.md)
 - [WezTerm Configuration](core/.config/wezterm/README.md)
 - [Shell Configuration](core/.config/shell/README.md)
 - [Kitty Configuration](core/.config/kitty/README.md)
 
 ## Requirements
 
-- macOS (tested on Sequoia 15.5)
+- macOS (tested on Tahoe 26) or Debian/Ubuntu Linux
 - `curl` (pre-installed on macOS)
 - Internet connection for downloading packages
 

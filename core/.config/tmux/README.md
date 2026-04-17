@@ -26,20 +26,21 @@ Modular tmux configuration with vim-like keybindings and session management.
 - `C-g L` - Switch to last session
 
 ### Window Management
-- `C-g c` - Create new window
-- `M-h/M-l` - Previous/next window
+- `C-g c <key>` - Chord for window/pane actions (see `tmux-c-chords.conf`)
+- `M-[/M-]` - Previous/next window
 - `M-0` to `M-9` - Switch to window by number
 - `C-S-Left/Right` - Move window left/right
 
 ### Pane Management
 - `C-g |` - Split horizontally
 - `C-g -` - Split vertically
-- `C-g \` - Split with 70/30 ratio
+- `C-g \` - Split horizontal (alias)
+- `C-g _` - Split vertical, resize to 35%
 - `C-g h/j/k/l` - Navigate panes (vim-style)
-- `C-h/j/k/l` - Navigate panes (with vim awareness)
+- `C-h/j/k/l` - Navigate panes (with vim awareness, no prefix)
 - `C-g C-h/j/k/l` - Resize panes
 - `C-g z` - Toggle pane zoom
-- `C-g e` - Kill all panes except current
+- `C-g V/H/E/T` - Main-vertical / main-horizontal / even / tiled layout
 
 ### Copy Mode
 - `C-g Enter` - Enter copy mode
@@ -53,17 +54,18 @@ Modular tmux configuration with vim-like keybindings and session management.
 - `C-g m` - Toggle mouse mode
 - `C-g o` - Open current directory
 - `C-g g` - Open lazygit popup
+- `C-g e` - Yazi file picker popup
+- `C-g v` - Scratch neovim popup
 - `C-g C` - Open Claude popup
-- `C-g C-s` - Synchronize panes
+- `C-g L` - Clear screen and scrollback
 
 ## Plugins
 
 Managed by TPM (Tmux Plugin Manager):
 
-- **tmux-sensible** - Sensible defaults
 - **tmux-yank** - System clipboard integration
 - **tmux-sessionist** - Session management helpers
-- **vim-tmux-navigator** - Seamless vim/tmux navigation
+- **tmux-fzf** - Fuzzy session/window/pane switcher (launch: `C-f`)
 
 ## Installation
 
@@ -89,7 +91,7 @@ brew install sesh
 
 ## Mouse Support
 
-Mouse is disabled by default to allow terminal link clicking. Toggle with `C-g m`.
+Mouse is enabled by default. Toggle with `C-g m` (disable to allow terminal link clicking).
 
 ## Platform Support
 
