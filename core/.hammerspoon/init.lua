@@ -17,8 +17,10 @@ local function launchOrFocusOrRotate(app)
 	end
 end
 
--- Reload on changes in dotfiles repo and in the active Hammerspoon config dir
-hs.pathwatcher.new(os.getenv("HOME") .. "/dotfiles/core/.hammerspoon/", hs.reload):start()
+-- Reload on changes to the active Hammerspoon config dir.
+-- `hs.configdir` is the symlink target of `~/.hammerspoon`, so it covers
+-- edits made directly in the dotfiles repo without watching the same
+-- directory twice.
 hs.pathwatcher.new(hs.configdir, hs.reload):start()
 hs.application.enableSpotlightForNameSearches(true)
 
