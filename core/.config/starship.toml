@@ -1,6 +1,9 @@
 # ============================================================================
 # Starship Prompt Configuration - Minimal & Fast
 # ============================================================================
+# Only modules that appear in `format` are evaluated. Keep this file trimmed
+# to what the prompt actually renders; starship ships sensible defaults for
+# everything else.
 
 # Global settings
 command_timeout = 1500       # ms
@@ -8,12 +11,13 @@ scan_timeout = 30            # ms for scanning files
 add_newline = true
 palette = "catppuccin_mocha"
 
-# Format - shape prompt as: user@host in dir (BRANCH_SYMBOL) branch [status]
+# Format: user@host in dir (BRANCH) status
+# Newline + character on second line.
 format = """
 $username$hostname in $directory$git_branch$git_status$line_break$character"""
 
 # ============================================================================
-# Module Configurations
+# Module Configurations (only modules referenced in `format`)
 # ============================================================================
 
 [character]
@@ -30,8 +34,7 @@ read_only_style = "fg:red"
 home_symbol = "~"
 
 [git_branch]
-# e.g. "() main "
-symbol = " "
+symbol = " "
 style = "fg:mauve"
 truncation_length = 20
 
@@ -48,82 +51,26 @@ staged = "+"
 renamed = "»"
 deleted = "✘"
 
+# git_state is rendered implicitly during rebase/merge/cherry-pick even
+# when not in `format`; style it so those banners match the palette.
 [git_state]
 style = "fg:peach"
 
-[python]
-symbol = " "
-style = "fg:yellow"
-detect_extensions = ["py"]
-detect_files = ["requirements.txt", "setup.py", "pyproject.toml"]
-
-[nodejs]
-symbol = " "
-style = "fg:green"
-detect_extensions = ["js", "mjs", "cjs", "ts", "mts", "cts"]
-detect_files = ["package.json"]
-
-[rust]
-symbol = "󱘗 "
-style = "fg:red"
-
-[golang]
-symbol = " "
-style = "fg:sky"
-
-[docker_context]
-symbol = " "
-style = "fg:blue"
-only_with_files = true
-detect_files = ["docker-compose.yml", "docker-compose.yaml", "Dockerfile"]
-
-# ============================================================================
-# Disabled Modules (for performance)
-# ============================================================================
-
-[aws]
-disabled = true
-
-symbol = "  "
-
-[gcloud]
-disabled = true
-
-symbol = "  "
-
-[cmd_duration]
-disabled = true
-
 [hostname]
-# Show short host (before first dot). Set ssh_only=true to show only on SSH.
+# Show short host (before first dot). Only on SSH.
 trim_at = "."
 ssh_only = true
 format = "[@$hostname]($style)"
 style = "bold fg:mauve"
 disabled = false
-
-ssh_symbol = " "
+ssh_symbol = " "
 
 [username]
-# Show username in the prompt (always visible)
 format = "[$user]($style)"
 style_root = "bold fg:red"
 style_user = "bold fg:yellow"
 show_always = true
 disabled = false
-
-[package]
-disabled = true
-
-symbol = "󰏗 "
-
-[memory_usage]
-disabled = true
-
-symbol = "󰍛 "
-
-[battery]
-disabled = true
 
 # ============================================================================
 # Palette - Catppuccin Mocha
@@ -156,159 +103,3 @@ mauve = "#cba6f7"
 pink = "#f5c2e7"
 flamingo = "#f2cdcd"
 rosewater = "#f5e0dc"
-
-[conda]
-symbol = " "
-
-[kotlin]
-symbol = " "
-
-[haskell]
-symbol = " "
-
-[rlang]
-symbol = "󰟔 "
-
-[cmake]
-symbol = " "
-
-[meson]
-symbol = "󰔷 "
-
-[fossil_branch]
-symbol = " "
-
-[pixi]
-symbol = "󰏗 "
-
-[cpp]
-symbol = " "
-
-[crystal]
-symbol = " "
-
-[nix_shell]
-symbol = " "
-
-[bun]
-symbol = " "
-
-[ocaml]
-symbol = " "
-
-[zig]
-symbol = " "
-
-[gradle]
-symbol = " "
-
-[haxe]
-symbol = " "
-
-[hg_branch]
-symbol = " "
-
-[lua]
-symbol = " "
-
-[php]
-symbol = " "
-
-[ruby]
-symbol = " "
-
-[swift]
-symbol = " "
-
-[c]
-symbol = " "
-
-[dart]
-symbol = " "
-
-[deno]
-symbol = " "
-
-[guix_shell]
-symbol = " "
-
-[fennel]
-symbol = " "
-
-[os.symbols]
-Alpaquita = " "
-Alpine = " "
-AlmaLinux = " "
-Amazon = " "
-Android = " "
-Arch = " "
-Artix = " "
-CachyOS = " "
-CentOS = " "
-Debian = " "
-DragonFly = " "
-Emscripten = " "
-EndeavourOS = " "
-Fedora = " "
-FreeBSD = " "
-Garuda = "󰛓 "
-Gentoo = " "
-HardenedBSD = "󰞌 "
-Illumos = "󰈸 "
-Kali = " "
-Linux = " "
-Mabox = " "
-Macos = " "
-Manjaro = " "
-Mariner = " "
-MidnightBSD = " "
-Mint = " "
-NetBSD = " "
-NixOS = " "
-Nobara = " "
-OpenBSD = "󰈺 "
-openSUSE = " "
-OracleLinux = "󰌷 "
-Pop = " "
-Raspbian = " "
-Redhat = " "
-RedHatEnterprise = " "
-RockyLinux = " "
-Redox = "󰀘 "
-Solus = "󰠳 "
-SUSE = " "
-Ubuntu = " "
-Unknown = " "
-Void = " "
-Windows = "󰍲 "
-
-
-[git_commit]
-tag_symbol = '  '
-
-[pijul_channel]
-symbol = " "
-
-[scala]
-symbol = " "
-
-[elixir]
-symbol = " "
-
-[nim]
-symbol = "󰆥 "
-
-[julia]
-symbol = " "
-
-[elm]
-symbol = " "
-
-[buf]
-symbol = " "
-
-[java]
-symbol = " "
-
-[perl]
-symbol = " "
