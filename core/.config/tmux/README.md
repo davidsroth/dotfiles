@@ -6,12 +6,12 @@ Modular tmux configuration with vim-like keybindings and session management.
 
 ```
 .config/tmux/
-├── tmux.conf         # Main configuration entry point
-├── keybindings.conf  # All key binding definitions
-├── utility.conf      # Utility commands (lazygit, claude)
-├── statusline.conf   # Status bar appearance
-├── macos.conf        # macOS-specific settings
-└── scripts/          # Helper scripts
+├── tmux.conf            # Main configuration entry point
+├── keybindings.conf     # All key binding definitions
+├── utility.conf         # Claude/worktree popups
+├── tmux-c-chords.conf   # Prefix+c chord sub-table (opencode, splits, etc.)
+├── statusline.conf      # Status bar appearance (Catppuccin Mocha)
+└── macos.conf           # macOS-specific settings
 ```
 
 ## Key Bindings

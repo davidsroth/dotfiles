@@ -143,6 +143,7 @@ alias reload='source ~/.zshrc'
 # Quick edit common files
 alias ezsh='${EDITOR:-nvim} ~/.zshrc'
 alias ealias='${EDITOR:-nvim} ~/.config/shell/aliases.sh'
+alias efunc='${EDITOR:-nvim} ~/.config/shell/functions.sh'
 alias evim='${EDITOR:-nvim} ~/.config/nvim/init.lua'
 alias etmux='${EDITOR:-nvim} ~/.config/tmux/tmux.conf'
 
