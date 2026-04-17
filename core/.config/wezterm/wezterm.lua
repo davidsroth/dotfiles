@@ -21,11 +21,12 @@ config.color_scheme = "Catppuccin Mocha"
 -- Font Configuration
 -- ============================================================================
 
--- Primary font configuration with fallbacks for Nerd Font glyphs
+-- Primary font: FiraCode Nerd Font Mono (matches Kitty, ships via Brewfile cask).
+-- Fallbacks cover system fonts if the Nerd variant isn't installed.
 config.font = wezterm.font_with_fallback({
+	"FiraCode Nerd Font Mono",
 	"Fira Code Retina",
 	"Monaco",
-	"JetBrainsMono Nerd Font Mono",
 	"Menlo",
 })
 config.font_size = 12.0

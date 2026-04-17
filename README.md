@@ -65,12 +65,15 @@ The installer will:
 This repo uses GNU Stow to create symlinks into your home directory. A `.stowrc` is provided that sets the target to `$HOME`, so you can run Stow commands from the repository root:
 
 ```bash
-# Preview the links (no changes)
-stow -n -v core zsh git-config
+# macOS: stow core, zsh, git-config
+stow -n -v core zsh git-config        # preview
+stow -R core zsh git-config           # apply
 
-# Create or update links
-stow -R core zsh git-config
+# Linux: add the `linux` package (awesome, kmonad)
+stow -R core zsh git-config linux
 ```
+
+Or use `just stow` / `just stow-restow`, which picks the right package set based on OS.
 
 Files and directories that should not be linked (e.g., scripts, docs) are excluded via `.stow-local-ignore`.
 
@@ -85,7 +88,7 @@ git clone https://github.com/davidroth/dotfiles.git ~/dotfiles
 # Install GNU Stow
 brew install stow
 
-# Create symlinks
+# Create symlinks (add `linux` on Linux hosts)
 cd ~/dotfiles
 stow core zsh git-config
 ```
@@ -111,8 +114,8 @@ stow core zsh git-config
 
 ### 🖥️ Terminal & Multiplexing
 
-- **WezTerm** - GPU-accelerated terminal emulator
-  - Gruvbox Dark Hard theme
+- **WezTerm** - GPU-accelerated terminal emulator (primary)
+  - Catppuccin Mocha theme, WebGPU renderer
   - Configuration documented in `.config/wezterm/README.md`
 - **Kitty** - Alternative terminal (configured in `.config/kitty/`)
 - **tmux** - Terminal multiplexer with vim-like keybindings
@@ -164,6 +167,10 @@ dotfiles/
 ├── git-config/
 │   ├── .gitconfig       # Git configuration
 │   └── .gitconfig.local.example
+├── linux/              # Linux-only configs (stowed only on Linux)
+│   └── .config/
+│       ├── awesome/    # AwesomeWM
+│       └── kmonad/     # kmonad keyboard remapper
 └── docs/                # Additional documentation
 ```
 
@@ -227,7 +234,7 @@ zsh -l -c 'echo PATH=$PATH | cut -c1-200'
     - `markdownlint` for Markdown style
     - `lychee` for link checking (network)
     - PATH sanity from a login shell
-- Dry-run links: `stow -n -v core zsh git-config` to preview symlinks without changing files.
+- Dry-run links: `just doctor` (or `stow -n -v core zsh git-config`) to preview symlinks without changing files.
 - Packages: `brew bundle check --no-upgrade` to verify Brewfile status; `brew bundle install --no-upgrade` to install missing items.
 - Cleanup: `just clean` to remove `.DS_Store` and editor backup files.
 - Report: see latest maintenance notes in `.codex/reports/`.

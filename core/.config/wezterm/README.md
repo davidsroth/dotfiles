@@ -1,177 +1,68 @@
 # WezTerm Configuration
 
-WezTerm terminal emulator configuration.
+Primary terminal emulator for this setup. Config: `wezterm.lua` (in this directory).
 
 ## Overview
 
-This configuration uses:
-- **WebGPU rendering**: Hardware-accelerated performance
-- **Dynamic themes**: Automatic light/dark mode switching
-- **Leader key bindings**: tmux-like workflow
-- **macOS settings**: Platform-specific configuration
-
-## Features
-
-### Performance Optimizations
-- **WebGPU front-end**: GPU-accelerated rendering
-- **60 FPS**: Frame rate target
-- **Font rendering**: Subpixel antialiasing and hinting
-- **Scrollback**: 10,000 lines
-
-### Visual Settings
-- **Dynamic theming**: Switches between Gruvbox Dark/Light based on system appearance
-- **Font**: Inconsolata Nerd Font Mono
-- **Transparency**: 95% opacity with macOS background blur
-- **Interface**: Hidden tab bar when single tab, no scroll bar
-
-### Terminal Features
+- **Renderer**: WebGPU, up to 120 FPS
+- **Theme**: Catppuccin Mocha (static; no auto light/dark switching)
+- **Font**: FiraCode Nerd Font Mono, 12pt (falls back to Fira Code Retina, Monaco, Menlo)
 - **Leader key**: `Ctrl+A`
-- **Pane management**: Split, navigate, and close panes
-- **Copy mode**: Vim-like text selection and copying
-- **Quick select**: Fast URL/path selection
-- **Command palette**: `Cmd+Shift+P`
+- **Scrollback**: 10,000 lines
+- **Opacity**: 1.0 (opaque)
 
 ## Key Bindings
 
-### Leader Key Commands
-The leader key is `Ctrl+A` (similar to tmux):
+### Leader chords (`Ctrl+A`, then...)
 
-#### Pane Management
-- `Leader + -` - Split pane vertically
-- `Leader + =` - Split pane horizontally
-- `Leader + h/j/k/l` - Navigate panes (vim-style)
-- `Leader + x` - Close current pane (with confirmation)
+Pane:
+- `-` split vertical, `=` split horizontal
+- `h/j/k/l` navigate panes (vim-style)
+- `x` close pane (confirm prompt)
 
-#### Tab Management
-- `Leader + c` - Create new tab
-- `Leader + n` - Next tab
-- `Leader + p` - Previous tab
+Tab:
+- `c` new tab, `n` next tab, `p` previous tab
 
-#### Text Operations
-- `Leader + Enter` - Enter copy mode
-- `Leader + f` - Search
-- `Leader + Space` - Quick select mode
+Copy / search / select:
+- `Enter` copy mode
+- `f` search (case-sensitive)
+- `Space` quick select
 
-### Global Shortcuts
-- `Cmd+Shift+P` - Command palette
-- `Right click` - Paste from clipboard
+### Global shortcuts
 
-## Font Configuration
+- `Cmd+Shift+P` — command palette
+- `Cmd+J` — sends `Ctrl+G` (my tmux prefix)
+- `Cmd+[` / `Cmd+]` — sends `Alt+[` / `Alt+]` (tmux prev/next window)
+- `Opt+Left/Right` — word-wise cursor motion (sends `Alt+b` / `Alt+f`)
+- `Opt+Backspace` — delete word (sends `Ctrl+W`)
+- Right click — paste from clipboard
 
-### Primary Font
-- **Font**: Inconsolata Nerd Font Mono
-- **Size**: 16pt
-- **Features**: Built-in Nerd Font symbols, ligatures disabled
+## Visual
 
-### Rendering Settings
-- **Antialiasing**: Subpixel for crisp text
-- **Hinting**: Full
-- **Load target**: Light
-- **Render target**: HorizontalLcd for macOS
+- Tab bar hidden when only one tab; no "new tab" button; no scroll bar.
+- Window decorations: resize-only (no title bar).
+- Cursor: steady block.
+- Bell: audible disabled; brief cursor-color visual flash.
 
-## Theme System
+## macOS
 
-### Dynamic Theme Switching
-Automatically switches between themes based on macOS system appearance:
-- **Dark mode**: Gruvbox Dark (Hard)
-- **Light mode**: Gruvbox Light (Hard)
+- `macos_forward_to_ime_modifier_mask = "SHIFT|CTRL"` — lets Option stay available for keybinds.
 
-### Color Scheme Features
-- **High contrast**: Gruvbox theme characteristics
-- **Consistent**: Matches Neovim configuration
+## Misc
 
-## Performance
-
-### Benchmarks
-- **Startup time**: <100ms cold start
-- **Rendering**: 60 FPS with WebGPU
-- **Memory usage**: 10,000 line scrollback buffer
-- **GPU acceleration**: WebGPU enabled
-
-### Optimization Features
-- **WebGPU backend**: Hardware accelerated rendering
-- **Disabled features**: No update checks, minimal UI chrome
-- **Font caching**: Glyph rendering cache
-
-## macOS Integration
-
-### Platform-Specific Features
-- **Background blur**: 20-point blur effect with transparency
-- **Alt key handling**: Composed key support
-- **Window decorations**: Minimal resize-only borders
-- **System integration**: Respects system appearance settings
-
-### Security & Privacy
-- **Update checks disabled**: No network calls for updates
-- **Local operation**: All configuration stored locally
-- **Scrollback storage**: In-memory buffer
-
-## Usage Patterns
-
-### Development Workflow
-1. **Multiple panes**: Split terminal for code/logs/tests
-2. **Tab organization**: One tab per project
-3. **Copy mode**: Easy log analysis and error copying
-4. **Quick select**: Fast file path and URL selection
-
-### Integration with Other Tools
-- **Tmux compatibility**: Can run tmux inside WezTerm if needed
-- **Neovim integration**: Seamless terminal buffer switching
-- **Shell integration**: Works with zsh, starship prompt
-- **Git workflow**: Compatible with lazygit and git operations
-
-## Configuration Management
-
-### File Structure
-```
-~/.config/wezterm/
-├── wezterm.lua          # Main configuration
-└── README.md           # This documentation
-```
-
-### Customization
-Edit `wezterm.lua` to modify:
-- Theme preferences
-- Key bindings
-- Font settings
-- Performance options
-
-### Testing Changes
-WezTerm automatically reloads configuration on file changes. No restart required.
+- `check_for_updates = false` — no network calls on launch.
+- WezTerm auto-reloads on file change; no restart needed.
 
 ## Troubleshooting
 
-### Common Issues
-
-#### Font Problems
-- Use `wezterm ls-fonts` to check available fonts
-- Ensure Inconsolata Nerd Font is installed
-- Check font warnings in terminal output
-
-#### Performance Issues
-- Verify WebGPU support: Check WezTerm version
-- Monitor GPU usage in Activity Monitor
-- Reduce scrollback if memory usage is high
-
-#### Key Binding Conflicts
-- Check for conflicts with system shortcuts
-- Test leader key timeout (1000ms default)
-- Verify terminal focus when using bindings
-
-### Debugging
 ```bash
-# Check WezTerm version and features
 wezterm --version
-
-# List available fonts
-wezterm ls-fonts
-
-# Test configuration
+wezterm ls-fonts           # verify FiraCode Nerd Font Mono is found
 wezterm -n --config-file ~/.config/wezterm/wezterm.lua
 ```
 
-## See Also
+## References
 
-- [WezTerm Documentation](https://wezterm.org/)
-- [Font Configuration Guide](https://wezterm.org/config/fonts.html)
-- [Key Binding Reference](https://wezterm.org/config/keys.html)
+- [WezTerm docs](https://wezterm.org/)
+- [Fonts](https://wezterm.org/config/fonts.html)
+- [Keys](https://wezterm.org/config/keys.html)

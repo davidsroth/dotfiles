@@ -77,7 +77,7 @@ All dotfiles are managed via symlinks from home directory to this repository:
 ~/.gitconfig → ~/dotfiles/git-config/.gitconfig
 ```
 
-Stow packages: `core`, `zsh`, `git-config`
+Stow packages: `core`, `zsh`, `git-config`, and `linux` (Linux-only: awesome, kmonad)
 
 ### Key Directories
 

@@ -2,6 +2,9 @@
 
 set shell := ["bash", "-euo", "pipefail", "-c"]
 
+# Stow packages (Linux adds `linux` for awesome/kmonad configs).
+stow_packages := if os() == "linux" { "core zsh git-config linux" } else { "core zsh git-config" }
+
 default:
   @just --list
 
@@ -12,11 +15,11 @@ install *args:
 
 # Symlink dotfiles into $HOME using stow.
 stow:
-  stow -v core zsh git-config
+  stow -v {{stow_packages}}
 
 # Restow (relink) dotfiles, useful after updates.
 stow-restow:
-  stow -R -v core zsh git-config
+  stow -R -v {{stow_packages}}
 
 # Apply macOS defaults (prompts within script handle confirmations).
 macos-defaults:
@@ -25,7 +28,7 @@ macos-defaults:
 # Update repo and restow changes.
 update:
   git pull --rebase --autostash || true
-  stow -R -v core zsh git-config
+  stow -R -v {{stow_packages}}
 
 # Run full system maintenance (Brew, plugins, system updates)
 maintenance:
@@ -141,7 +144,7 @@ doctor:
   fi
   @echo
   @echo "Stow dry-run preview"
-  @stow -n -v core zsh git-config 2>&1 | grep -E "LINK:|directory" || true
+  @stow -n -v {{stow_packages}} 2>&1 | grep -E "LINK:|directory" || true
 
 # Run static checks and quick repo audit
 audit:
@@ -199,7 +202,7 @@ audit:
   @find . -name ".git" -prune -o -name ".claude" -prune -o -name ".codex" -prune -o -path "*/.config/tmux/plugins" -prune -o \( -type l ! -exec test -e {} \; -print \) | sed -n '1,200p' || true
   @echo
   @echo "Stow conflicts"
-  @stow -n -v core zsh git-config 2>&1 | grep -E "existing target is" || true
+  @stow -n -v {{stow_packages}} 2>&1 | grep -E "existing target is" || true
   @echo
   @echo "PATH sanity (login shell)"
   @zsh -l -c 'echo PATH=$PATH' | cut -c1-200

@@ -144,19 +144,19 @@ gui:
   theme:
     lightTheme: false
     # Borders
-    activeBorderColor: [ "#89b4fa", bold ]      # Blue
-    inactiveBorderColor: [ "#a6adc8" ]          # Subtext0
+    activeBorderColor: ["#89b4fa", bold] # Blue
+    inactiveBorderColor: ["#a6adc8"] # Subtext0
     # Text / options
-    optionsTextColor: [ "#cdd6f4" ]             # Text
-    defaultFgColor: [ "#cdd6f4" ]               # Text
+    optionsTextColor: ["#cdd6f4"] # Text
+    defaultFgColor: ["#cdd6f4"] # Text
     # Selection / highlights
-    selectedLineBgColor: [ "#313244" ]          # Surface0
+    selectedLineBgColor: ["#313244"] # Surface0
     # Git-specific accents
-    cherryPickedCommitFgColor: [ "#94e2d5" ]    # Teal
-    cherryPickedCommitBgColor: [ "#45475a" ]    # Surface1
-    markedBaseCommitFgColor: [ "#f9e2af" ]      # Yellow
-    markedBaseCommitBgColor: [ "#45475a" ]      # Surface1
-    unstagedChangesColor: [ "#f38ba8" ]         # Red
+    cherryPickedCommitFgColor: ["#94e2d5"] # Teal
+    cherryPickedCommitBgColor: ["#45475a"] # Surface1
+    markedBaseCommitFgColor: ["#f9e2af"] # Yellow
+    markedBaseCommitBgColor: ["#45475a"] # Surface1
+    unstagedChangesColor: ["#f38ba8"] # Red
   # Author colors
   authorColors:
     "*": "#999999" # default color for unknown authors
@@ -191,6 +191,10 @@ git:
   # Staging & Diff Configuration
   # ============================================================================
 
+  # Delta pager for syntax-highlighted diffs (installed via Brewfile)
+  pagers:
+    - colorArg: always
+      pager: delta --paging=never
   # Staging mode: 'all' or 'split'
   staging:
     splitDiff: "auto"

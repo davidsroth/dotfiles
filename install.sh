@@ -204,30 +204,16 @@ check_command() {
   command -v "$1" &>/dev/null
 }
 
-# Ensure ~/.local/bin is in PATH for current session and persistently
+# Ensure ~/.local/bin is in PATH for the current install session.
+# Persistence for future shells is handled by the stow-linked zsh/.zprofile
+# and zsh/.zshenv; we intentionally don't mutate rc files here to avoid
+# drift against the tracked dotfiles.
 ensure_user_local_bin_path() {
   mkdir -p "$HOME/.local/bin"
-  # Current session
   case ":$PATH:" in
     *:"$HOME/.local/bin":* ) :;;
     * ) export PATH="$HOME/.local/bin:$PATH";;
   esac
-
-  # Persist for future shells (avoid duplicates)
-  if [[ -f "$HOME/.zprofile" ]]; then
-    if ! grep -qs '^[^#]*\.local/bin' "$HOME/.zprofile"; then
-      # shellcheck disable=SC2016
-      echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$HOME/.zprofile"
-    fi
-  fi
-  if [[ -f "$HOME/.profile" || ! -e "$HOME/.profile" ]]; then
-    # Create if missing
-    touch "$HOME/.profile"
-    if ! grep -qs '^[^#]*\.local/bin' "$HOME/.profile"; then
-      # shellcheck disable=SC2016
-      echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$HOME/.profile"
-    fi
-  fi
 }
 
 # Compare two semantic versions using dpkg if available, otherwise sort -V
@@ -508,6 +494,14 @@ check_platform() {
       exit 1
       ;;
   esac
+
+  # Packages to stow. The `linux` package holds Linux-only configs
+  # (awesome, kmonad) and is skipped on macOS.
+  STOW_PACKAGES=(core zsh git-config)
+  if [[ "$OS_FAMILY" == "linux" ]]; then
+    STOW_PACKAGES+=(linux)
+  fi
+  export STOW_PACKAGES
 }
 
 # Install Xcode Command Line Tools if not already installed
@@ -577,20 +571,10 @@ install_homebrew() {
       return 1
     fi
 
-    # Add Homebrew to PATH
+    # Make brew available in the current install session.
+    # Persistence is handled by the stow-linked zsh/.zprofile (cached brew shellenv).
     if [[ -f "$HOMEBREW_PREFIX/bin/brew" ]]; then
       eval "$("$HOMEBREW_PREFIX"/bin/brew shellenv)"
-
-      # Add to shell profile for persistence (avoid duplicates)
-      if [[ "$SHELL" == *"zsh"* ]]; then
-        if ! grep -q "brew shellenv" ~/.zprofile 2>/dev/null; then
-          echo "eval \"\$(\"$HOMEBREW_PREFIX\"/bin/brew shellenv)\"" >> ~/.zprofile
-        fi
-      else
-        if ! grep -q "brew shellenv" ~/.bash_profile 2>/dev/null; then
-          echo "eval \"\$(\"$HOMEBREW_PREFIX\"/bin/brew shellenv)\"" >> ~/.bash_profile
-        fi
-      fi
     fi
     success "Homebrew installed"
   else
@@ -902,7 +886,7 @@ backup_existing_files() {
   # Get list of files that would be stowed
   cd "$DOTFILES_DIR"
   local conflicts
-  conflicts=$(stow -n -v core zsh git-config 2>&1 | grep "existing target is" || true)
+  conflicts=$(stow -n -v "${STOW_PACKAGES[@]}" 2>&1 | grep "existing target is" || true)
 
   if [[ -n "$conflicts" ]]; then
     warning "Found existing configuration files that would be overwritten"
@@ -943,14 +927,16 @@ setup_dotfiles() {
   cd "$DOTFILES_DIR"
 
   if [[ "$DRY_RUN" == "true" ]]; then
-    info "[DRY RUN] Would run: stow -v core zsh git-config"
+    local _pkgs_str
+    _pkgs_str="$(IFS=' '; printf '%s' "${STOW_PACKAGES[*]}")"
+    info "[DRY RUN] Would run: stow -v ${_pkgs_str}"
     # Show what would be stowed
     info "Preview of what would be linked:"
-    stow -n -v core zsh git-config 2>&1 | grep -E "LINK:|directory" || true
+    stow -n -v "${STOW_PACKAGES[@]}" 2>&1 | grep -E "LINK:|directory" || true
     success "[DRY RUN] Dotfiles would be linked"
   else
     info "Running stow..."
-    if stow -v core zsh git-config; then
+    if stow -v "${STOW_PACKAGES[@]}"; then
       success "Dotfiles linked successfully"
     else
       error "Stow failed. Check the error messages above"
@@ -1164,7 +1150,9 @@ show_summary() {
 
   echo
   info "To update dotfiles in the future:"
-  echo "  cd $DOTFILES_DIR && git pull && stow -R core zsh git-config"
+  local _pkgs_str
+  _pkgs_str="$(IFS=' '; printf '%s' "${STOW_PACKAGES[*]}")"
+  echo "  cd $DOTFILES_DIR && git pull && stow -R ${_pkgs_str}"
 }
 
 # Main installation flow

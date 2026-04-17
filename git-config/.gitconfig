@@ -5,22 +5,32 @@
 [core]
 	# Default editor for commit messages and interactive commands
 	editor = nvim
-	
-	# Better diff settings configured in [diff]
-	
+
+	# Syntax-highlighted diffs via delta (installed via Brewfile: git-delta)
+	pager = delta
+
 	# Prevent issues with file permissions on macOS
 	filemode = false
-	
+
 	# Handle line endings properly
 	autocrlf = input
-	
+
 	# Enable parallel index operations
 	preloadindex = true
-	
+
 	# Faster operations on macOS
 	untrackedcache = true
 	fsmonitor = true
 	excludesfile = ~/.config/git/ignore
+
+[interactive]
+	diffFilter = delta --color-only
+
+[delta]
+	navigate = true          # n / N jumps between diff sections
+	line-numbers = true
+	side-by-side = false
+	syntax-theme = Catppuccin Mocha
 
 [init]
 	# Set default branch name for new repositories

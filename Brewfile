@@ -30,6 +30,7 @@ brew "git-lfs"
 brew "gnupg"           # GPG for commit signing
 brew "lazygit"
 brew "gh"              # GitHub CLI
+brew "git-delta"       # syntax-highlighted diff pager (used by git + lazygit)
 brew "neovim"
 brew "ripgrep"
 brew "fd"
@@ -71,9 +72,10 @@ brew "docker-credential-helper"
 # ================
 
 # Terminals
-cask "wezterm"
-cask "kitty"
-cask "iterm2"
+cask "wezterm"              # primary
+# Alternative terminals (not actively used; uncomment if needed):
+# cask "kitty"
+# cask "iterm2"
 
 # Development
 cask "antigravity"

@@ -12,23 +12,27 @@ export XDG_CACHE_HOME="${XDG_CACHE_HOME:-$HOME/.cache}"
 export XDG_DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
 export XDG_STATE_HOME="${XDG_STATE_HOME:-$HOME/.local/state}"
 
-# Ensure essential binary dirs are in PATH for all shells (incl. non-interactive)
-# This allows commands like nvim/cursor to be discoverable when .zprofile/.zshrc
-# are not sourced (e.g., subprocesses launched by TUIs like lazygit).
-if [ -d "$HOME/.local/bin" ] && [[ ":$PATH:" != *":$HOME/.local/bin:"* ]]; then
-  export PATH="$HOME/.local/bin:$PATH"
-fi
-if [ -d "/opt/homebrew/bin" ] && [[ ":$PATH:" != *":/opt/homebrew/bin:"* ]]; then
-  export PATH="/opt/homebrew/bin:$PATH"
-fi
-if [ -d "/usr/local/bin" ] && [[ ":$PATH:" != *":/usr/local/bin:"* ]]; then
-  export PATH="/usr/local/bin:$PATH"
-fi
-# Cursor app CLI path (when not symlinked into /usr/local/bin)
-if [ -d "/Applications/Cursor.app/Contents/Resources/app/bin" ] \
-   && [[ ":$PATH:" != *":/Applications/Cursor.app/Contents/Resources/app/bin:"* ]]; then
-  export PATH="/Applications/Cursor.app/Contents/Resources/app/bin:$PATH"
-fi
+# Baseline binary dirs for all shells (incl. non-interactive subshells so
+# TUIs like lazygit can find nvim). Login shells layer brew shellenv and GNU
+# paths on top in .zprofile; this is the one place user-bin dirs are set.
+for _dir in \
+  "$HOME/.local/bin" \
+  "$HOME/bin" \
+  "$XDG_DATA_HOME/bin" \
+  "/opt/homebrew/bin" \
+  "/usr/local/bin"
+do
+  if [ -d "$_dir" ] && [[ ":$PATH:" != *":$_dir:"* ]]; then
+    export PATH="$_dir:$PATH"
+  fi
+done
+unset _dir
+
+# Machine-specific overrides (not tracked). Put PATH additions for locally
+# installed apps here — e.g., for the Cursor CLI:
+#   [ -d "/Applications/Cursor.app/Contents/Resources/app/bin" ] && \
+#     export PATH="/Applications/Cursor.app/Contents/Resources/app/bin:$PATH"
+[[ -f "$HOME/.zshenv.local" ]] && source "$HOME/.zshenv.local"
 
 # Language and locale
 export LANG="${LANG:-en_US.UTF-8}"
@@ -90,11 +94,7 @@ export ZSH_AUTOSUGGEST_BUFFER_MAX_SIZE=20
 export PYENV_VIRTUALENV_DISABLE_PROMPT=1
 
 # Ensure XDG directories exist
-[[ ! -d "$XDG_CONFIG_HOME" ]] && mkdir -p "$XDG_CONFIG_HOME"
-[[ ! -d "$XDG_CACHE_HOME" ]] && mkdir -p "$XDG_CACHE_HOME"
-[[ ! -d "$XDG_DATA_HOME" ]] && mkdir -p "$XDG_DATA_HOME"
-[[ ! -d "$XDG_STATE_HOME" ]] && mkdir -p "$XDG_STATE_HOME"
-[[ ! -d "$XDG_STATE_HOME/zsh" ]] && mkdir -p "$XDG_STATE_HOME/zsh"
+mkdir -p "$XDG_CONFIG_HOME" "$XDG_CACHE_HOME" "$XDG_DATA_HOME" "$XDG_STATE_HOME/zsh"
 
 # FZF configuration
 # Global defaults should NOT change Enter behavior to avoid breaking widgets like Ctrl-R history

@@ -27,4 +27,13 @@ return {
     "tpope/vim-fugitive",
     cmd = "G",
   },
+  {
+    "kdheepak/lazygit.nvim",
+    dependencies = { "nvim-lua/plenary.nvim" },
+    cmd = { "LazyGit", "LazyGitCurrentFile", "LazyGitFilter", "LazyGitFilterCurrentFile" },
+    keys = {
+      { "<leader>gg", "<cmd>LazyGit<cr>", desc = "LazyGit (root)" },
+      { "<leader>gG", "<cmd>LazyGitCurrentFile<cr>", desc = "LazyGit (file dir)" },
+    },
+  },
 }

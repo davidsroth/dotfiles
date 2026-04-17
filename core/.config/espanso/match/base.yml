@@ -15,14 +15,7 @@ matches:
   - trigger: ";li"
     replace: "https://www.linkedin.com/in/david-s-roth/"
 
-  - trigger: ";@@"
-    replace: "davidsamuelroth@gmail.com"
-
-  - trigger: ";##"
-    replace: "2016153785"
-
-  - trigger: ";addr"
-    replace: "715 Saint Marks Avenue"
+  # Personal identifiers (";@@", ";##", ";addr") live in match/local.yml (gitignored)
 
   # Print the current date
   - trigger: ";date"

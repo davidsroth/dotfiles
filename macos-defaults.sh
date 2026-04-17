@@ -34,8 +34,10 @@ error() {
     echo -e "${RED}[ERROR]${NC} $1" >&2
 }
 
-# Close System Preferences to prevent conflicts
-osascript -e 'tell application "System Preferences" to quit' 2>/dev/null || true
+# Close System Settings (Ventura+) / System Preferences to prevent conflicts
+osascript -e 'tell application "System Settings" to quit' 2>/dev/null \
+  || osascript -e 'tell application "System Preferences" to quit' 2>/dev/null \
+  || true
 
 # =============================================================================
 # Accessibility

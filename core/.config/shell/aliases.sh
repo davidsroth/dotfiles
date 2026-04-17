@@ -36,7 +36,7 @@ fi
 
 # Better cat with syntax highlighting (guarded)
 if command -v bat >/dev/null 2>&1; then
-  alias cat='bat --theme=ansi'
+  alias cat='bat'
 fi
 
 # Editor shortcuts (guarded)
@@ -88,7 +88,6 @@ alias dpsa='docker ps -a'
 # Homebrew maintenance (guarded)
 if command -v brew >/dev/null 2>&1; then
   alias brwu='brew update && brew upgrade && brew cleanup && rm -f ~/.cache/zsh/brew-shellenv.zsh ~/.cache/zsh/gnu-paths.zsh && echo "✓ Regenerated zsh brew caches"'
-  alias brewup='brew update && brew upgrade && brew cleanup && rm -f ~/.cache/zsh/brew-shellenv.zsh ~/.cache/zsh/gnu-paths.zsh && echo "✓ Regenerated zsh brew caches"'
 fi
 
 # Quick clear

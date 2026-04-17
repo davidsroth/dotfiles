@@ -17,13 +17,8 @@ else
   fi
 fi
 
-# User-specific binaries
-path=(
-    "$HOME/.local/bin"           # User installed binaries (pipx, etc.)
-    "$HOME/bin"                  # Personal scripts
-    "$XDG_DATA_HOME/bin"         # XDG compliant user binaries
-    $path                        # Existing PATH
-)
+# Note: User bin dirs ($HOME/.local/bin, $HOME/bin, $XDG_DATA_HOME/bin) are
+# set in .zshenv so they're available in non-interactive subshells too.
 
 # Prefer GNU userland where safe (via Homebrew) - cached for performance
 if [[ -f ~/.cache/zsh/gnu-paths.zsh ]]; then

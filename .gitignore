@@ -60,6 +60,7 @@ core/.config/op/
 # Root level dotfiles that might be stow conflicts or local
 .gitconfig
 core/.config/espanso/config/local.yml
+core/.config/espanso/match/local.yml
 core/.config/espanso/.local_email
 core/.config/espanso/.local_address
 core/.config/gh/hosts.yml
