@@ -200,13 +200,7 @@ fi'
 # Uncomment the line below to see startup performance report
 # zprof
 
-# bun
-if [[ -d "$HOME/.bun" ]]; then
-  export BUN_INSTALL="$HOME/.bun"
-  export PATH="$BUN_INSTALL/bin:$PATH"
-fi
-
-# bun completions
-[ -s "$HOME/.bun/_bun" ] && source "$HOME/.bun/_bun"
+# bun is installed via Homebrew (see Brewfile); completions load automatically
+# from $HOMEBREW_PREFIX/share/zsh/site-functions via compinit.
 
 # Antigravity path is set in ~/.zshenv.local (machine-local override).

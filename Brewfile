@@ -1,6 +1,9 @@
 # Brewfile - Homebrew Bundle for dotfiles
 # https://github.com/Homebrew/homebrew-bundle
 
+# Taps
+tap "oven-sh/bun"             # Official bun tap (https://github.com/oven-sh/homebrew-bun)
+
 # Command Line Tools
 # =================
 
@@ -54,6 +57,7 @@ brew "k9s"             # Kubernetes TUI
 brew "pyenv"
 brew "pyenv-virtualenv"
 # Node managed via NVM; pnpm installed via npm/corepack under NVM
+brew "bun"             # JavaScript runtime / package manager (official oven-sh tap)
 
 # Container Tools
 brew "docker"
