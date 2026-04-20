@@ -44,9 +44,11 @@ brew "grep"            # GNU grep (faster, broadly compatible)
 brew "gawk"            # GNU awk (feature-rich, broadly compatible)
 brew "jless"           # JSON viewer
 brew "btop"            # Modern system monitor
+brew "bottom"          # Modern system monitor (provides `btm`)
 brew "doggo"           # Modern DNS client (actively maintained)
 brew "fastfetch"       # System info display
 brew "yazi"            # Terminal file manager
+brew "k9s"             # Kubernetes TUI
 
 # Language Managers
 brew "pyenv"
@@ -76,6 +78,8 @@ cask "1password"
 cask "1password-cli"
 cask "hammerspoon"
 cask "karabiner-elements"
+cask "amethyst"             # Tiling window manager
+cask "espanso"              # Text expander
 
 # Communication
 cask "slack"
