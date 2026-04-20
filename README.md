@@ -110,7 +110,7 @@ stow core zsh git-config
   - Language support for multiple languages
   - LaTeX editing with VimTeX
   - See `.config/nvim/README.md` for details
-- **Cursor** as secondary editor (VSCode fork)
+- **Antigravity** as secondary editor
 
 ### 🖥️ Terminal & Multiplexing
 
@@ -124,9 +124,9 @@ stow core zsh git-config
 
 ### 🎛️ Automation
 
+- **Amethyst** - Tiling window manager (layouts, resize, pane arrangement)
 - **Hammerspoon** - macOS automation with Lua
-  - App switching hotkeys
-  - Window management
+  - App-launch hotkeys and dead-key swallowing (non-tiling automation)
 - **Karabiner-Elements** - Keyboard customization
 
 ### Development Tools
@@ -140,7 +140,6 @@ stow core zsh git-config
 - **Opencode** - AI coding assistant integration
   - Neovim plugin
   - Shell aliases and tools
-- **Antigravity** - Secondary editor
 - **Zen Browser** - Primary browser
 - Python management with **pyenv**
 - Node.js management with **nvm** (lazy-loaded)
@@ -167,11 +166,10 @@ dotfiles/
 ├── git-config/
 │   ├── .gitconfig       # Git configuration
 │   └── .gitconfig.local.example
-├── linux/              # Linux-only configs (stowed only on Linux)
-│   └── .config/
-│       ├── awesome/    # AwesomeWM
-│       └── kmonad/     # kmonad keyboard remapper
-└── docs/                # Additional documentation
+└── linux/              # Linux-only configs (stowed only on Linux)
+    └── .config/
+        ├── awesome/    # AwesomeWM
+        └── kmonad/     # kmonad keyboard remapper
 ```
 
 ## Component Documentation
@@ -213,18 +211,7 @@ zsh -l -c 'echo PATH=$PATH | cut -c1-200'
 
 ### brew bundle failures
 
-- Deprecated taps: Remove `tap "homebrew/services"` and `tap "zen-browser/zen-browser"` from `Brewfile`. The installer no longer relies on these; `zen-browser` cask installs from core.
-- Font cask conflicts: If `cask "font-inconsolata-nerd-font"` fails with "It seems the existing Font is different", back up and remove conflicting local fonts, then retry:
-
-  ```bash
-  ts=$(date +%Y%m%d-%H%M%S)
-  mkdir -p "$HOME/.font-backups/$ts"
-  mv "$HOME/Library/Fonts"/InconsolataNerdFont-*.ttf "$HOME/.font-backups/$ts" 2>/dev/null || true
-  brew reinstall --cask font-inconsolata-nerd-font
-  # or: brew bundle --file Brewfile
-  ```
-
-  Note: The installer auto-taps `homebrew/cask-fonts` when `font-` casks are present.
+- Font cask conflicts: if a Nerd Font cask fails with "It seems the existing Font is different", back up and remove the conflicting local font files from `~/Library/Fonts` and retry `brew bundle --file Brewfile`.
 
 ## Maintenance
 
@@ -238,7 +225,6 @@ zsh -l -c 'echo PATH=$PATH | cut -c1-200'
 - Dry-run links: `just doctor` (or `stow -n -v core zsh git-config`) to preview symlinks without changing files.
 - Packages: `brew bundle check --no-upgrade` to verify Brewfile status; `brew bundle install --no-upgrade` to install missing items.
 - Cleanup: `just clean` to remove `.DS_Store` and editor backup files.
-- Report: see latest maintenance notes in `.codex/reports/`.
 
 ## Custom Commands
 
@@ -253,9 +239,8 @@ zsh -l -c 'echo PATH=$PATH | cut -c1-200'
 ### Functions
 
 - `pblog` - Daily logging helper
-- `tdump` - Quick note dumping
-- `rdom`, `tody`, `ystd` - Date helpers
-- `jt`, `jtm` - Temporary file management
+- `today`, `yesterday`, `tomorrow`, `datetime`, `now` - Date helpers
+- `tmpfile`, `tdump`, `tlog` - Temporary file / note helpers
 
 See `.config/shell/` for the complete list.
 

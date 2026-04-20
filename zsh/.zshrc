@@ -129,10 +129,8 @@ pyenv() {
 # Lazy load using autoload hook for better performance
 autoload -U add-zsh-hook
 load_nvm() {
-  export NVM_DIR="$HOME/.nvm"
   [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
   [ -s "$NVM_DIR/bash_completion" ] && . "$NVM_DIR/bash_completion"
-  # Remove this function after first load
   unfunction load_nvm
   add-zsh-hook -d preexec load_nvm
 }
@@ -180,15 +178,6 @@ zsh-defer -c '[[ -n "$HOMEBREW_PREFIX" ]] && source "$HOMEBREW_PREFIX/share/zsh-
 # Performance Settings
 # ============================================================================
 # Performance environment variables are now in ~/.zshenv
-
-# ============================================================================
-# Custom Aliases
-# ============================================================================
-
-# Local Claude alias if available
-if [ -x "$HOME/.claude/local/claude" ]; then
-  alias claude="$HOME/.claude/local/claude"
-fi
 
 # ============================================================================
 # History Substring Search Configuration

@@ -65,23 +65,6 @@ for key, app in pairs(alts) do
     end)
 end
 
--- Swallow macOS dead-key leaders for Option+i/u so they don't compose
--- Hotkeys defined above (hs.hotkey.bind) will still fire; this just blocks text insertion
-local swallowKeys = { i = true, u = true }
-local swallowTap = hs.eventtap.new({ hs.eventtap.event.types.keyDown, hs.eventtap.event.types.keyUp }, function(event)
-    local flags = event:getFlags()
-    if flags.alt and not flags.cmd and not flags.ctrl then
-        local kc = event:getKeyCode()
-        for k, _ in pairs(swallowKeys) do
-            if kc == hs.keycodes.map[k] then
-                return true -- prevent dead-key / glyph from reaching apps
-            end
-        end
-    end
-    return false
-end)
-swallowTap:start()
-
 -- Bind F-keys produced by Karabiner for Option+i/u
 -- This avoids macOS dead-key composition while keeping Option-based muscle memory
 hs.hotkey.bind({}, "f18", function() launchOrFocusOrRotate(launchKeys.i) end)

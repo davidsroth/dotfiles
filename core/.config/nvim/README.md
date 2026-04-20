@@ -45,7 +45,7 @@ This configuration uses:
 - **Cache**: `~/.cache/nvim/`
 
 ### Language Support
-- **Markdown**: Editing with headlines and preview
+- **Markdown**: Editing with render-markdown.nvim
 - **LaTeX**: VimTeX integration with Skim viewer
 - **Python**: Pyenv integration with dedicated environment
 - **LSP**: Full language server support via Mason
@@ -131,11 +131,15 @@ Current performance metrics:
 
 Currently enabled extras:
 - `dap.core` - Debug adapter protocol
-- `lang.markdown` - Markdown support
+- `lang.markdown`, `lang.python`, `lang.json`, `lang.toml` - Language support
 - `ui.mini-animate` - Smooth animations
 - `ui.alpha` - Dashboard
+- `ui.smear-cursor` - Smeared cursor motion
 - `linting.eslint` - ESLint integration
 - `formatting.prettier` - Prettier formatting
+- `util.dot` - Dotfiles syntax / helpers
+- `util.mini-hipatterns` - Highlight patterns (TODO, hex colors, etc.)
+- `vscode` - VSCode integration
 
 ## Dependencies
 
