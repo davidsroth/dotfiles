@@ -155,6 +155,24 @@
                                 "to": [ { "key_code": "f19" } ]
                             }
                         ]
+                    },
+                    {
+                        "description": "F5 to right_option+F13 (Wispr Flow trigger)",
+                        "manipulators": [
+                            {
+                                "type": "basic",
+                                "from": {
+                                    "key_code": "f5",
+                                    "modifiers": { "optional": ["any"] }
+                                },
+                                "to": [
+                                    {
+                                        "key_code": "f13",
+                                        "modifiers": ["right_option"]
+                                    }
+                                ]
+                            }
+                        ]
                     }
                 ]
             },
