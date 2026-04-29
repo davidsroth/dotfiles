@@ -39,11 +39,6 @@ Justfile
 Brewfile
 Brewfile.lock.json
 
-# Documentation directory
-# Ignore any nested docs directories and the top-level package
-docs/
-^docs$
-
 # Repo-level automation and reports (do not stow into $HOME)
 ^\.codex$
 

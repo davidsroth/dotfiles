@@ -129,9 +129,7 @@ if command -v gemini >/dev/null 2>&1; then
   alias gmir='gemini -r'
 fi
 
-# Logs - view today's log
-alias tlog-view='${EDITOR:-nvim} /tmp/$(date +"%Y%m%d")/log'
-alias tlog-tail='tail -f /tmp/$(date +"%Y%m%d")/log'
+# tlog viewers live in functions.sh so they can ensure today's dir + log exist.
 
 # ============================================================================
 # Utility Aliases

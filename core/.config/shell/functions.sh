@@ -360,6 +360,23 @@ tlog() {
     echo "" >>"$file"
 }
 
+# View today's tlog in $EDITOR
+tlog-view() {
+    local file="$(ensure_today_dir)/log"
+    if [[ ! -s "$file" ]]; then
+        echo "No tlog entries for today. Usage: <cmd> | tlog [context]" >&2
+        return 1
+    fi
+    "${EDITOR:-nvim}" "$file"
+}
+
+# Tail today's tlog live
+tlog-tail() {
+    local file="$(ensure_today_dir)/log"
+    [[ -e "$file" ]] || : >"$file"
+    tail -f "$file"
+}
+
 # Find latest file in current directory
 fls() {
     ls -t | head -n 1
