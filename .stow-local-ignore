@@ -51,7 +51,6 @@ docs/
 ^.nvimlog$
 
 # Repo-level files that should not be stowed into $HOME
-^AGENTS\.MD$
 .*\.bundle$
 
 # Example files
