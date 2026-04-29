@@ -64,6 +64,12 @@ config.macos_forward_to_ime_modifier_mask = "SHIFT|CTRL"
 -- Terminal Behavior
 -- ============================================================================
 
+-- Emit CSI u key encoding so modifier+key combos that the legacy xterm
+-- encoding can't represent (Ctrl+Enter, Shift+Enter, Ctrl+i vs Tab,
+-- Ctrl+,, etc.) are sent unambiguously. Pairs with tmux's
+-- `set -g extended-keys on` so Neovim and friends can map them.
+config.enable_csi_u_key_encoding = true
+
 -- Scrollback configuration
 config.scrollback_lines = 10000
 config.enable_scroll_bar = false
