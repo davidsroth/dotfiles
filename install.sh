@@ -497,7 +497,7 @@ check_platform() {
 
   # Packages to stow. The `linux` package holds Linux-only configs
   # (awesome, kmonad) and is skipped on macOS.
-  STOW_PACKAGES=(core zsh git-config)
+  STOW_PACKAGES=(core zsh git-config pi)
   if [[ "$OS_FAMILY" == "linux" ]]; then
     STOW_PACKAGES+=(linux)
   fi

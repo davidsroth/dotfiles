@@ -1,0 +1,14 @@
+{
+  "lastChangelogVersion": "0.70.6",
+  "defaultThinkingLevel": "medium",
+  "theme": "catppuccin-mocha",
+  "defaultProvider": "anthropic",
+  "defaultModel": "claude-opus-4-7",
+  "terminal": {
+    "showTerminalProgress": true
+  },
+  "quietStartup": true,
+  "packages": [
+    "npm:pi-vim"
+  ]
+}

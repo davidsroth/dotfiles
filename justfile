@@ -3,7 +3,7 @@
 set shell := ["bash", "-euo", "pipefail", "-c"]
 
 # Stow packages (Linux adds `linux` for awesome/kmonad configs).
-stow_packages := if os() == "linux" { "core zsh git-config linux" } else { "core zsh git-config" }
+stow_packages := if os() == "linux" { "core zsh git-config pi linux" } else { "core zsh git-config pi" }
 
 default:
   @just --list

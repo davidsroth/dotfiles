@@ -76,9 +76,12 @@ All dotfiles are managed via symlinks from home directory to this repository:
 ~/.config/ → ~/dotfiles/core/.config/
 ~/.hammerspoon → ~/dotfiles/core/.hammerspoon
 ~/.gitconfig → ~/dotfiles/git-config/.gitconfig
+~/.pi/agent/{AGENTS.md,settings.json,prompts,skills,extensions,themes} → ~/dotfiles/pi/.pi/agent/*
 ```
 
-Stow packages: `core`, `zsh`, `git-config`, and `linux` (Linux-only: awesome, kmonad)
+Note: `~/.pi/agent/auth.json` and `~/.pi/agent/sessions/` are intentionally **not** stowed — they stay local (secrets / per-machine session history).
+
+Stow packages: `core`, `zsh`, `git-config`, `pi`, and `linux` (Linux-only: awesome, kmonad)
 
 ### Key Directories
 
