@@ -28,7 +28,7 @@ vim.opt.undofile = true
 -- Language Provider Configuration
 -- ============================================================================
 
--- Python provider (ensure pyenv environment exists)
+-- Python provider (uses the pyenv-managed `py3nvim` environment when available)
 local python_path = os.getenv("HOME") .. "/.pyenv/versions/py3nvim/bin/python"
 if vim.fn.executable(python_path) == 1 then
   vim.g.python3_host_prog = python_path

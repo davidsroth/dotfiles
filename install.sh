@@ -946,6 +946,19 @@ setup_dotfiles() {
   fi
 }
 
+# Report whether an expected config path exists after stow.
+# Arguments: path label
+report_stow_target() {
+  local path="$1"
+  local label="$2"
+
+  if [[ -e "$path" || -L "$path" ]]; then
+    success "$label found at $path"
+  else
+    warning "$label missing at $path"
+  fi
+}
+
 # Perform post-installation tasks (directories, Git LFS, TPM, shell)
 # Returns: 0 on success
 post_install_setup() {
@@ -1157,6 +1170,16 @@ show_summary() {
     warning "tmux plugin manager (TPM) not found at ~/.tmux/plugins/tpm"
     echo "  Install with: git clone https://github.com/tmux-plugins/tpm ~/.tmux/plugins/tpm"
     echo "  Then in tmux, press prefix + I to install plugins"
+  fi
+
+  echo
+  info "Linked config check:"
+  report_stow_target "$HOME/.config/nvim" "Neovim config"
+  report_stow_target "$HOME/.config/tmux" "tmux config"
+  report_stow_target "$HOME/.pi/agent" "pi agent config"
+  if [[ "${OS_FAMILY:-}" == "macos" ]]; then
+    report_stow_target "$HOME/.hammerspoon" "Hammerspoon config"
+    report_stow_target "$HOME/.config/karabiner" "Karabiner config"
   fi
 
   if [[ "$GITHUB_USER" == "YOUR_USERNAME" ]]; then

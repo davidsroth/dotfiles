@@ -47,7 +47,7 @@ This configuration uses:
 ### Language Support
 - **Markdown**: Editing with render-markdown.nvim
 - **LaTeX**: VimTeX integration with Skim viewer
-- **Python**: Pyenv integration with dedicated environment
+- **Python**: Pyenv integration with dedicated `py3nvim` environment
 - **LSP**: Full language server support via Mason
 
 ### Custom Keybindings
@@ -144,7 +144,8 @@ Currently enabled extras:
 ## Dependencies
 
 - **Neovim**: v0.9.0+ (v0.10.0+ for all features)
-- **Python**: Pyenv with `py3nvim` environment
+- **Python**: Pyenv with a `py3nvim` environment
+  - Create it with: `pyenv virtualenv 3.11 py3nvim && pyenv activate py3nvim && pip install pynvim`
 - **Node.js**: For LSP servers and formatters
 - **Git**: For plugin management
 - **Skim**: PDF viewer for LaTeX (macOS)

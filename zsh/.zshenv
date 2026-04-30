@@ -72,8 +72,14 @@ if [ -z "${VISUAL:-}" ] || [ "${VISUAL:-}" = "vi" ] || [ "${VISUAL:-}" = "vim" ]
 fi
 
 # Development paths
-# Only set JAVA_HOME if the path exists on this machine
-if [ -d "/Library/Java/JavaVirtualMachines/zulu-17.jdk/Contents/Home" ]; then
+# Prefer the active macOS Java installation, with a fallback for older setups
+if [ -x "/usr/libexec/java_home" ]; then
+  JAVA_HOME_CANDIDATE="$(/usr/libexec/java_home 2>/dev/null || true)"
+  if [ -n "$JAVA_HOME_CANDIDATE" ] && [ -d "$JAVA_HOME_CANDIDATE" ]; then
+    export JAVA_HOME="$JAVA_HOME_CANDIDATE"
+  fi
+  unset JAVA_HOME_CANDIDATE
+elif [ -d "/Library/Java/JavaVirtualMachines/zulu-17.jdk/Contents/Home" ]; then
   export JAVA_HOME="/Library/Java/JavaVirtualMachines/zulu-17.jdk/Contents/Home"
 fi
 export NVM_DIR="$HOME/.nvm"
@@ -99,11 +105,16 @@ mkdir -p "$XDG_CONFIG_HOME" "$XDG_CACHE_HOME" "$XDG_DATA_HOME" "$XDG_STATE_HOME/
 # FZF configuration
 # Global defaults should NOT change Enter behavior to avoid breaking widgets like Ctrl-R history
 export FZF_DEFAULT_OPTS="--height 40% --layout=reverse --border"
-export FZF_DEFAULT_COMMAND='fd --type f --hidden --follow --exclude .git'
+if command -v fd >/dev/null 2>&1; then
+  export FZF_DEFAULT_COMMAND='fd --type f --hidden --follow --exclude .git'
+else
+  export FZF_DEFAULT_COMMAND='find -L . -type f -not -path "*/.git/*" 2>/dev/null'
+fi
 export FZF_CTRL_T_COMMAND="$FZF_DEFAULT_COMMAND"
 
 # Open selected file from Ctrl-T in $EDITOR on Enter, without affecting Ctrl-R history widget
-export FZF_CTRL_T_OPTS="--bind 'enter:execute($EDITOR {} < /dev/tty > /dev/tty 2>&1)+abort'"
+# Escape $EDITOR so it resolves when the binding runs, not when the shell starts.
+export FZF_CTRL_T_OPTS="--bind 'enter:execute(\$EDITOR {} < /dev/tty > /dev/tty 2>&1)+abort'"
 
 # Ensure Ctrl-R behaves normally (accept selection on Enter)
 export FZF_CTRL_R_OPTS="--bind 'enter:accept'"

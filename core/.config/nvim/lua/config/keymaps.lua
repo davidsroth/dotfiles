@@ -20,10 +20,6 @@ map("n", "<leader>wr", "<cmd> set wrap!<cr>", { desc = "Toggle wrap" })
 map("n", "<leader>ww", "<cmd>w<cr>", { desc = "Save File" })
 map("n", "<leader>wq", "<cmd>wq<cr>", { desc = "Save and Quit" })
 
--- Move to beginning and end of line
-map("n", "<M-h>", "^", { desc = "Go to beginning of line" })
-map("n", "<M-l>", "$", { desc = "Go to end of line" })
-
 -- Stay in indent mode
 map("v", "<", "<gv")
 map("v", ">", ">gv")

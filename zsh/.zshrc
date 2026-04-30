@@ -119,10 +119,15 @@ setopt HIST_VERIFY               # Show command with history expansion before ru
 # Pyenv - Python version management
 # Lazy load to improve shell startup time
 pyenv() {
+    local pyenv_init pyenv_virtualenv_init
+
+    pyenv_init="$(command pyenv init -)" || return 1
+    pyenv_virtualenv_init="$(command pyenv virtualenv-init -)" || return 1
+
     unfunction pyenv
-    eval "$(command pyenv init -)"
-    eval "$(command pyenv virtualenv-init -)"
-    pyenv "$@"
+    eval "$pyenv_init"
+    eval "$pyenv_virtualenv_init"
+    command pyenv "$@"
 }
 
 # NVM - Node version management
@@ -131,8 +136,8 @@ autoload -U add-zsh-hook
 load_nvm() {
   [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
   [ -s "$NVM_DIR/bash_completion" ] && . "$NVM_DIR/bash_completion"
-  unfunction load_nvm
   add-zsh-hook -d preexec load_nvm
+  unfunction load_nvm
 }
 add-zsh-hook preexec load_nvm
 # ============================================================================
@@ -171,9 +176,6 @@ unset _starship_cache _starship_config
 # Zsh autosuggestions - suggests commands as you type (guard brew and defer)
 zsh-defer -c '[[ -n "$HOMEBREW_PREFIX" ]] && source "$HOMEBREW_PREFIX/share/zsh-autosuggestions/zsh-autosuggestions.zsh"'
 
-# Zsh syntax highlighting - must be loaded last (guard brew and defer)
-zsh-defer -c '[[ -n "$HOMEBREW_PREFIX" ]] && source "$HOMEBREW_PREFIX/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh"'
-
 # ============================================================================
 # Performance Settings
 # ============================================================================
@@ -183,8 +185,8 @@ zsh-defer -c '[[ -n "$HOMEBREW_PREFIX" ]] && source "$HOMEBREW_PREFIX/share/zsh-
 # History Substring Search Configuration
 # ============================================================================
 
-# Load history substring search after syntax highlighting (deferred)
-zsh-defer -c 'if [[ -n "$HOMEBREW_PREFIX" && -f "$HOMEBREW_PREFIX/share/zsh-history-substring-search/zsh-history-substring-search.zsh" ]]; then
+# Load history substring search immediately so it works in a fresh shell.
+if [[ -n "$HOMEBREW_PREFIX" && -f "$HOMEBREW_PREFIX/share/zsh-history-substring-search/zsh-history-substring-search.zsh" ]]; then
     source "$HOMEBREW_PREFIX/share/zsh-history-substring-search/zsh-history-substring-search.zsh"
     bindkey "^[[A" history-substring-search-up
     bindkey "^[[B" history-substring-search-down
@@ -192,7 +194,10 @@ zsh-defer -c 'if [[ -n "$HOMEBREW_PREFIX" && -f "$HOMEBREW_PREFIX/share/zsh-hist
     bindkey -M vicmd "j" history-substring-search-down
     bindkey "^P" history-substring-search-up
     bindkey "^N" history-substring-search-down
-fi'
+fi
+
+# Zsh syntax highlighting - must be loaded last (guard brew and defer)
+zsh-defer -c '[[ -n "$HOMEBREW_PREFIX" ]] && source "$HOMEBREW_PREFIX/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh"'
 
 # ============================================================================
 # Performance Profiling Output

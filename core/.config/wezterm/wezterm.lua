@@ -29,7 +29,7 @@ config.font = wezterm.font_with_fallback({
 	"Monaco",
 	"Menlo",
 })
-config.font_size = 12.0
+config.font_size = tonumber(os.getenv("WEZTERM_FONT_SIZE")) or 12.0
 
 -- Font rendering optimizations
 
@@ -187,6 +187,13 @@ config.keys = {
 		key = "P",
 		mods = "CMD|SHIFT",
 		action = wezterm.action.ActivateCommandPalette,
+	},
+
+	-- Copy selected text to the macOS clipboard.
+	{
+		key = "c",
+		mods = "CMD",
+		action = wezterm.action.CopyTo("Clipboard"),
 	},
 
 	-- Quick select mode
