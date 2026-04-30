@@ -130,8 +130,8 @@ Stow packages: `core`, `zsh`, `git-config`, `pi`, and `linux` (Linux-only: aweso
 
 ### When Working with Configs
 
-- Always use absolute paths for file operations
-- Open files in Antigravity after editing: `antigravity /path/to/file`
+- Open files after editing in a tmux window with Neovim: `tmux new-window -c "$(dirname /path/to/file)" -n "$(basename /path/to/file)" "nvim /path/to/file"`
+- If tmux is unavailable, fall back to: `nvim /path/to/file`
 - Use Zen browser for links: `open -a "Zen" "URL"`
 
 ### Common Tasks
