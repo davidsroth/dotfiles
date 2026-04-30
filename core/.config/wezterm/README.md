@@ -6,7 +6,8 @@ Primary terminal emulator for this setup. Config: `wezterm.lua` (in this directo
 
 - **Renderer**: WebGPU, up to 120 FPS
 - **Theme**: Catppuccin Mocha (static; no auto light/dark switching)
-- **Font**: FiraCode Nerd Font Mono, 12pt (falls back to Fira Code Retina, Monaco, Menlo)
+- **Font**: FiraCode Nerd Font Mono, 12pt by default (falls back to Fira Code Retina, Monaco, Menlo)
+  - Override per launch with `WEZTERM_FONT_SIZE`, e.g. `WEZTERM_FONT_SIZE=13 wezterm`
 - **Leader key**: `Ctrl+A`
 - **Scrollback**: 10,000 lines
 - **Opacity**: 1.0 (opaque)
@@ -31,6 +32,7 @@ Copy / search / select:
 ### Global shortcuts
 
 - `Cmd+Shift+P` — command palette
+- `Cmd+C` — copy selected text to the clipboard
 - `Cmd+J` — sends `Ctrl+G` (my tmux prefix)
 - `Cmd+[` / `Cmd+]` — sends `Alt+[` / `Alt+]` (tmux prev/next window)
 - `Opt+Left/Right` — word-wise cursor motion (sends `Alt+b` / `Alt+f`)

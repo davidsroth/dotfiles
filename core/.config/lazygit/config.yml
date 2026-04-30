@@ -26,7 +26,7 @@ customCommands:
     context: "commits"
     command: "url=$(git remote get-url origin | sed 's/\\.git$//' | sed 's/git@github.com:/https:\\/\\/github.com\\//'); if [ \"$(uname)\" = \"Darwin\" ]; then open \"$url/commit/{{.SelectedLocalCommit.Hash}}\"; else xdg-open \"$url/commit/{{.SelectedLocalCommit.Hash}}\"; fi"
     description: "Open commit in GitHub"
-  # Open GitHub Dashboard
+  # Open GitHub Dashboard (`gh dash`) without leaving Lazygit.
   - key: "D"
     context: "global"
     command: "gh dash"
@@ -71,13 +71,13 @@ customCommands:
     command: "${VISUAL:-$EDITOR} {{.SelectedCommitFile.Name}}"
     description: "Edit in $VISUAL"
     output: terminal
-  # Create worktree for selected branch (opens tmux in matching subdir)
+  # Create/open a branch worktree via the tmux helper script.
   - key: "W"
     context: "localBranches"
     command: '~/.config/shell/bin/tmux_worktree_session_for_branch "{{.SelectedLocalBranch.Name}}"'
     description: "Create worktree for branch"
     output: terminal
-  # Interactive rebase from selected commit
+  # Interactive rebase from the commit before the selected one.
   - key: "E"
     # ============================================================================
     # Commit Operations

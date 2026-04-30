@@ -125,9 +125,12 @@ stow core zsh git-config
 ### 🎛️ Automation
 
 - **Amethyst** - Tiling window manager (layouts, resize, pane arrangement)
+  - See `core/.config/amethyst/README.md`
 - **Hammerspoon** - macOS automation with Lua
   - App-launch hotkeys and dead-key swallowing (non-tiling automation)
+  - See `core/.hammerspoon/README.md`
 - **Karabiner-Elements** - Keyboard customization
+  - See `core/.config/karabiner/README.md`
 
 ### Development Tools
 
@@ -137,6 +140,7 @@ stow core zsh git-config
   - LFS support
   - Delta for diffs
 - **Lazygit** - Terminal UI for Git
+  - See `core/.config/lazygit/README.md`
 - **Opencode** - AI coding assistant integration
   - Neovim plugin
   - Shell aliases and tools
@@ -181,6 +185,10 @@ Component documentation:
 - [WezTerm Configuration](core/.config/wezterm/README.md)
 - [Shell Configuration](core/.config/shell/README.md)
 - [Kitty Configuration](core/.config/kitty/README.md)
+- [Lazygit Configuration](core/.config/lazygit/README.md)
+- [Amethyst Configuration](core/.config/amethyst/README.md)
+- [Karabiner Configuration](core/.config/karabiner/README.md)
+- [Hammerspoon Configuration](core/.hammerspoon/README.md)
 
 ## Requirements
 
