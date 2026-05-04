@@ -1,0 +1,44 @@
+# Vendored Pi Packages
+
+This directory contains Pi packages that are intentionally vendored into the dotfiles repo.
+
+Current packages:
+
+- `pi-vim`
+- `pi-subagents`
+- `pi-btw`
+- `pi-intercom`
+
+These packages are loaded by Pi via relative paths from:
+
+- `pi/.pi/agent/settings.json`
+
+## Why vendor them?
+
+- reproducible Pi setup across machines
+- local patching/customization without depending on external installs
+- package versions travel with the dotfiles repo
+
+## Vendoring policy
+
+- **Vendor source, docs, tests, and lockfiles**
+- **Do not vendor install artifacts** such as `node_modules/`, `dist/`, `build/`, or caches
+- Keep upstream provenance in each package's `VENDORED_FROM.md` when available
+- Prefer small, explicit commits for local modifications to vendored packages
+
+A local `.gitignore` in this directory excludes common install/build artifacts.
+
+## Updating a vendored package
+
+Recommended workflow:
+
+1. Inspect the package's `VENDORED_FROM.md` and upstream repository
+2. Refresh the package source from upstream
+3. Keep or regenerate lockfiles as needed
+4. Remove any install artifacts before committing
+5. Commit the refresh as a dedicated package update commit
+
+## Notes
+
+- `pi-subagents` is the most active/complex vendored package and is the most likely to need compatibility updates as Pi evolves
+- Relative package loading assumes the stowed Pi config layout used by this repo
