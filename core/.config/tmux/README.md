@@ -20,10 +20,10 @@ Modular tmux configuration with vim-like keybindings and session management.
 - `C-g` - Main prefix key (instead of default `C-b`)
 
 ### Session Management
-- `C-g f` - Fuzzy find sessions with sesh
-- `C-g s` - Quick session switcher
+- `C-g s` - Sesh session picker (tmux + zoxide; `ctrl-t` tmux only, `ctrl-z` zoxide only)
+- `C-g C-f` - tmux-fzf picker
 - `C-g C-c` - Create new session
-- `C-g L` - Switch to last session
+- `C-s` / `C-g S` - Switch to last session
 
 ### Window Management
 - `C-g c <key>` - Chord for window/pane actions (see `tmux-c-chords.conf`)
@@ -55,9 +55,11 @@ Modular tmux configuration with vim-like keybindings and session management.
 - `C-g o` - Open current directory
 - `C-g g` - Open lazygit popup
 - `C-g e` - Yazi file picker popup
+- `C-g f` - Find file and open in a new window
 - `C-g v` - Scratch neovim popup
 - `C-g C` - Open Claude popup
 - `C-g L` - Clear screen and scrollback
+- `C-g X` - Clean up current worktree/session
 
 ## Plugins
 
@@ -65,7 +67,7 @@ Managed by TPM (Tmux Plugin Manager):
 
 - **tmux-yank** - System clipboard integration
 - **tmux-sessionist** - Session management helpers
-- **tmux-fzf** - Fuzzy session/window/pane switcher (launch: `C-f`)
+- **tmux-fzf** - Fuzzy session/window/pane switcher (launch: `C-g C-f`)
 
 ## Installation
 
