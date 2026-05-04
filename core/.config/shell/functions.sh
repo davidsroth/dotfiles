@@ -558,72 +558,7 @@ tmux_worktree_session() {
 # Create a new tmux session for an existing branch's worktree
 # Usage: tmux_worktree_session_for_branch <branch>
 tmux_worktree_session_for_branch() {
-    local branch="$1"
-
-    if [[ -z "$branch" ]]; then
-        echo "Usage: tmux_worktree_session_for_branch <branch>"
-        return 1
-    fi
-
-    # Ensure we're in a git repository
-    if git rev-parse --git-dir >/dev/null 2>&1; then
-        :
-    else
-        local msg="Not in a git repository"
-        echo "Error: $msg"
-        if [[ -n "$TMUX" ]]; then
-            tmux display-message "Worktree: $msg"
-        fi
-        return 1
-    fi
-
-    # Repo info
-    local git_root
-    git_root="$(git rev-parse --show-toplevel)"
-    local repo_name
-    repo_name="$(basename "$git_root")"
-    local parent_dir
-    parent_dir="$(dirname "$git_root")"
-    local worktree_dir
-    worktree_dir="$parent_dir/${repo_name}-${branch//\//-}"
-
-    # Try to create the worktree (branch already exists)
-    local wt_out
-    if ! wt_out=$(git worktree add "$worktree_dir" "$branch" 2>&1); then
-        # Continue if worktree already exists; otherwise surface the error
-        if printf "%s" "$wt_out" | grep -qiE "already exists|worktree .* is already registered|Another worktree is already|file exists"; then
-            : # proceed
-        else
-            echo "Error: Failed to create worktree"
-            echo "$wt_out" >&2
-            if [[ -n "$TMUX" ]]; then
-                local first_line
-                first_line=$(printf "%s" "$wt_out" | sed -n '1p')
-                tmux display-message "Worktree add failed — ${first_line}"
-            fi
-            return 1
-        fi
-    fi
-
-    # Determine matching subdirectory inside the new worktree for current PWD
-    local rel_path
-    rel_path="$(git rev-parse --show-prefix 2>/dev/null || true)"
-    rel_path="${rel_path%/}"
-    local target_dir="$worktree_dir"
-    if [[ -n "$rel_path" && -d "$worktree_dir/$rel_path" ]]; then
-        target_dir="$worktree_dir/$rel_path"
-    fi
-
-    # Create/switch tmux session
-    local session_name
-    session_name="${repo_name}-${branch//\//-}"
-    if [[ -n "$TMUX" ]]; then
-        tmux has-session -t "$session_name" 2>/dev/null || tmux new-session -d -s "$session_name" -c "$target_dir" 2>/dev/null
-        # If session exists, ensure there is at least one window and cwd
-        tmux switch-client -t "$session_name" 2>/dev/null
-    else
-        tmux new-session -s "$session_name" -c "$target_dir" 2>/dev/null
-    fi
+    "$HOME/.config/shell/bin/tmux_worktree_session_for_branch" "$@"
 }
 
 # Rename current git worktree and tmux session
@@ -755,8 +690,18 @@ sysinfo() {
     echo "Hostname: $(hostname)"
     echo "OS: $(uname -s) $(uname -r)"
     echo "Uptime: $(uptime)"
-    echo "CPU: $(sysctl -n machdep.cpu.brand_string 2>/dev/null || lscpu | grep 'Model name' | cut -d':' -f2 | xargs)"
-    echo "Memory: $(free -h 2>/dev/null || vm_stat | grep 'Pages free' | awk '{print $3}')"
+    local cpu_info
+    cpu_info="$(sysctl -n machdep.cpu.brand_string 2>/dev/null)"
+    if [[ -z "$cpu_info" ]] && command -v lscpu >/dev/null 2>&1; then
+        cpu_info="$(lscpu | grep 'Model name' | cut -d':' -f2 | xargs)"
+    fi
+    echo "CPU: ${cpu_info:-unknown}"
+    local mem_info
+    mem_info="$(free -h 2>/dev/null)"
+    if [[ -z "$mem_info" ]] && command -v vm_stat >/dev/null 2>&1; then
+        mem_info="$(vm_stat | grep 'Pages free' | awk '{print $3}')"
+    fi
+    echo "Memory: ${mem_info:-unknown}"
 }
 
 # ============================================================================
@@ -834,15 +779,14 @@ bgrun() {
             done
             cmd_str="${(j: :)quoted}"
         else
-            # POSIX fallback quoting
+            # Bash fallback: use printf %q for safe shell quoting.
+            # (This function always runs the command inside zsh via nohup.)
             cmd_str=""
             for arg in "$@"; do
-                # Replace ' with '\'' inside each arg then wrap in single quotes
-                local esc
-                esc=${arg//\'/\'\\\'\'}
-                cmd_str="$cmd_str '$esc'"
+                cmd_str="$cmd_str $(printf '%q ' "$arg")"
             done
             cmd_str="${cmd_str# }"
+            cmd_str="${cmd_str% }"
         fi
     fi
 
@@ -851,14 +795,15 @@ bgrun() {
     local zsh_prelude='emulate -L zsh; setopt aliases; '
     zsh_prelude+="[ -f $HOME/.config/shell/aliases.sh ] && source $HOME/.config/shell/aliases.sh; "
     zsh_prelude+="[ -f $HOME/.config/shell/functions.sh ] && source $HOME/.config/shell/functions.sh; "
-    # Use eval so aliases defined above are expanded during parsing of the command.
-    # Quote the command string safely for eval invocation.
+    # eval is required here so that aliases loaded above are expanded when the
+    # command string is parsed by zsh.  cmd_str is pre-quoted (printf %q / ${(q)})
+    # so no word-splitting or injection can occur.
     local eval_cmd
     if [ -n "${ZSH_VERSION:-}" ]; then
         eval_cmd="eval -- ${(q)cmd_str}"
     else
-        # POSIX quoting fallback
-        eval_cmd="eval -- '"${cmd_str//\'/\'\\\'\'}"'"
+        # Bash: cmd_str already shell-quoted with printf %q
+        eval_cmd="eval -- $cmd_str"
     fi
     local full_cmd="$zsh_prelude$eval_cmd"
 

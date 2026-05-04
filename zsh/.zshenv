@@ -119,6 +119,9 @@ export FZF_CTRL_T_OPTS="--bind 'enter:execute(\$EDITOR {} < /dev/tty > /dev/tty 
 # Ensure Ctrl-R behaves normally (accept selection on Enter)
 export FZF_CTRL_R_OPTS="--bind 'enter:accept'"
 
+# pi-ask-user defaults
+export PI_ASK_USER_DISPLAY_MODE=inline
+
 # Source sensitive environment variables if they exist
 # Keep passwords, tokens, and keys in ~/.env (not tracked in git)
 [[ -f "$HOME/.env" ]] && source "$HOME/.env"

@@ -15,7 +15,7 @@ else
         if [[ "$1" == "-c" ]]; then
             shift
         fi
-        eval "$@"
+        "$@"
     }
 fi
 

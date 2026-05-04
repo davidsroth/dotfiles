@@ -52,14 +52,12 @@ fi
 
 alias g='git'
 alias gs='git status'
-alias gc='git checkout'
 alias gco='git checkout'
 alias gb='git branch'
 alias gp='git pull'
 alias gpu='git push'
 alias gsh='git rev-parse --short HEAD'
 if command -v lazygit >/dev/null 2>&1; then
-  alias lz='lazygit'
   alias lg='lazygit'
 fi
 
@@ -91,7 +89,6 @@ if command -v brew >/dev/null 2>&1; then
 fi
 
 # Quick clear
-alias cl='clear'
 alias cls='clear'
 
 # Modern replacements
@@ -121,6 +118,8 @@ alias j='z' # zoxide jump
 
 # Claude Code
 alias claudec='claude --continue'
+# pi shortcut
+alias p='pi'
 # OpenCode shortcut
 alias oc='opencode'
 # Gemini CLI
@@ -136,7 +135,7 @@ fi
 # ============================================================================
 
 # Reload shell configuration
-alias reload='source ~/.zshrc'
+alias reload='exec zsh -l'
 
 # Quick edit common files
 alias ezsh='${EDITOR:-nvim} ~/.zshrc'
