@@ -28,8 +28,9 @@ https://github.com/user-attachments/assets/8685261b-9338-4fea-8dfe-1c590d5df543
 - **Skill preloading** — inject named skill files from `.pi/skills/` into agent system prompts
 - **Tool denylist** — block specific tools via `disallowed_tools` frontmatter
 - **Styled completion notifications** — background agent results render as themed, compact notification boxes (icon, stats, result preview) instead of raw XML. Expandable to show full output. Group completions render each agent individually
-- **Event bus** — lifecycle events (`subagents:created`, `started`, `completed`, `failed`, `steered`) emitted via `pi.events`, enabling other extensions to react to sub-agent activity
+- **Event bus** — lifecycle events (`subagents:created`, `started`, `completed`, `failed`, `steered`, `compacted`) emitted via `pi.events`, enabling other extensions to react to sub-agent activity
 - **Cross-extension RPC** — other pi extensions can spawn and stop subagents via the `pi.events` event bus (`subagents:rpc:ping`, `subagents:rpc:spawn`, `subagents:rpc:stop`). Standardized reply envelopes with protocol versioning. Emits `subagents:ready` on load
+- **Schedule subagents** — pass `schedule` to the `Agent` tool to fire on cron / interval / one-shot. Session-scoped jobs with PID-locked persistence; results land via the same `subagent-notification` followUp path as manual background completions; manage via `/agents → Scheduled jobs`
 
 ## Install
 
@@ -58,29 +59,67 @@ Agent({
 
 Foreground agents block until complete and return results inline. Background agents return an ID immediately and notify you on completion.
 
+### Scheduling
+
+Add a `schedule` field to register the agent to fire later instead of running now:
+
+```
+Agent({
+  subagent_type: "Explore",
+  prompt: "Look at recent commits and summarize what changed since last week",
+  description: "Weekly commit review",
+  schedule: "0 0 9 * * 1",   // 9am every Monday (6-field cron)
+})
+```
+
+Schedule formats:
+
+- **Cron** — 6-field (`second minute hour day-of-month month day-of-week`), e.g. `"0 0 9 * * 1"` for 9am every Monday, `"0 */15 * * * *"` for every 15 minutes.
+- **Interval** — `"5m"`, `"1h"`, `"30s"`, `"2d"`. Fires repeatedly at that interval.
+- **One-shot relative** — `"+10m"`, `"+2h"`, `"+1d"`. Fires once at that future time.
+- **One-shot absolute** — full ISO timestamp, e.g. `"2026-12-25T09:00:00.000Z"`.
+
+When a schedule fires, the spawn runs in background and its completion notification arrives in the conversation through the same `subagent-notification` followUp path as a manually-spawned background agent — your parent agent reasons about the result the same way.
+
+Schedules are **session-scoped**: they reset on `/new` and restore on `/resume`. List and cancel via `/agents → Scheduled jobs` (creation is the `Agent` tool's job — there is no parallel manual-create wizard). Storage at `<cwd>/.pi/subagent-schedules/<sessionId>.json` with PID-based file locking for cross-instance safety.
+
+**Disable the feature entirely**: `/agents → Settings → Scheduling → disabled` removes `schedule` from the `Agent` tool spec (no LLM-context cost), hides the menu entry, and stops any active scheduler. The schema-level removal takes effect on the next pi session; the runtime kill is immediate. Re-enable from the same menu.
+
+Restrictions:
+- `schedule` cannot be combined with `inherit_context` (no parent conversation exists at fire time) or `resume` (schedules create fresh agents).
+- `run_in_background` is forced to `true`.
+- Scheduled fires bypass the `maxConcurrent` queue so a 5-minute interval cannot be deferred behind long-running manual agents.
+- **Headless `pi -p` doesn't wait for scheduled subagents.**
+
 ## UI
 
 The extension renders a persistent widget above the editor showing all active agents:
 
 ```
 ● Agents
-├─ ⠹ Agent  Refactor auth module · ⟳5≤30 · 5 tool uses · 33.8k token · 12.3s
+├─ ⠹ Agent  Refactor auth module · ⟳5≤30 · 5 tool uses · 33.8k token (62%) · 12.3s
 │    ⎿  editing 2 files…
-├─ ⠹ Explore  Find auth files · ⟳3 · 3 tool uses · 12.4k token · 4.1s
+├─ ⠹ Explore  Find auth files · ⟳3 · 3 tool uses · 12.4k token (8%) · 4.1s
 │    ⎿  searching…
+├─ ⠹ Agent  Long-running task · ⟳42 · 38 tool uses · 91.0k token (84% · ↻2) · 2m17s
+│    ⎿  reading…
 └─ 2 queued
 ```
+
+The token field is annotated with two optional signals inside parens:
+- **`NN%`** — context-window utilization (color-coded: <70% dim, 70–85% warning, ≥85% error). Omitted when the model has no declared `contextWindow`, or briefly right after compaction.
+- **`↻N`** — number of times the session has compacted, when > 0. Stays dim; the percent's color carries urgency.
 
 Individual agent results render Claude Code-style in the conversation:
 
 | State | Example |
 |-------|---------|
-| **Running** | `⠹ ⟳3≤30 · 3 tool uses · 12.4k token` / `⎿ searching, reading 3 files…` |
-| **Completed** | `✓ ⟳8 · 5 tool uses · 33.8k token · 12.3s` / `⎿ Done` |
-| **Wrapped up** | `✓ ⟳50≤50 · 50 tool uses · 89.1k token · 45.2s` / `⎿ Wrapped up (turn limit)` |
-| **Stopped** | `■ ⟳3 · 3 tool uses · 12.4k token` / `⎿ Stopped` |
-| **Error** | `✗ ⟳3 · 3 tool uses · 12.4k token` / `⎿ Error: timeout` |
-| **Aborted** | `✗ ⟳55≤50 · 55 tool uses · 102.3k token` / `⎿ Aborted (max turns exceeded)` |
+| **Running** | `⠹ ⟳3≤30 · 3 tool uses · 12.4k token (8%)` / `⎿ searching, reading 3 files…` |
+| **Completed** | `✓ ⟳8 · 5 tool uses · 33.8k token (62%) · 12.3s` / `⎿ Done` |
+| **Wrapped up** | `✓ ⟳50≤50 · 50 tool uses · 89.1k token (84% · ↻2) · 45.2s` / `⎿ Wrapped up (turn limit)` |
+| **Stopped** | `■ ⟳3 · 3 tool uses · 12.4k token (8%)` / `⎿ Stopped` |
+| **Error** | `✗ ⟳3 · 3 tool uses · 12.4k token (8%)` / `⎿ Error: timeout` |
+| **Aborted** | `✗ ⟳55≤50 · 55 tool uses · 102.3k token (95% · ↻3)` / `⎿ Aborted (max turns exceeded)` |
 
 Completed results can be expanded (ctrl+o in pi) to show the full agent output inline.
 
@@ -304,12 +343,17 @@ Agent lifecycle events are emitted via `pi.events.emit()` so other extensions ca
 |-------|------|------------|
 | `subagents:created` | Background agent registered | `id`, `type`, `description`, `isBackground` |
 | `subagents:started` | Agent transitions to running (including queued→running) | `id`, `type`, `description` |
-| `subagents:completed` | Agent finished successfully | `id`, `type`, `durationMs`, `tokens`, `toolUses`, `result` |
+| `subagents:completed` | Agent finished successfully | `id`, `type`, `durationMs`, `tokens` (lifetime `{ input, output, total }`), `toolUses`, `result` |
 | `subagents:failed` | Agent errored, stopped, or aborted | same as completed + `error`, `status` |
 | `subagents:steered` | Steering message sent | `id`, `message` |
+| `subagents:compacted` | Agent's session successfully compacted | `id`, `type`, `description`, `reason` (`"manual"` / `"threshold"` / `"overflow"`), `tokensBefore`, `compactionCount` |
+| `subagents:scheduled` | Schedule lifecycle change | `{ type: "added" \| "removed" \| "updated" \| "fired" \| "error", … }` (job/agentId/error fields per type) |
+| `subagents:scheduler_ready` | Scheduler bound to session, enabled jobs armed | `sessionId`, `jobCount` |
 | `subagents:ready` | Extension loaded and RPC handlers registered | — |
 | `subagents:settings_loaded` | Persisted settings applied at extension init | `settings` (merged global + project) |
 | `subagents:settings_changed` | `/agents` → Settings mutation was applied | `settings`, `persisted` (`boolean` — `false` on write failure) |
+
+`tokens.total` = `input + output + cacheWrite`. `cacheRead` is excluded — each turn's `cacheRead` is the cumulative cached prefix re-read on that one API call, so summing per-message would over-count it. Use `contextUsage.percent` (surfaced as `(NN%)` in the widget) for current context size.
 
 ## Cross-Extension RPC
 
@@ -409,7 +453,7 @@ The agent gets a full, isolated copy of the repository. On completion:
 - **No changes:** worktree is cleaned up automatically
 - **Changes made:** changes are committed to a new branch (`pi-agent-<id>`) and returned in the result
 
-If the worktree cannot be created (not a git repo, no commits), the agent falls back to the main working directory with a warning.
+If the worktree cannot be created (not a git repo, no commits, or `git worktree add` fails), the `Agent` tool returns a clear error instead of running unisolated — `isolation: "worktree"` is a strict guarantee, not a hint. Initialize git and commit at least once, or omit `isolation`.
 
 ## Skill Preloading
 

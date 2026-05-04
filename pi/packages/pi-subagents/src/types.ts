@@ -4,6 +4,7 @@
 
 import type { ThinkingLevel } from "@mariozechner/pi-agent-core";
 import type { AgentSession } from "@mariozechner/pi-coding-agent";
+import type { LifetimeUsage } from "./usage.js";
 
 export type { ThinkingLevel };
 
@@ -85,6 +86,14 @@ export interface AgentRecord {
   outputFile?: string;
   /** Cleanup function for the output file stream subscription. */
   outputCleanup?: () => void;
+  /**
+   * Lifetime usage breakdown, accumulated via `message_end` events. Survives
+   * compaction. Total = input + output + cacheWrite (cacheRead deliberately
+   * excluded — see issue #38). Initialized to zeros at spawn.
+   */
+  lifetimeUsage: LifetimeUsage;
+  /** Number of times this agent's session has compacted. Initialized to 0 at spawn. */
+  compactionCount: number;
 }
 
 /** Details attached to custom notification messages for visual rendering. */
@@ -108,4 +117,47 @@ export interface EnvInfo {
   isGitRepo: boolean;
   branch: string;
   platform: string;
+}
+
+/**
+ * A subagent spawn registered to fire on a schedule.
+ *
+ * Stored at `<cwd>/.pi/subagent-schedules/<sessionId>.json`. Session-scoped:
+ * survives `/resume` but resets on `/new`, mirroring pi-chonky-tasks.
+ */
+export interface ScheduledSubagent {
+  id: string;
+  /** Unique within store. Defaults to `description`. */
+  name: string;
+  description: string;
+  /** Raw user input — cron expr | "+10m" | ISO | "5m". */
+  schedule: string;
+  scheduleType: "cron" | "once" | "interval";
+  /** Computed at create time for interval/once. */
+  intervalMs?: number;
+
+  // spawn params (subset of Agent tool params; no inherit_context, no resume)
+  subagent_type: SubagentType;
+  prompt: string;
+  model?: string;
+  thinking?: ThinkingLevel;
+  max_turns?: number;
+  isolated?: boolean;
+  isolation?: IsolationMode;
+
+  // state
+  enabled: boolean;
+  /** ISO timestamp. */
+  createdAt: string;
+  lastRun?: string;
+  lastStatus?: "success" | "error" | "running";
+  /** Refreshed on every fire and on store load. */
+  nextRun?: string;
+  runCount: number;
+}
+
+export interface ScheduleStoreData {
+  /** For future migrations. */
+  version: 1;
+  jobs: ScheduledSubagent[];
 }

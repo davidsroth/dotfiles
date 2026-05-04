@@ -11,10 +11,13 @@ import type { Model } from "@mariozechner/pi-ai";
 import type { AgentSession, ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { resumeAgent, runAgent, type ToolActivity } from "./agent-runner.js";
 import type { AgentRecord, IsolationMode, SubagentType, ThinkingLevel } from "./types.js";
+import { addUsage } from "./usage.js";
 import { cleanupWorktree, createWorktree, pruneWorktrees, } from "./worktree.js";
 
 export type OnAgentComplete = (record: AgentRecord) => void;
 export type OnAgentStart = (record: AgentRecord) => void;
+export type OnAgentCompact = (record: AgentRecord, info: CompactionInfo) => void;
+export type CompactionInfo = { reason: "manual" | "threshold" | "overflow"; tokensBefore: number };
 
 /** Default max concurrent background agents. */
 const DEFAULT_MAX_CONCURRENT = 4;
@@ -35,8 +38,16 @@ interface SpawnOptions {
   inheritContext?: boolean;
   thinkingLevel?: ThinkingLevel;
   isBackground?: boolean;
+  /**
+   * Skip the maxConcurrent queue check for this spawn — start immediately even
+   * if the configured concurrency limit would otherwise queue it. Used by the
+   * scheduler so a fired job can't be deferred past its trigger window.
+   */
+  bypassQueue?: boolean;
   /** Isolation mode — "worktree" creates a temp git worktree for the agent. */
   isolation?: IsolationMode;
+  /** Parent abort signal — when aborted, the subagent is also stopped. */
+  signal?: AbortSignal;
   /** Called on tool start/end with activity info (for streaming progress to UI). */
   onToolActivity?: (activity: ToolActivity) => void;
   /** Called on streaming text deltas from the assistant response. */
@@ -45,6 +56,10 @@ interface SpawnOptions {
   onSessionCreated?: (session: AgentSession) => void;
   /** Called at the end of each agentic turn with the cumulative count. */
   onTurnEnd?: (turnCount: number) => void;
+  /** Called once per assistant message_end with that message's usage delta. */
+  onAssistantUsage?: (usage: { input: number; output: number; cacheWrite: number }) => void;
+  /** Called when the session successfully compacts. */
+  onCompaction?: (info: CompactionInfo) => void;
 }
 
 export class AgentManager {
@@ -52,6 +67,7 @@ export class AgentManager {
   private cleanupInterval: ReturnType<typeof setInterval>;
   private onComplete?: OnAgentComplete;
   private onStart?: OnAgentStart;
+  private onCompact?: OnAgentCompact;
   private maxConcurrent: number;
 
   /** Queue of background agents waiting to start. */
@@ -59,9 +75,15 @@ export class AgentManager {
   /** Number of currently running background agents. */
   private runningBackground = 0;
 
-  constructor(onComplete?: OnAgentComplete, maxConcurrent = DEFAULT_MAX_CONCURRENT, onStart?: OnAgentStart) {
+  constructor(
+    onComplete?: OnAgentComplete,
+    maxConcurrent = DEFAULT_MAX_CONCURRENT,
+    onStart?: OnAgentStart,
+    onCompact?: OnAgentCompact,
+  ) {
     this.onComplete = onComplete;
     this.onStart = onStart;
+    this.onCompact = onCompact;
     this.maxConcurrent = maxConcurrent;
     // Cleanup completed agents after 10 minutes (but keep sessions for resume)
     this.cleanupInterval = setInterval(() => this.cleanup(), 60_000);
@@ -99,45 +121,63 @@ export class AgentManager {
       toolUses: 0,
       startedAt: Date.now(),
       abortController,
+      lifetimeUsage: { input: 0, output: 0, cacheWrite: 0 },
+      compactionCount: 0,
     };
     this.agents.set(id, record);
 
     const args: SpawnArgs = { pi, ctx, type, prompt, options };
 
-    if (options.isBackground && this.runningBackground >= this.maxConcurrent) {
+    if (options.isBackground && !options.bypassQueue && this.runningBackground >= this.maxConcurrent) {
       // Queue it — will be started when a running agent completes
       this.queue.push({ id, args });
       return id;
     }
 
-    this.startAgent(id, record, args);
+    // startAgent can throw (e.g. strict worktree-isolation failure) — clean
+    // up the record so callers don't see an orphan in `listAgents()`.
+    try {
+      this.startAgent(id, record, args);
+    } catch (err) {
+      this.agents.delete(id);
+      throw err;
+    }
     return id;
   }
 
   /** Actually start an agent (called immediately or from queue drain). */
   private startAgent(id: string, record: AgentRecord, { pi, ctx, type, prompt, options }: SpawnArgs) {
+    // Worktree isolation: try to create a temporary git worktree. Strict —
+    // fail loud if not possible (no silent fallback to main tree). Done
+    // BEFORE state mutation so a throw doesn't leave the record half-running.
+    let worktreeCwd: string | undefined;
+    if (options.isolation === "worktree") {
+      const wt = createWorktree(ctx.cwd, id);
+      if (!wt) {
+        throw new Error(
+          'Cannot run with isolation: "worktree" — not a git repo, no commits yet, or `git worktree add` failed. ' +
+          'Initialize git and commit at least once, or omit `isolation`.',
+        );
+      }
+      record.worktree = wt;
+      worktreeCwd = wt.path;
+    }
+
     record.status = "running";
     record.startedAt = Date.now();
     if (options.isBackground) this.runningBackground++;
     this.onStart?.(record);
 
-    // Worktree isolation: create a temporary git worktree if requested
-    let worktreeCwd: string | undefined;
-    let worktreeWarning = "";
-    if (options.isolation === "worktree") {
-      const wt = createWorktree(ctx.cwd, id);
-      if (wt) {
-        record.worktree = wt;
-        worktreeCwd = wt.path;
-      } else {
-        worktreeWarning = "\n\n[WARNING: Worktree isolation was requested but failed (not a git repo, or no commits yet). Running in the main working directory instead.]";
-      }
+    // Wire parent abort signal to stop the subagent when the parent is interrupted
+    let detachParentSignal: (() => void) | undefined;
+    if (options.signal) {
+      const onParentAbort = () => this.abort(id);
+      options.signal.addEventListener("abort", onParentAbort, { once: true });
+      detachParentSignal = () => options.signal!.removeEventListener("abort", onParentAbort);
     }
+    const detach = () => { detachParentSignal?.(); detachParentSignal = undefined; };
 
-    // Prepend worktree warning to prompt if isolation failed
-    const effectivePrompt = worktreeWarning ? worktreeWarning + "\n\n" + prompt : prompt;
-
-    const promise = runAgent(ctx, type, effectivePrompt, {
+    const promise = runAgent(ctx, type, prompt, {
       pi,
       model: options.model,
       maxTurns: options.maxTurns,
@@ -152,6 +192,15 @@ export class AgentManager {
       },
       onTurnEnd: options.onTurnEnd,
       onTextDelta: options.onTextDelta,
+      onAssistantUsage: (usage) => {
+        addUsage(record.lifetimeUsage, usage);
+        options.onAssistantUsage?.(usage);
+      },
+      onCompaction: (info) => {
+        record.compactionCount++;
+        this.onCompact?.(record, info);
+        options.onCompaction?.(info);
+      },
       onSessionCreated: (session) => {
         record.session = session;
         // Flush any steers that arrived before the session was ready
@@ -172,6 +221,8 @@ export class AgentManager {
         record.result = responseText;
         record.session = session;
         record.completedAt ??= Date.now();
+
+        detach();
 
         // Final flush of streaming output file
         if (record.outputCleanup) {
@@ -204,6 +255,8 @@ export class AgentManager {
         record.error = err instanceof Error ? err.message : String(err);
         record.completedAt ??= Date.now();
 
+        detach();
+
         // Final flush of streaming output file on error
         if (record.outputCleanup) {
           try { record.outputCleanup(); } catch { /* ignore */ }
@@ -235,7 +288,16 @@ export class AgentManager {
       const next = this.queue.shift()!;
       const record = this.agents.get(next.id);
       if (!record || record.status !== "queued") continue;
-      this.startAgent(next.id, record, next.args);
+      try {
+        this.startAgent(next.id, record, next.args);
+      } catch (err) {
+        // Late failure (e.g. strict worktree-isolation) — surface on the record
+        // so the user/agent can see it via /agents, then keep draining.
+        record.status = "error";
+        record.error = err instanceof Error ? err.message : String(err);
+        record.completedAt = Date.now();
+        this.onComplete?.(record);
+      }
     }
   }
 
@@ -277,6 +339,13 @@ export class AgentManager {
       const responseText = await resumeAgent(record.session, prompt, {
         onToolActivity: (activity) => {
           if (activity.type === "end") record.toolUses++;
+        },
+        onAssistantUsage: (usage) => {
+          addUsage(record.lifetimeUsage, usage);
+        },
+        onCompaction: (info) => {
+          record.compactionCount++;
+          this.onCompact?.(record, info);
         },
         signal,
       });
