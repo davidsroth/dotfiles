@@ -8,7 +8,7 @@
 import { truncateToWidth } from "@mariozechner/pi-tui";
 import type { AgentManager } from "../agent-manager.js";
 import { getConfig } from "../agent-types.js";
-import type { SubagentType } from "../types.js";
+import type { AgentRecord, SubagentType } from "../types.js";
 import { getLifetimeTotal, getSessionContextPercent, type LifetimeUsage, type SessionLike } from "../usage.js";
 
 // ---- Constants ----
@@ -142,6 +142,14 @@ export function formatDuration(startedAt: number, completedAt?: number): string 
   return `${formatMs(Date.now() - startedAt)} (running)`;
 }
 
+/** Derive a short model tag, matching the convention in index.ts. */
+function formatModelTag(model: { name?: string; id?: string } | undefined): string | undefined {
+  if (!model) return undefined;
+  const raw = model.name ?? model.id;
+  if (!raw) return undefined;
+  return raw.replace(/^Claude\s+/i, "").toLowerCase();
+}
+
 /** Get display name for any agent type (built-in or custom). */
 export function getDisplayName(type: SubagentType): string {
   return getConfig(type).displayName;
@@ -258,7 +266,7 @@ export class AgentWidget {
   }
 
   /** Render a finished agent line. */
-  private renderFinishedLine(a: { id: string; type: SubagentType; status: string; description: string; toolUses: number; startedAt: number; completedAt?: number; error?: string }, theme: Theme): string {
+  private renderFinishedLine(a: AgentRecord, theme: Theme): string {
     const name = getDisplayName(a.type);
     const modeLabel = getPromptModeLabel(a.type);
     const duration = formatMs((a.completedAt ?? Date.now()) - a.startedAt);
@@ -285,6 +293,8 @@ export class AgentWidget {
     }
 
     const parts: string[] = [];
+    const modelTag = formatModelTag(a.session?.model) ?? formatModelTag({ id: a.modelId });
+    if (modelTag) parts.push(modelTag);
     const activity = this.agentActivity.get(a.id);
     if (activity) parts.push(formatTurns(activity.turnCount, activity.maxTurns));
     if (a.toolUses > 0) parts.push(`${a.toolUses} tool use${a.toolUses === 1 ? "" : "s"}`);
@@ -341,6 +351,8 @@ export class AgentWidget {
       const tokenText = tokens > 0 ? formatSessionTokens(tokens, contextPercent, theme, a.compactionCount) : "";
 
       const parts: string[] = [];
+      const modelTag = formatModelTag(a.session?.model) ?? formatModelTag({ id: a.modelId });
+      if (modelTag) parts.push(modelTag);
       if (bg) parts.push(formatTurns(bg.turnCount, bg.maxTurns));
       if (toolUses > 0) parts.push(`${toolUses} tool use${toolUses === 1 ? "" : "s"}`);
       if (tokenText) parts.push(tokenText);

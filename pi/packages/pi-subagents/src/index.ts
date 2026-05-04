@@ -355,6 +355,46 @@ export default function (pi: ExtensionAPI) {
     const tokens = total > 0
       ? { input: u.input, output: u.output, total }
       : undefined;
+
+    // Local extension: also surface a richer `usage` payload (with cost) and
+    // resolved `model` info for cross-extension consumers (history, billing).
+    let usage: {
+      input: number;
+      output: number;
+      cacheRead: number;
+      cacheWrite: number;
+      totalTokens: number;
+      cost: { input: number; output: number; cacheRead: number; cacheWrite: number; total: number };
+    } | undefined;
+    let model: { provider: string; id: string; tag: string } | undefined;
+    try {
+      if (record.session) {
+        const stats = record.session.getSessionStats() as any;
+        usage = {
+          input: stats?.tokens?.input ?? 0,
+          output: stats?.tokens?.output ?? 0,
+          cacheRead: stats?.tokens?.cacheRead ?? 0,
+          cacheWrite: stats?.tokens?.cacheWrite ?? 0,
+          totalTokens: stats?.tokens?.total ?? 0,
+          cost: {
+            input: 0,
+            output: 0,
+            cacheRead: 0,
+            cacheWrite: 0,
+            total: stats?.cost ?? 0,
+          },
+        };
+        const sessionModel = (record.session as any).model;
+        if (sessionModel) {
+          model = {
+            provider: sessionModel.provider,
+            id: sessionModel.id,
+            tag: getModelLabelFromConfig(`${sessionModel.provider}/${sessionModel.id}`),
+          };
+        }
+      }
+    } catch { /* session stats unavailable */ }
+
     return {
       id: record.id,
       type: record.type,
@@ -365,6 +405,8 @@ export default function (pi: ExtensionAPI) {
       toolUses: record.toolUses,
       durationMs,
       tokens,
+      usage,
+      model,
     };
   }
 
@@ -384,6 +426,8 @@ export default function (pi: ExtensionAPI) {
       id: record.id, type: record.type, description: record.description,
       status: record.status, result: record.result, error: record.error,
       startedAt: record.startedAt, completedAt: record.completedAt,
+      usage: eventData.usage,
+      model: eventData.model,
     });
 
     // Skip notification if result was already consumed via get_subagent_result
@@ -1077,6 +1121,17 @@ Guidelines:
       }
 
       clearInterval(spinnerInterval);
+
+      // Persist final record for cross-extension history reconstruction
+      // (foreground path — background path persists in the manager callback above).
+      const fgEventData = buildEventData(record);
+      pi.appendEntry("subagents:record", {
+        id: record.id, type: record.type, description: record.description,
+        status: record.status, result: record.result, error: record.error,
+        startedAt: record.startedAt, completedAt: record.completedAt,
+        usage: fgEventData.usage,
+        model: fgEventData.model,
+      });
 
       // Clean up foreground agent from widget
       if (fgId) {

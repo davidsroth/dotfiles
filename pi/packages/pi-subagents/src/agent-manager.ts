@@ -123,6 +123,8 @@ export class AgentManager {
       abortController,
       lifetimeUsage: { input: 0, output: 0, cacheWrite: 0 },
       compactionCount: 0,
+      modelId: options.model?.id,
+      provider: options.model?.provider,
     };
     this.agents.set(id, record);
 
@@ -203,6 +205,8 @@ export class AgentManager {
       },
       onSessionCreated: (session) => {
         record.session = session;
+        record.modelId = session.model?.id ?? record.modelId;
+        record.provider = session.model?.provider ?? record.provider;
         // Flush any steers that arrived before the session was ready
         if (record.pendingSteers?.length) {
           for (const msg of record.pendingSteers) {

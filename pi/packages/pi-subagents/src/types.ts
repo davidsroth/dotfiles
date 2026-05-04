@@ -94,6 +94,10 @@ export interface AgentRecord {
   lifetimeUsage: LifetimeUsage;
   /** Number of times this agent's session has compacted. Initialized to 0 at spawn. */
   compactionCount: number;
+  /** Resolved model id used by the agent (for widget display). */
+  modelId?: string;
+  /** Resolved model provider (for widget display). */
+  provider?: string;
 }
 
 /** Details attached to custom notification messages for visual rendering. */
