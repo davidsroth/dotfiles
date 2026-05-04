@@ -1,0 +1,12 @@
+{
+  "app.editor.external": ["ctrl+alt+e"],
+  "app.model.select": ["ctrl+alt+l"],
+  "tui.editor.deleteToLineEnd": ["ctrl+alt+k"],
+  "tui.editor.cursorLineStart": ["home", "ctrl+alt+a"],
+  "app.message.followUp": ["alt+enter", "ctrl+alt+enter"],
+  "app.session.toggleSort": ["ctrl+alt+s"],
+  "app.models.save": ["ctrl+alt+s"],
+  "app.thinking.cycle": ["shift+tab", "ctrl+alt+t"],
+  "app.tree.filter.all": ["ctrl+alt+a"],
+  "app.models.enableAll": ["ctrl+alt+a"]
+}

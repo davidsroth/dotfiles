@@ -235,7 +235,7 @@ async function fetchWeather(): Promise<WeatherData> {
 
 async function fetchAgenda(): Promise<AgendaEvent[]> {
 	if (CUSTOM_EVENTS_COMMAND) {
-		const stdout = await execFileText("/bin/zsh", ["-lc", CUSTOM_EVENTS_COMMAND], AGENDA_TIMEOUT_MS);
+		const stdout = await execFileText(process.env.SHELL ?? "/bin/zsh", ["-lc", CUSTOM_EVENTS_COMMAND], AGENDA_TIMEOUT_MS);
 		return parseAgendaJson(stdout);
 	}
 

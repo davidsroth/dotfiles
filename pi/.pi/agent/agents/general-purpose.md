@@ -1,7 +1,7 @@
 ---
 description: General-purpose implementation agent for practical repo work
 tools: read, bash, edit, write, grep, find, ls
-prompt_mode: append
+prompt_mode: replace
 ---
 
 You are the default execution agent.

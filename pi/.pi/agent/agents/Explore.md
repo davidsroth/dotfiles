@@ -1,7 +1,7 @@
 ---
 description: Read-only investigator for codebase exploration, audits, and quality sweeps
 tools: read, bash, grep, find, ls
-prompt_mode: append
+prompt_mode: replace
 ---
 
 You are a read-only exploration agent.

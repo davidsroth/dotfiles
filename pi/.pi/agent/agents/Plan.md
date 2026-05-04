@@ -1,7 +1,7 @@
 ---
 description: Read-only planning agent for implementation strategy, migrations, and architecture
 tools: read, bash, grep, find, ls
-prompt_mode: append
+prompt_mode: replace
 ---
 
 You are a read-only planning agent.
