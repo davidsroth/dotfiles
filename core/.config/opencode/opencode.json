@@ -49,7 +49,7 @@
       "command": [
         "bash",
         "-lc",
-        "${HOME}/projects/mcp-sunsama/start-with-auth.sh"
+        "[ -n \"${SUNSAMA_MCP_CMD}\" ] && eval \"${SUNSAMA_MCP_CMD}\" || { echo \"[mcp:sunsama] SUNSAMA_MCP_CMD not set, skipping\" >&2; exit 0; }"
       ]
     }
   }
