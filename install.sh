@@ -549,6 +549,8 @@ install_homebrew() {
     info "Installing Homebrew..."
     local BREW_INSTALL_SCRIPT="/tmp/homebrew-install-$$.sh"
 
+    # NOTE: SHA not pinned (acceptable for a dotfiles installer; the script is
+    # downloaded to a temp file first, never piped directly into a shell).
     # Download the install script
     if curl -fsSL "https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh" -o "$BREW_INSTALL_SCRIPT"; then
       # Review script if verbose
@@ -751,6 +753,8 @@ install_additional_tools() {
     info "Installing NVM..."
     local NVM_INSTALL_SCRIPT="/tmp/nvm-install-$$.sh"
 
+    # NOTE: SHA not pinned (acceptable for a dotfiles installer; the script is
+    # downloaded to a temp file first, never piped directly into a shell).
     # Download the install script
     if curl -fsSL "https://raw.githubusercontent.com/nvm-sh/nvm/${NVM_VERSION}/install.sh" -o "$NVM_INSTALL_SCRIPT"; then
       # Make it executable and run it
