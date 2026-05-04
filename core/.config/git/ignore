@@ -38,3 +38,7 @@ credentials/
 *.tmp
 *.bak
 .tmp/
+
+# pi-coding-agent runtime state (subagents settings, schedules, sessions)
+# Created in any project cwd by /agents settings, scheduling, etc.
+.pi/
