@@ -1,8 +1,9 @@
 # Vendored from
 
 - Repository: https://github.com/dbachelder/pi-btw
-- Commit: `2377ccb1130d027f49a414a720cac0f0e5f11b2b`
-- Retrieved: 2026-04-29
+- Commit: `aff4c168b49798444ce890670f62eba3bce394a1`
+- Released as: `pi-btw@0.3.8`
+- Retrieved: 2026-05-04
 
 Notes:
 - `.git/`, `.github/`, and `node_modules/` were omitted from the vendored copy.
