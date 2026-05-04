@@ -18,8 +18,9 @@ git clone https://github.com/davidroth/dotfiles.git ~/dotfiles
 cd ~/dotfiles
 ./install.sh
 
-# Or install with a single command
-curl -fsSL https://raw.githubusercontent.com/davidroth/dotfiles/main/install.sh | bash -s -- --help
+# Or install with a single command (download first, then inspect/run)
+curl -fsSL https://raw.githubusercontent.com/davidroth/dotfiles/main/install.sh -o /tmp/dotfiles-install.sh
+bash /tmp/dotfiles-install.sh --help
 ```
 
 ## Installation
@@ -141,6 +142,10 @@ stow core zsh git-config
   - Delta for diffs
 - **Lazygit** - Terminal UI for Git
   - See `core/.config/lazygit/README.md`
+- **Pi coding agent**
+  - Agent config is stowed from `pi/.pi/agent/`
+  - Local Pi packages are vendored in `pi/packages/` and loaded via `pi/.pi/agent/settings.json`
+  - See `pi/packages/README.md`
 - **Opencode** - AI coding assistant integration
   - Neovim plugin
   - Shell aliases and tools
@@ -170,6 +175,9 @@ dotfiles/
 ├── git-config/
 │   ├── .gitconfig       # Git configuration
 │   └── .gitconfig.local.example
+├── pi/
+│   ├── .pi/agent/      # Pi agent config, prompts, agents, extensions
+│   └── packages/       # Vendored local Pi packages used by the agent
 └── linux/              # Linux-only configs (stowed only on Linux)
     └── .config/
         ├── awesome/    # AwesomeWM
@@ -189,6 +197,7 @@ Component documentation:
 - [Amethyst Configuration](core/.config/amethyst/README.md)
 - [Karabiner Configuration](core/.config/karabiner/README.md)
 - [Hammerspoon Configuration](core/.hammerspoon/README.md)
+- [Vendored Pi Packages](pi/packages/README.md)
 
 ## Requirements
 

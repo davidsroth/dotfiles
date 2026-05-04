@@ -40,6 +40,7 @@ This is David Roth's personal dotfiles repository for macOS development environm
 - **Alternative Terminal**: Kitty
   - Configured with Catppuccin Mocha theme
   - See `.config/kitty/README.md`
+  - Not auto-installed via Brewfile (cask is commented out); maintained manually
 - **Multiplexer**: tmux with modular configuration
   - Vim-like keybindings in `.config/tmux/keybindings.conf`
   - Settings and plugins
@@ -76,7 +77,7 @@ All dotfiles are managed via symlinks from home directory to this repository:
 ~/.config/ → ~/dotfiles/core/.config/
 ~/.hammerspoon → ~/dotfiles/core/.hammerspoon
 ~/.gitconfig → ~/dotfiles/git-config/.gitconfig
-~/.pi/agent/{AGENTS.md,settings.json,prompts,skills,extensions,themes} → ~/dotfiles/pi/.pi/agent/*
+~/.pi/agent/{AGENTS.md,settings.json,keybindings.json,agents/,packages/,prompts,skills,extensions,themes} → ~/dotfiles/pi/.pi/agent/*
 ```
 
 Note: `~/.pi/agent/auth.json` and `~/.pi/agent/sessions/` are intentionally **not** stowed — they stay local (secrets / per-machine session history).
@@ -164,7 +165,7 @@ Consult `git log --oneline` for an authoritative history. Major pivots:
 - Neovim completion uses `blink.cmp`; file management uses `oil.nvim` and `yazi`.
 - Terminal: WezTerm primary, Kitty alternative; Fira Code Nerd Font throughout.
 - Shell: cached starship/zoxide/brew init, lazy nvm, zsh-defer for plugins.
-- AI tooling: `opencode` (TS), `claude`, `codex`, `gemini` configs co-located under `.config/`.
+- AI tooling: `opencode` lives at `.config/opencode/`; `claude` (`~/.claude`), `codex` (`~/.codex`), `gemini` (`~/.gemini`) maintain their own home-rooted directories.
 - Window: Amethyst (tiling) + Hammerspoon (app-launch / dead-key swallow).
 
 ## Git Workflow
