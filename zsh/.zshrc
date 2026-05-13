@@ -76,7 +76,9 @@ stty -ixon
 
 # Zoxide - cached init for performance
 _zoxide_cache="${XDG_CACHE_HOME:-$HOME/.cache}/zsh/zoxide-init.zsh"
-if [[ -f "$_zoxide_cache" && "$_zoxide_cache" -nt "$(command -v zoxide 2>/dev/null)" ]]; then
+local _zoxide_bin
+_zoxide_bin="$(command -v zoxide 2>/dev/null)"
+if [[ -f "$_zoxide_cache" && -n "$_zoxide_bin" && "$_zoxide_cache" -nt "$_zoxide_bin" ]]; then
     source "$_zoxide_cache"
 elif command -v zoxide >/dev/null 2>&1; then
     zoxide init zsh > "$_zoxide_cache"
@@ -122,11 +124,11 @@ pyenv() {
     local pyenv_init pyenv_virtualenv_init
 
     pyenv_init="$(command pyenv init -)" || return 1
-    pyenv_virtualenv_init="$(command pyenv virtualenv-init -)" || return 1
+    pyenv_virtualenv_init="$(command pyenv virtualenv-init - 2>/dev/null || true)"
 
     unfunction pyenv
     eval "$pyenv_init"
-    eval "$pyenv_virtualenv_init"
+    [[ -n "$pyenv_virtualenv_init" ]] && eval "$pyenv_virtualenv_init"
     command pyenv "$@"
 }
 
@@ -161,7 +163,9 @@ fi
 # Starship prompt - cached init for performance
 _starship_cache="${XDG_CACHE_HOME:-$HOME/.cache}/zsh/starship-init.zsh"
 _starship_config="${XDG_CONFIG_HOME:-$HOME/.config}/starship.toml"
-if [[ -f "$_starship_cache" && "$_starship_cache" -nt "$(command -v starship 2>/dev/null)" && ( ! -f "$_starship_config" || "$_starship_cache" -nt "$_starship_config" ) ]]; then
+local _starship_bin
+_starship_bin="$(command -v starship 2>/dev/null)"
+if [[ -f "$_starship_cache" && -n "$_starship_bin" && "$_starship_cache" -nt "$_starship_bin" && ( ! -f "$_starship_config" || "$_starship_cache" -nt "$_starship_config" ) ]]; then
     source "$_starship_cache"
 elif command -v starship >/dev/null 2>&1; then
     starship init zsh --print-full-init > "$_starship_cache"

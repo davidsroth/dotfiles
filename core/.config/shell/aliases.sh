@@ -91,17 +91,14 @@ fi
 # Quick clear
 alias cls='clear'
 
-# Modern replacements
-# Modern replacements (guarded; only override when available)
-command -v dust >/dev/null 2>&1 && alias du='dust'
-command -v duf >/dev/null 2>&1 && alias df='duf'
-command -v procs >/dev/null 2>&1 && alias ps='procs'
-# Do not alias sed to sd; sd is not sed-compatible
-# If desired, install gnu-sed and add its gnubin to PATH for GNU-compatible sed
-## command -v sd    >/dev/null 2>&1 && alias sed='sd'
-command -v gping >/dev/null 2>&1 && alias ping='gping'
-command -v doggo >/dev/null 2>&1 && alias dig='doggo'
-command -v btop >/dev/null 2>&1 && alias top='btop'
+# Modern alternative tools (NOT aliased over POSIX utils — they are not drop-in compatible):
+#   dust  ≠ du   (tree output, different flags: -s means apparent-size not summary)
+#   duf   ≠ df   (no -h/-i/-T/-P flags; completely different interface)
+#   procs ≠ ps   (keyword search, not flag-based; 'ps aux' searches for keyword 'aux')
+#   gping ≠ ping (-i means interface not interval; no -W/--linger)
+#   doggo ≠ dig  (+short does not work; uses --short)
+#   btop  ≠ top  (-p means preset not PID; -u means update ms not user)
+# Use them by their real names: dust, duf, procs, gping, doggo, btop
 command -v fastfetch >/dev/null 2>&1 && alias ff='fastfetch'
 
 # ============================================================================

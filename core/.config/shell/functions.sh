@@ -2,7 +2,7 @@
 # Shell Functions - Organized by Category
 # ============================================================================
 # This file contains shell functions for improved productivity
-# Source this from your shell rc file (.zshrc, .bashrc)
+# Source this from your .zshrc (zsh only)
 # ============================================================================
 
 # ============================================================================
@@ -449,10 +449,10 @@ extract() {
         *.zip) unzip "$1" ;;
         *.Z) uncompress "$1" ;;
         *.7z) 7z x "$1" ;;
-        *) echo "'$1' cannot be extracted" ;;
+        *) echo "'$1' cannot be extracted"; return 1 ;;
         esac
     else
-        echo "'$1' is not a valid file"
+        echo "'$1' is not a valid file"; return 1
     fi
 }
 
@@ -468,11 +468,11 @@ mkcd() {
 # Go up N directories
 up() {
     local count="${1:-1}"
-    local path=""
+    local target_dir=""
     for ((i = 0; i < count; i++)); do
-        path="../$path"
+        target_dir="../$target_dir"
     done
-    cd "$path" || return
+    cd "$target_dir" || return
 }
 
 # ============================================================================
