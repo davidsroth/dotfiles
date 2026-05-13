@@ -168,6 +168,37 @@ describe("resolveModel", () => {
     });
   });
 
+  describe("tie-breaking — equal scores", () => {
+    const ALIAS_MODELS = [
+      { id: "claude-sonnet-4-0", name: "Claude Sonnet 4.0", provider: "anthropic" },
+      { id: "claude-sonnet-4-5", name: "Claude Sonnet 4.5", provider: "anthropic" },
+      { id: "claude-sonnet-4-6", name: "Claude Sonnet 4.6", provider: "anthropic" },
+    ];
+
+    it("'sonnet' picks the newest alias when scores tie", () => {
+      const result = resolveModel("sonnet", makeRegistry(ALIAS_MODELS));
+      expect(result).toEqual(ALIAS_MODELS[2]); // 4-6
+    });
+
+    it("'haiku' picks the newest alias when scores tie", () => {
+      const haikuModels = [
+        { id: "claude-haiku-4-3", name: "Claude Haiku 4.3", provider: "anthropic" },
+        { id: "claude-haiku-4-5", name: "Claude Haiku 4.5", provider: "anthropic" },
+      ];
+      const result = resolveModel("haiku", makeRegistry(haikuModels));
+      expect(result).toEqual(haikuModels[1]); // 4-5
+    });
+
+    it("'opus' picks the newest alias when scores tie", () => {
+      const opusModels = [
+        { id: "claude-opus-4-5", name: "Claude Opus 4.5", provider: "anthropic" },
+        { id: "claude-opus-4-7", name: "Claude Opus 4.7", provider: "anthropic" },
+      ];
+      const result = resolveModel("opus", makeRegistry(opusModels));
+      expect(result).toEqual(opusModels[1]); // 4-7
+    });
+  });
+
   describe("ambiguous matches", () => {
     const SIMILAR_MODELS = [
       { id: "claude-sonnet-4-6", name: "Claude Sonnet 4.6", provider: "anthropic" },

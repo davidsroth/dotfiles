@@ -10,7 +10,7 @@ import { randomUUID } from "node:crypto";
 import type { Model } from "@mariozechner/pi-ai";
 import type { AgentSession, ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { resumeAgent, runAgent, type ToolActivity } from "./agent-runner.js";
-import type { AgentRecord, IsolationMode, SubagentType, ThinkingLevel } from "./types.js";
+import type { AgentInvocation, AgentRecord, IsolationMode, SubagentType, ThinkingLevel } from "./types.js";
 import { addUsage } from "./usage.js";
 import { cleanupWorktree, createWorktree, pruneWorktrees, } from "./worktree.js";
 
@@ -46,6 +46,8 @@ interface SpawnOptions {
   bypassQueue?: boolean;
   /** Isolation mode — "worktree" creates a temp git worktree for the agent. */
   isolation?: IsolationMode;
+  /** Resolved invocation snapshot captured for UI display. */
+  invocation?: AgentInvocation;
   /** Parent abort signal — when aborted, the subagent is also stopped. */
   signal?: AbortSignal;
   /** Called on tool start/end with activity info (for streaming progress to UI). */
@@ -87,6 +89,7 @@ export class AgentManager {
     this.maxConcurrent = maxConcurrent;
     // Cleanup completed agents after 10 minutes (but keep sessions for resume)
     this.cleanupInterval = setInterval(() => this.cleanup(), 60_000);
+    this.cleanupInterval.unref();
   }
 
   /** Update the max concurrent background agents limit. */
@@ -123,8 +126,7 @@ export class AgentManager {
       abortController,
       lifetimeUsage: { input: 0, output: 0, cacheWrite: 0 },
       compactionCount: 0,
-      modelId: options.model?.id,
-      provider: options.model?.provider,
+      invocation: options.invocation,
     };
     this.agents.set(id, record);
 
@@ -205,8 +207,6 @@ export class AgentManager {
       },
       onSessionCreated: (session) => {
         record.session = session;
-        record.modelId = session.model?.id ?? record.modelId;
-        record.provider = session.model?.provider ?? record.provider;
         // Flush any steers that arrived before the session was ready
         if (record.pendingSteers?.length) {
           for (const msg of record.pendingSteers) {
@@ -246,7 +246,7 @@ export class AgentManager {
 
         if (options.isBackground) {
           this.runningBackground--;
-          this.onComplete?.(record);
+          try { this.onComplete?.(record); } catch { /* ignore completion side-effect errors */ }
           this.drainQueue();
         }
         return responseText;

@@ -30,3 +30,6 @@ Thumbs.db
 .pi/readcache
 .claude
 .vscode
+
+# Large upstream media files not vendored into dotfiles
+media/

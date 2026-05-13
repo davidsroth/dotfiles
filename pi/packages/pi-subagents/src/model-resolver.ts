@@ -64,6 +64,11 @@ export function resolveModel(
     if (score > bestScore) {
       bestScore = score;
       bestMatch = m;
+    } else if (score === bestScore && score > 0 && bestMatch) {
+      // Tie-break: prefer lexicographically higher id (newer versions sort later)
+      if (m.id.toLowerCase() > bestMatch.id.toLowerCase()) {
+        bestMatch = m;
+      }
     }
   }
 

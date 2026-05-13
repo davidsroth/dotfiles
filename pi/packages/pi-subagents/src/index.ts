@@ -27,11 +27,12 @@ import { createOutputFilePath, streamToOutputFile, writeInitialEntry } from "./o
 import { SubagentScheduler } from "./schedule.js";
 import { resolveStorePath, ScheduleStore } from "./schedule-store.js";
 import { applyAndEmitLoaded, type SubagentsSettings, saveAndEmitChanged } from "./settings.js";
-import { type AgentConfig, type AgentRecord, type JoinMode, type NotificationDetails, type SubagentType } from "./types.js";
+import { type AgentConfig, type AgentInvocation, type AgentRecord, type JoinMode, type NotificationDetails, type SubagentType } from "./types.js";
 import {
   type AgentActivity,
   type AgentDetails,
   AgentWidget,
+  buildInvocationTags,
   describeActivity,
   formatDuration,
   formatMs,
@@ -275,7 +276,7 @@ export default function (pi: ExtensionAPI) {
     cancelNudge(key);
     pendingNudges.set(key, setTimeout(() => {
       pendingNudges.delete(key);
-      send();
+      try { send(); } catch { /* ignore stale completion side-effect errors */ }
     }, delay));
   }
 
@@ -355,46 +356,6 @@ export default function (pi: ExtensionAPI) {
     const tokens = total > 0
       ? { input: u.input, output: u.output, total }
       : undefined;
-
-    // Local extension: also surface a richer `usage` payload (with cost) and
-    // resolved `model` info for cross-extension consumers (history, billing).
-    let usage: {
-      input: number;
-      output: number;
-      cacheRead: number;
-      cacheWrite: number;
-      totalTokens: number;
-      cost: { input: number; output: number; cacheRead: number; cacheWrite: number; total: number };
-    } | undefined;
-    let model: { provider: string; id: string; tag: string } | undefined;
-    try {
-      if (record.session) {
-        const stats = record.session.getSessionStats() as any;
-        usage = {
-          input: stats?.tokens?.input ?? 0,
-          output: stats?.tokens?.output ?? 0,
-          cacheRead: stats?.tokens?.cacheRead ?? 0,
-          cacheWrite: stats?.tokens?.cacheWrite ?? 0,
-          totalTokens: stats?.tokens?.total ?? 0,
-          cost: {
-            input: 0,
-            output: 0,
-            cacheRead: 0,
-            cacheWrite: 0,
-            total: stats?.cost ?? 0,
-          },
-        };
-        const sessionModel = (record.session as any).model;
-        if (sessionModel) {
-          model = {
-            provider: sessionModel.provider,
-            id: sessionModel.id,
-            tag: getModelLabelFromConfig(`${sessionModel.provider}/${sessionModel.id}`),
-          };
-        }
-      }
-    } catch { /* session stats unavailable */ }
-
     return {
       id: record.id,
       type: record.type,
@@ -405,8 +366,6 @@ export default function (pi: ExtensionAPI) {
       toolUses: record.toolUses,
       durationMs,
       tokens,
-      usage,
-      model,
     };
   }
 
@@ -426,8 +385,6 @@ export default function (pi: ExtensionAPI) {
       id: record.id, type: record.type, description: record.description,
       status: record.status, result: record.result, error: record.error,
       startedAt: record.startedAt, completedAt: record.completedAt,
-      usage: eventData.usage,
-      model: eventData.model,
     });
 
     // Skip notification if result was already consumed via get_subagent_result
@@ -891,25 +848,32 @@ Guidelines:
       const isolated = resolvedConfig.isolated;
       const isolation = resolvedConfig.isolation;
 
-      // Build display tags for non-default config
       const parentModelId = ctx.model?.id;
       const effectiveModelId = model?.id;
-      const agentModelName = effectiveModelId && effectiveModelId !== parentModelId
+      const modelName = effectiveModelId && effectiveModelId !== parentModelId
         ? (model?.name ?? effectiveModelId).replace(/^Claude\s+/i, "").toLowerCase()
         : undefined;
-      const agentTags: string[] = [];
-      const modeLabel = getPromptModeLabel(subagentType);
-      if (modeLabel) agentTags.push(modeLabel);
-      if (thinking) agentTags.push(`thinking: ${thinking}`);
-      if (isolated) agentTags.push("isolated");
-      if (isolation === "worktree") agentTags.push("worktree");
       const effectiveMaxTurns = normalizeMaxTurns(resolvedConfig.maxTurns ?? getDefaultMaxTurns());
-      // Shared base fields for all AgentDetails in this call
+      const agentInvocation: AgentInvocation = {
+        modelName,
+        thinking,
+        // Explicit value only — the default fallback would just add noise.
+        // Normalize so `0` (unlimited) doesn't surface as a misleading "max turns: 0".
+        maxTurns: normalizeMaxTurns(resolvedConfig.maxTurns),
+        isolated,
+        inheritContext,
+        runInBackground,
+        isolation,
+      };
+      // Tool-result render shows the mode label too; viewer's header already does.
+      const modeLabel = getPromptModeLabel(subagentType);
+      const { tags: invocationTags } = buildInvocationTags(agentInvocation);
+      const agentTags = modeLabel ? [modeLabel, ...invocationTags] : invocationTags;
       const detailBase = {
         displayName,
         description: params.description,
         subagentType,
-        modelName: agentModelName,
+        modelName,
         tags: agentTags.length > 0 ? agentTags : undefined,
       };
 
@@ -1000,6 +964,7 @@ Guidelines:
             thinkingLevel: thinking,
             isBackground: true,
             isolation,
+            invocation: agentInvocation,
             ...bgCallbacks,
           });
         } catch (err) {
@@ -1112,6 +1077,7 @@ Guidelines:
           inheritContext,
           thinkingLevel: thinking,
           isolation,
+          invocation: agentInvocation,
           signal,
           ...fgCallbacks,
         });
@@ -1121,17 +1087,6 @@ Guidelines:
       }
 
       clearInterval(spinnerInterval);
-
-      // Persist final record for cross-extension history reconstruction
-      // (foreground path — background path persists in the manager callback above).
-      const fgEventData = buildEventData(record);
-      pi.appendEntry("subagents:record", {
-        id: record.id, type: record.type, description: record.description,
-        status: record.status, result: record.result, error: record.error,
-        startedAt: record.startedAt, completedAt: record.completedAt,
-        usage: fgEventData.usage,
-        model: fgEventData.model,
-      });
 
       // Clean up foreground agent from widget
       if (fgId) {
@@ -1461,7 +1416,7 @@ Guidelines:
       return;
     }
 
-    const { ConversationViewer } = await import("./ui/conversation-viewer.js");
+    const { ConversationViewer, VIEWPORT_HEIGHT_PCT } = await import("./ui/conversation-viewer.js");
     const session = record.session;
     const activity = agentActivity.get(record.id);
 
@@ -1471,7 +1426,7 @@ Guidelines:
       },
       {
         overlay: true,
-        overlayOptions: { anchor: "center", width: "90%" },
+        overlayOptions: { anchor: "center", width: "90%", maxHeight: `${VIEWPORT_HEIGHT_PCT}%` },
       },
     );
   }

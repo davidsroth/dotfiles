@@ -25,7 +25,7 @@ https://github.com/user-attachments/assets/8685261b-9338-4fea-8dfe-1c590d5df543
 - **Context inheritance** — optionally fork the parent conversation into a sub-agent so it knows what's been discussed
 - **Persistent agent memory** — three scopes (project, local, user) with automatic read-only fallback for agents without write tools
 - **Git worktree isolation** — run agents in isolated repo copies; changes auto-committed to branches on completion
-- **Skill preloading** — inject named skill files from `.pi/skills/` into agent system prompts
+- **Skill preloading** — inject named skills into agent system prompts, discovered from `.pi/skills/`, `.agents/skills/`, and global locations (Pi-standard `<name>/SKILL.md` directory layout supported)
 - **Tool denylist** — block specific tools via `disallowed_tools` frontmatter
 - **Styled completion notifications** — background agent results render as themed, compact notification boxes (icon, stats, result preview) instead of raw XML. Expandable to show full output. Group completions render each agent individually
 - **Event bus** — lifecycle events (`subagents:created`, `started`, `completed`, `failed`, `steered`, `compacted`) emitted via `pi.events`, enabling other extensions to react to sub-agent activity
@@ -195,7 +195,7 @@ All fields are optional — sensible defaults for everything.
 | `display_name` | — | Display name for UI (e.g. widget, agent list) |
 | `tools` | all 7 | Comma-separated built-in tools: read, bash, edit, write, grep, find, ls. `none` for no tools |
 | `extensions` | `true` | Inherit MCP/extension tools. `false` to disable |
-| `skills` | `true` | Inherit skills from parent. Can be a comma-separated list of skill names to preload from `.pi/skills/` |
+| `skills` | `true` | Inherit skills from parent. Can be a comma-separated list of skill names to preload (see [Skill Preloading](#skill-preloading) for discovery locations) |
 | `memory` | — | Persistent agent memory scope: `project`, `local`, or `user`. Auto-detects read-only agents |
 | `disallowed_tools` | — | Comma-separated tools to deny even if extensions provide them |
 | `isolation` | — | Set to `worktree` to run in an isolated git worktree |
@@ -457,7 +457,7 @@ If the worktree cannot be created (not a git repo, no commits, or `git worktree 
 
 ## Skill Preloading
 
-Skills can be preloaded as named files from `.pi/skills/` or `~/.pi/skills/`:
+Skills can be preloaded by name and injected into the agent's system prompt:
 
 ```yaml
 ---
@@ -465,7 +465,25 @@ skills: api-conventions, error-handling
 ---
 ```
 
-Skill files (`.md`, `.txt`, or extensionless) are read and injected into the agent's system prompt. Project-level skills take priority over global ones. Symlinked skill files are rejected for security.
+**Discovery roots** (checked in this order, first match wins):
+
+| Scope | Path | Source |
+|---|---|---|
+| Project | `<cwd>/.pi/skills/` | Pi-standard |
+| Project | `<cwd>/.agents/skills/` | [Agent Skills spec](https://agentskills.io/integrate-skills) |
+| User | `$PI_CODING_AGENT_DIR/skills/` (default `~/.pi/agent/skills/`) | Pi-standard |
+| User | `~/.agents/skills/` | [Agent Skills spec](https://agentskills.io/integrate-skills) |
+| User | `~/.pi/skills/` | Legacy (pre-Pi) |
+
+**Per root, a skill named `foo` resolves to the first of:**
+
+- `<root>/foo.md` — flat file at the top level
+- `<root>/foo/SKILL.md` — directory skill (top-level)
+- `<root>/*/.../foo/SKILL.md` — directory skill, found by recursive descent
+
+Recursion skips dotfile directories and `node_modules`. A directory that itself contains a `SKILL.md` is treated as a single skill — we don't descend into it. Traversal is byte-order sorted for deterministic resolution across filesystems.
+
+**Security:** symlinks are rejected at every layer (root, flat file, skill directory, `SKILL.md` inside a skill directory) — intentional deviation from Pi, which follows symlinks. Skill names with path-traversal characters (`..`, `/`, `\`, spaces, leading dot, >128 chars) are rejected.
 
 ## Tool Denylist
 
@@ -494,7 +512,7 @@ src/
   group-join.ts       # Group join manager: batched completion notifications with timeout
   custom-agents.ts    # Load user-defined agents from .pi/agents/*.md
   memory.ts           # Persistent agent memory (resolve, read, build prompt blocks)
-  skill-loader.ts     # Preload skill files from .pi/skills/
+  skill-loader.ts     # Preload skills (Pi-standard + Agent Skills spec layouts)
   output-file.ts      # Streaming output file transcripts for agent sessions
   worktree.ts         # Git worktree isolation (create, cleanup, prune)
   prompts.ts          # Config-driven system prompt builder
