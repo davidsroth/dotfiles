@@ -38,7 +38,7 @@ return {
       desc = "Explorer (oil) float (root)",
     },
     {
-      "<leader>o",
+      "<leader>O",
       function()
         require("oil").open_float()
       end,

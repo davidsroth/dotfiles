@@ -147,18 +147,8 @@ return {
     end,
   },
 
-  -- Mason integration for Python tools
-  {
-    "mason-org/mason.nvim",
-    opts = function(_, opts)
-      opts.ensure_installed = opts.ensure_installed or {}
-      vim.list_extend(opts.ensure_installed, {
-        "pyright",
-        "ruff",
-        "debugpy",
-      })
-    end,
-  },
+  -- Python tools should be installed via :MasonInstall or mason-lspconfig.nvim
+  -- (mason.nvim itself has no ensure_installed option in its setup schema)
 
   -- Formatting with ruff (uv's preferred formatter)
   {

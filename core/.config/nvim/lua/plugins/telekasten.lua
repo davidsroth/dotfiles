@@ -45,11 +45,8 @@ return {
         end,
       })
 
-      pcall(function()
-        local language = require("nvim-treesitter.language")
-        language.register("markdown", "telekasten")
-        language.register("markdown", "telekasten.markdown")
-      end)
+      vim.treesitter.language.register("markdown", "telekasten")
+      vim.treesitter.language.register("markdown", "telekasten.markdown")
     end,
     keys = {
       { "<leader>z",  "<cmd>Telekasten panel<cr>",          desc = "Telekasten Panel" },

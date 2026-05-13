@@ -33,8 +33,10 @@ map("n", "<leader>;", "<cmd>Alpha<cr>", { desc = "Alpha" })
 
 map("n", "x", '"_x', { noremap = true, silent = true })
 
--- Map 'r' to rename
-map("n", "<leader>r", vim.lsp.buf.rename, { desc = "Rename symbol" })
+-- Map 'r' to rename (skip in VSCode where vscode.lua handles it)
+if not vim.g.vscode then
+  map("n", "<leader>r", vim.lsp.buf.rename, { desc = "Rename symbol" })
+end
 
 -- Map Shift+[J/K] to move five lines up and down
 map("n", "J", "<c-d>", { desc = "Page down" })
