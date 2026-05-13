@@ -1,4 +1,4 @@
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 export default function (pi: ExtensionAPI) {
   const baseUrl = process.env.AZURE_INFERENCE_ENDPOINT?.trim() || process.env.AZURE_FOUNDRY_ENDPOINT?.trim() || "";
@@ -7,8 +7,6 @@ export default function (pi: ExtensionAPI) {
     console.warn("[azure-foundry] No endpoint configured. Set AZURE_INFERENCE_ENDPOINT or AZURE_FOUNDRY_ENDPOINT to enable.");
     return;
   }
-
-  console.log(`[azure-foundry] Registering provider at ${baseUrl}`);
 
   pi.registerProvider("azure-foundry", {
     baseUrl,
@@ -39,5 +37,5 @@ export default function (pi: ExtensionAPI) {
     ],
   });
 
-  console.log("[azure-foundry] Provider registered.");
+
 }
