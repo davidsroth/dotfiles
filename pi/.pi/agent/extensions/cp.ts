@@ -1,11 +1,12 @@
 /**
- * /cp — copy from the last assistant message, with code-block picker.
+ * /cp — copy from the last assistant message, with code-block and block-quote picker.
  *
  * Behavior:
- *   - No fenced code blocks in the last assistant message → copies the full response.
- *   - One or more fenced ``` blocks → shows a selector:
+ *   - No fenced code blocks or block quotes in the last assistant message → copies the full response.
+ *   - One or more fenced ``` blocks or `>` block quotes → shows a selector:
  *       • "Full response"
  *       • One entry per fenced block (with lang + first-line preview)
+ *       • One entry per block quote (with first-line preview)
  *     Selected entry's content is copied to the clipboard.
  *
  * This is a companion to the built-in `/copy`, which always copies the whole
@@ -13,7 +14,7 @@
  * this lives under `/cp`.
  */
 
-import { copyToClipboard, type ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import { copyToClipboard, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 interface CodeBlock {
 	/** Info string after the opening fence (e.g. "ts", "bash title=foo"). */
@@ -23,6 +24,15 @@ interface CodeBlock {
 	/** Block contents, without the surrounding fences or the trailing newline. */
 	content: string;
 	/** 1-based line number of the opening fence in the source text. */
+	line: number;
+	/** 1-based line number of the closing fence in the source text. */
+	endLine: number;
+}
+
+interface BlockQuote {
+	/** Quote contents, without the leading `>` markers. */
+	content: string;
+	/** 1-based line number of the first line of the quote. */
 	line: number;
 }
 
@@ -72,10 +82,42 @@ function extractCodeBlocks(text: string): CodeBlock[] {
 
 		const content = lines.slice(openLine + 1, close).join("\n");
 		const lang = info.split(/\s+/)[0] ?? "";
-		blocks.push({ info, lang, content, line: openLine + 1 });
+		const endLine = close === lines.length ? lines.length : close + 1;
+		blocks.push({ info, lang, content, line: openLine + 1, endLine });
 		i = close + 1;
 	}
 	return blocks;
+}
+
+function extractBlockQuotes(text: string): BlockQuote[] {
+	const lines = text.split("\n");
+	const quotes: BlockQuote[] = [];
+
+	let i = 0;
+	while (i < lines.length) {
+		if (!lines[i].startsWith(">")) {
+			i++;
+			continue;
+		}
+		const openLine = i;
+		const quoteLines: string[] = [];
+		while (i < lines.length && lines[i].startsWith(">")) {
+			quoteLines.push(lines[i].replace(/^>\s?/, ""));
+			i++;
+		}
+		const content = quoteLines.join("\n");
+		if (content.trim().length > 0) {
+			quotes.push({ content, line: openLine + 1 });
+		}
+	}
+	return quotes;
+}
+
+function filterQuotesInsideBlocks(quotes: BlockQuote[], blocks: CodeBlock[]): BlockQuote[] {
+	return quotes.filter((q) => {
+		const qEnd = q.line + q.content.split("\n").length - 1;
+		return !blocks.some((b) => q.line >= b.line && qEnd <= b.endLine);
+	});
 }
 
 /** Pull the last assistant message's text from the session, joining text parts. */
@@ -109,20 +151,26 @@ function previewLine(content: string, max = 60): string {
 	return `${collapsed.slice(0, max - 1)}…`;
 }
 
-/** Format a block label for the selector. */
-function formatBlockLabel(block: CodeBlock, index: number, total: number): string {
+type Section = { type: "code"; data: CodeBlock } | { type: "quote"; data: BlockQuote };
+
+/** Format a selector label for a section. */
+function formatSectionLabel(section: Section, index: number, total: number): string {
 	const idx = `${index + 1}/${total}`;
-	const lang = block.lang || "text";
-	const lineCount = block.content === "" ? 0 : block.content.split("\n").length;
+	const lineCount = section.data.content === "" ? 0 : section.data.content.split("\n").length;
 	const lines = `${lineCount} line${lineCount === 1 ? "" : "s"}`;
-	const preview = previewLine(block.content);
+	const preview = previewLine(section.data.content);
 	const previewPart = preview ? ` — ${preview}` : "";
-	return `[${idx}] ${lang} (${lines})${previewPart}`;
+
+	if (section.type === "code") {
+		const lang = section.data.lang || "text";
+		return `[${idx}] ${lang} (${lines})${previewPart}`;
+	}
+	return `[${idx}] quote (${lines})${previewPart}`;
 }
 
 export default function cpExtension(pi: ExtensionAPI) {
 	pi.registerCommand("cp", {
-		description: "Copy last assistant message; pick a code block if present",
+		description: "Copy last assistant message; pick a code block or quote if present",
 		handler: async (_args, ctx) => {
 			const entries = ctx.sessionManager.getEntries();
 			const text = getLastAssistantText(entries);
@@ -132,11 +180,19 @@ export default function cpExtension(pi: ExtensionAPI) {
 			}
 
 			const blocks = extractCodeBlocks(text);
+			let quotes = extractBlockQuotes(text);
+			quotes = filterQuotesInsideBlocks(quotes, blocks);
 
-			if (blocks.length === 0) {
+			const sections: Section[] = [
+				...blocks.map((b) => ({ type: "code" as const, data: b })),
+				...quotes.map((q) => ({ type: "quote" as const, data: q })),
+			];
+			sections.sort((a, b) => a.data.line - b.data.line);
+
+			if (sections.length === 0) {
 				try {
 					await copyToClipboard(text);
-					ctx.ui.notify("Copied full response (no code blocks found)", "info");
+					ctx.ui.notify("Copied full response (no code blocks or quotes found)", "info");
 				} catch (err) {
 					ctx.ui.notify(err instanceof Error ? err.message : String(err), "error");
 				}
@@ -144,12 +200,20 @@ export default function cpExtension(pi: ExtensionAPI) {
 			}
 
 			const FULL = "Full response";
-			const items = [FULL, ...blocks.map((b, i) => formatBlockLabel(b, i, blocks.length))];
+			const items = [FULL, ...sections.map((s, i) => formatSectionLabel(s, i, sections.length))];
 
-			const choice = await ctx.ui.select(
-				blocks.length === 1 ? "Copy what?" : `Copy what? (${blocks.length} code blocks)`,
-				items,
-			);
+			const codeCount = blocks.length;
+			const quoteCount = quotes.length;
+			let prompt: string;
+			if (codeCount > 0 && quoteCount > 0) {
+				prompt = `Copy what? (${codeCount} code blocks, ${quoteCount} quotes)`;
+			} else if (codeCount > 0) {
+				prompt = codeCount === 1 ? "Copy what?" : `Copy what? (${codeCount} code blocks)`;
+			} else {
+				prompt = quoteCount === 1 ? "Copy what?" : `Copy what? (${quoteCount} quotes)`;
+			}
+
+			const choice = await ctx.ui.select(prompt, items);
 			if (!choice) return; // user cancelled
 
 			let payload: string;
@@ -159,13 +223,18 @@ export default function cpExtension(pi: ExtensionAPI) {
 				label = "full response";
 			} else {
 				const idx = items.indexOf(choice) - 1;
-				const block = blocks[idx];
-				if (!block) {
+				const section = sections[idx];
+				if (!section) {
 					ctx.ui.notify("Selection out of range", "error");
 					return;
 				}
-				payload = block.content;
-				label = `code block ${idx + 1}/${blocks.length}${block.lang ? ` (${block.lang})` : ""}`;
+				if (section.type === "code") {
+					payload = section.data.content;
+					label = `code block ${idx + 1}/${sections.length}${section.data.lang ? ` (${section.data.lang})` : ""}`;
+				} else {
+					payload = section.data.content;
+					label = `quote ${idx + 1}/${sections.length}`;
+				}
 			}
 
 			try {
