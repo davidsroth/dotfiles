@@ -10,13 +10,13 @@ import { InlineMessageComponent } from "./ui/inline-message.ts";
 import { loadConfig, type IntercomConfig } from "./config.ts";
 import type { SessionInfo, Message, Attachment } from "./types.ts";
 import { ReplyTracker } from "./reply-tracker.ts";
+import { resolveIntercomPresenceName } from "./presence-name.ts";
 
 const SUBAGENT_CONTROL_INTERCOM_EVENT = "subagent:control-intercom";
 const SUBAGENT_RESULT_INTERCOM_EVENT = "subagent:result-intercom";
 const SUBAGENT_RESULT_INTERCOM_DELIVERY_EVENT = "subagent:result-intercom-delivery";
 const INBOUND_FLUSH_DELAY_MS = 200;
 const INBOUND_IDLE_RETRY_MS = 500;
-const DEFAULT_UNNAMED_SESSION_ALIAS_PREFIX = "subagent-chat";
 const SUBAGENT_ORCHESTRATOR_TARGET_ENV = "PI_SUBAGENT_ORCHESTRATOR_TARGET";
 const SUBAGENT_RUN_ID_ENV = "PI_SUBAGENT_RUN_ID";
 const SUBAGENT_CHILD_AGENT_ENV = "PI_SUBAGENT_CHILD_AGENT";
@@ -368,14 +368,6 @@ function parseSubagentIntercomPayload(payload: unknown): { to: string; message: 
   const requestId = typeof record.requestId === "string" ? record.requestId : undefined;
   return { to: record.to, message: record.message, ...(requestId ? { requestId } : {}) };
 }
-function resolveIntercomPresenceName(sessionName: string | undefined, sessionId: string): string {
-  const trimmedName = sessionName?.trim();
-  if (trimmedName) {
-    return trimmedName;
-  }
-  const normalizedSessionId = sessionId.startsWith("session-") ? sessionId.slice("session-".length) : sessionId;
-  return `${DEFAULT_UNNAMED_SESSION_ALIAS_PREFIX}-${normalizedSessionId.slice(0, 8)}`;
-}
 function buildPresenceIdentity(pi: ExtensionAPI, sessionId: string): { name: string } {
   return {
     name: resolveIntercomPresenceName(pi.getSessionName(), sessionId),
@@ -437,11 +429,15 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
     reject: (error: Error) => void;
   } | null = null;
   function waitForReply(from: string, replyTo: string, signal?: AbortSignal): Promise<Message> {
+    // Throw synchronously rather than returning a rejected promise. A dangling
+    // rejected promise (assigned but not yet awaited) trips Node's default
+    // unhandled-rejection handler and aborts the process before the caller's
+    // try/catch can see it.
     if (replyWaiter) {
-      return Promise.reject(new Error("Already waiting for a reply"));
+      throw new Error("Already waiting for a reply");
     }
     if (signal?.aborted) {
-      return Promise.reject(new Error("Cancelled"));
+      throw new Error("Cancelled");
     }
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
@@ -1480,6 +1476,7 @@ Usage:
             };
           }
           let replyPromise: Promise<Message> | null = null;
+          let ownsWaiter = false;
 
           try {
             const sendTo = await resolveSessionTarget(connectedClient, to) ?? to;
@@ -1497,8 +1494,18 @@ Usage:
                 details: { error: true },
               };
             }
+            // Re-check after the await above: a parallel ask in the same tool
+            // batch may have claimed the slot between the early guard and now.
+            if (replyWaiter) {
+              return {
+                content: [{ type: "text", text: "Already waiting for a reply" }],
+                isError: true,
+                details: { error: true },
+              };
+            }
             const questionId = randomUUID();
             replyPromise = waitForReply(sendTo, questionId, _signal);
+            ownsWaiter = true;
             const sendResult = await connectedClient.send(sendTo, {
               messageId: questionId,
               text: message,
@@ -1509,12 +1516,14 @@ Usage:
 
             if (!sendResult.delivered) {
               const errorText = sendResult.reason ?? "Session may not exist or has disconnected.";
-              rejectReplyWaiter(new Error(`Message to "${to}" was not delivered: ${errorText}`));
-              if (replyPromise) {
-                try {
-                  await replyPromise;
-                } catch {
-                  // The waiter was already rejected above. Keep the delivery failure as the only error here.
+              if (ownsWaiter) {
+                rejectReplyWaiter(new Error(`Message to "${to}" was not delivered: ${errorText}`));
+                if (replyPromise) {
+                  try {
+                    await replyPromise;
+                  } catch {
+                    // The waiter was already rejected above. Keep the delivery failure as the only error here.
+                  }
                 }
               }
               return {
@@ -1545,12 +1554,16 @@ Usage:
               isError: false,
             };
           } catch (error) {
-            rejectReplyWaiter(toError(error));
-            if (replyPromise) {
-              try {
-                await replyPromise;
-              } catch {
-                // The waiter is cleanup-only on this path. The real failure is the one from the outer catch.
+            // Only reject the global waiter if THIS call actually owns it.
+            // Otherwise we'd cancel a sibling concurrent ask's pending wait.
+            if (ownsWaiter) {
+              rejectReplyWaiter(toError(error));
+              if (replyPromise) {
+                try {
+                  await replyPromise;
+                } catch {
+                  // The waiter is cleanup-only on this path. The real failure is the one from the outer catch.
+                }
               }
             }
             return {
