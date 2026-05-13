@@ -77,7 +77,7 @@ cask "datagrip"
 cask "docker-desktop"
 
 # Productivity
-cask "zen-browser"
+cask "zen"
 cask "1password"
 cask "1password-cli"
 cask "hammerspoon"

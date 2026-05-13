@@ -66,6 +66,9 @@ core/.config/gh/hosts.yml
 # OpenCode vendored dependencies (installed via post-install)
 core/.config/opencode/node_modules/
 
+# Local fork of @juicesharp/rpiv-mono used by pi (machine-local; see settings.json)
+pi/packages/rpiv-mono/
+
 # Machine-specific configurations
 core/.config/gh/config.yml
 core/.config/k9s/config.yaml
