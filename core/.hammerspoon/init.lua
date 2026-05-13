@@ -2,15 +2,20 @@
 local function launchOrFocusOrRotate(app)
 	local focusedWindow = hs.window.focusedWindow()
 	-- If already focused, try to find the next window
-	if focusedWindow and focusedWindow:application():name() == app then
-		local appWindows = hs.application.get(app):allWindows()
+	local appObj = focusedWindow and focusedWindow:application()
+	if appObj and appObj:name() == app then
+		local targetApp = hs.application.get(app)
+		if not targetApp then
+			hs.application.launchOrFocus(app)
+			return
+		end
+		local appWindows = targetApp:allWindows()
 		if #appWindows > 1 then
 			-- It seems that this list order changes after one window get focused,
 			-- let's directly bring the last one to focus every time
 			appWindows[#appWindows]:focus()
 		else -- this should not happen, but just in case
-			-- hs.application.launchOrFocus(app)
-			hs.application.get(app):hide()
+			targetApp:hide()
 		end
 	else -- if not focused
 		hs.application.launchOrFocus(app)
@@ -21,35 +26,40 @@ end
 -- `hs.configdir` is the symlink target of `~/.hammerspoon`, so it covers
 -- edits made directly in the dotfiles repo without watching the same
 -- directory twice.
-hs.pathwatcher.new(hs.configdir, hs.reload):start()
+local configWatcher = hs.pathwatcher.new(hs.configdir, hs.reload):start()
 hs.application.enableSpotlightForNameSearches(true)
 
 local launchKeys = {
 	i = "WezTerm",
 	m = "Messages",
-	s = "Spotify",
 	c = "Sunsama",
 	f = "Finder",
 	u = "Zen",
 	v = "Antigravity",
-	t = "Microsoft Teams",
 }
 
 local alts = {
 	m = "Slack",
+	s = "Spotify",
+	t = "Microsoft Teams",
 }
 
 -- Load local overrides from init.local.lua if it exists
 local localConfigPath = hs.configdir .. "/init.local.lua"
 if hs.fs.attributes(localConfigPath) then
-    local localConfig = loadfile(localConfigPath)()
-    if localConfig then
-        if localConfig.launchKeys then
-            for k, v in pairs(localConfig.launchKeys) do launchKeys[k] = v end
+    local fn, err = loadfile(localConfigPath)
+    if fn then
+        local localConfig = fn()
+        if localConfig then
+            if localConfig.launchKeys then
+                for k, v in pairs(localConfig.launchKeys) do launchKeys[k] = v end
+            end
+            if localConfig.alts then
+                for k, v in pairs(localConfig.alts) do alts[k] = v end
+            end
         end
-        if localConfig.alts then
-            for k, v in pairs(localConfig.alts) do alts[k] = v end
-        end
+    elseif err then
+        hs.notify.show("Hammerspoon", "Config error", "init.local.lua: " .. tostring(err))
     end
 end
 
