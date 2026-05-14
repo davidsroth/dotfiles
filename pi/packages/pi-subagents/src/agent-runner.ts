@@ -271,7 +271,14 @@ export async function runAgent(
     settingsManager: SettingsManager.create(effectiveCwd, agentDir),
     modelRegistry: ctx.modelRegistry,
     model,
-    tools: toolNames,
+    // NOTE: do NOT pass `tools: toolNames` here. The SDK treats `tools` as a
+    // strict `allowedToolNames` allowlist (see pi-coding-agent sdk.js where
+    // `allowedToolNames = options.tools`). Setting it permanently filters
+    // every extension-registered tool (slack_*, notion_*, MCP-backed tools,
+    // etc.) out of the registry via `_refreshToolRegistry`'s `isAllowedTool`
+    // check — even tools registered later via `pi.registerTool`. We instead
+    // apply our own per-agent filter via `setActiveToolsByName` AFTER
+    // `bindExtensions` has populated the registry.
     resourceLoader: loader,
   };
   if (thinkingLevel) {
@@ -285,30 +292,20 @@ export async function runAgent(
     ? new Set(agentConfig.disallowedTools)
     : undefined;
 
-  // Filter active tools: remove our own tools to prevent nesting,
-  // apply extension allowlist if specified, and apply disallowedTools denylist
-  if (extensions !== false) {
-    const builtinToolNameSet = new Set(toolNames);
-    const activeTools = session.getActiveToolNames().filter((t) => {
-      if (EXCLUDED_TOOL_NAMES.includes(t)) return false;
-      if (disallowedSet?.has(t)) return false;
-      if (builtinToolNameSet.has(t)) return true;
-      if (Array.isArray(extensions)) {
-        return extensions.some(ext => t.startsWith(ext) || t.includes(ext));
-      }
-      return true;
-    });
-    session.setActiveToolsByName(activeTools);
-  } else if (disallowedSet) {
-    // Even with extensions disabled, apply denylist to built-in tools
-    const activeTools = session.getActiveToolNames().filter(t => !disallowedSet.has(t));
-    session.setActiveToolsByName(activeTools);
-  }
-
-  // Bind extensions so that session_start fires and extensions can initialize
-  // (e.g. loading credentials, setting up state). Placed after tool filtering
-  // so extension-provided skills/prompts from extendResourcesFromExtensions()
-  // respect the active tool set. All ExtensionBindings fields are optional.
+  // Bind extensions FIRST so MCP-backed and other extensions get a chance to
+  // register their tools (synchronously during session_start) before we
+  // snapshot the registry for the filter pass below.
+  //
+  // Limitation: some extensions defer tool registration to *after* an async
+  // handshake (e.g. slack-mcp's autoConnect: setTimeout(0) -> network
+  // handshake -> registerDynamicTools). Those tools may not be in the
+  // registry yet when our filter runs and so won't be active on the
+  // subagent's first turn. They will, however, auto-activate on a later
+  // turn via the SDK's `_refreshToolRegistry` auto-add path (which adds any
+  // newly-registered tool to the active set when no explicit allowlist is
+  // present — which is now the case for us). The control tools
+  // (`slack_mcp_connect`, `notion_mcp_connect`, etc.) register synchronously
+  // and will be available immediately.
   await session.bindExtensions({
     onError: (err) => {
       options.onToolActivity?.({
@@ -317,6 +314,34 @@ export async function runAgent(
       });
     },
   });
+
+  // Yield once so any setTimeout(0)-deferred registrations queued during
+  // session_start get a chance to run before we snapshot the registry.
+  // This catches synchronously-deferred work but does NOT wait for network
+  // roundtrips (those rely on the auto-add path described above).
+  await new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+  // Compute active tools from the now-populated registry. We filter by:
+  //   - excluding tools we register (Agent / get_subagent_result /
+  //     steer_subagent) to prevent infinite subagent nesting
+  //   - applying the agent's disallowedTools denylist
+  //   - keeping built-ins that are in the agent's `toolNames` whitelist
+  //   - keeping extension tools per the agent's `extensions` config
+  //     (`true` = inherit all, `string[]` = match by prefix/substring,
+  //     `false` = none)
+  const builtinToolNameSet = new Set(toolNames);
+  const allToolNames = session.getAllTools().map((t) => t.name);
+  const activeTools = allToolNames.filter((name) => {
+    if (EXCLUDED_TOOL_NAMES.includes(name)) return false;
+    if (disallowedSet?.has(name)) return false;
+    if (builtinToolNameSet.has(name)) return true;
+    if (extensions === false) return false;
+    if (Array.isArray(extensions)) {
+      return extensions.some((ext) => name.startsWith(ext) || name.includes(ext));
+    }
+    return true; // extensions === true → inherit all extension tools
+  });
+  session.setActiveToolsByName(activeTools);
 
   options.onSessionCreated?.(session);
 
