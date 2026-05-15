@@ -13,7 +13,6 @@
     "../../packages/pi-subagents",
     "../../packages/pi-btw",
     "../../packages/pi-intercom",
-    "../../packages/rpiv-mono/packages/rpiv-ask-user-question",
     "npm:@feniix/pi-notion@2.2.2",
     "npm:pi-web-access"
   ],
