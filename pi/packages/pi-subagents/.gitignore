@@ -33,3 +33,5 @@ Thumbs.db
 
 # Large upstream media files not vendored into dotfiles
 media/
+# npm lockfile (not tracked, matches pi-intercom convention)
+package-lock.json
