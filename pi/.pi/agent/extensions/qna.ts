@@ -23,7 +23,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { type Message, complete, type UserMessage } from "@earendil-works/pi-ai";
-import { BorderedLoader, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { BorderedLoader, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
 	Editor,
 	type EditorTheme,
@@ -32,6 +32,7 @@ import {
 	truncateToWidth,
 	visibleWidth,
 } from "@earendil-works/pi-tui";
+import { Type } from "typebox";
 
 // ModalEditor (vim mode) is loaded dynamically from the locally-vendored
 // pi-vim package. If it can't be resolved we fall back to the plain Editor so
@@ -276,7 +277,242 @@ function buildFrame(width: number, color: (s: string) => string): CardFrame {
 	};
 }
 
+// ---------- Shared card UI helper ----------
+
+type CardResult =
+	| { kind: "submit"; answers: string[] }
+	| { kind: "cancel"; stashed: boolean; typedCount: number };
+
+interface RunQnaCardUIOptions {
+	questions: string[];
+	preAnswers?: string[];
+	preloadedStartIndex?: number;
+	// sourceText is stored in the stash on cancel so /qna --resume can re-show
+	// the original assistant message context. Empty string is fine.
+	sourceText?: string;
+}
+
+/**
+ * Render the card-style Q&A UI. Used by both the `/qna` command and the
+ * `launch_qna` tool, so the tool can invoke the same UI synchronously during
+ * tool execution without going through `sendUserMessage` (which doesn't
+ * dispatch slash commands).
+ */
+async function runQnaCardUI(
+	ctx: ExtensionContext,
+	opts: RunQnaCardUIOptions,
+): Promise<CardResult> {
+	const { questions } = opts;
+	const sourceText = opts.sourceText ?? "";
+	const preAnswers = opts.preAnswers ?? new Array(questions.length).fill("");
+	const preloadedStartIndex = opts.preloadedStartIndex;
+	const ModalEditor = await loadModalEditor();
+
+	return await ctx.ui.custom<CardResult>((tui, theme, kb, done) => {
+		const total = questions.length;
+		const answers: string[] = preAnswers.slice(0, total);
+		while (answers.length < total) answers.push("");
+		let index =
+			typeof preloadedStartIndex === "number" && preloadedStartIndex < total
+				? preloadedStartIndex
+				: 0;
+		let cached: string[] | undefined;
+
+		const editorTheme: EditorTheme = {
+			borderColor: (s) => theme.fg("accent", s),
+			selectList: {
+				selectedPrefix: (t) => theme.fg("accent", t),
+				selectedText: (t) => theme.fg("accent", t),
+				description: (t) => theme.fg("muted", t),
+				scrollInfo: (t) => theme.fg("dim", t),
+				noMatch: (t) => theme.fg("warning", t),
+			},
+		};
+
+		const setModeStatus = (text: string | undefined) =>
+			ctx.ui.setStatus(QNA_STATUS_KEY, text);
+		const statusColorizers = {
+			insert: (s: string) => theme.fg("warning", s),
+			normal: (s: string) => theme.fg("borderAccent", s),
+		};
+
+		const editor = (
+			ModalEditor
+				? new ModalEditor(tui, editorTheme, kb, setModeStatus, statusColorizers)
+				: new Editor(tui, editorTheme)
+		) as Editor & { getMode?: () => "insert" | "normal" };
+		editor.disableSubmit = true; // We own Enter handling at the frame level
+
+		const getMode = (): "insert" | "normal" =>
+			typeof editor.getMode === "function" ? editor.getMode() : "insert";
+
+		if (answers[index]) editor.setText(answers[index]);
+
+		const refresh = () => {
+			cached = undefined;
+			tui.requestRender();
+		};
+
+		const saveCurrent = () => {
+			answers[index] = editor.getText();
+		};
+
+		const loadCurrent = () => {
+			editor.setText(answers[index] ?? "");
+		};
+
+		const goTo = (next: number) => {
+			if (next < 0 || next >= total) return;
+			saveCurrent();
+			index = next;
+			loadCurrent();
+			refresh();
+		};
+
+		function cancel() {
+			saveCurrent();
+			const typedCount = answers.filter((a) => a.trim()).length;
+			const stashed = typedCount > 0;
+			if (stashed) {
+				saveStash({
+					questions: questions.slice(),
+					answers: answers.slice(),
+					sourceText,
+					savedAt: Date.now(),
+					lastIndex: index,
+				});
+			}
+			setModeStatus(undefined);
+			done({ kind: "cancel", stashed, typedCount });
+		}
+
+		function submitAndClose() {
+			saveCurrent();
+			saveStash({
+				questions: questions.slice(),
+				answers: answers.slice(),
+				sourceText,
+				savedAt: Date.now(),
+				lastIndex: index,
+				completed: true,
+			});
+			setModeStatus(undefined);
+			done({ kind: "submit", answers: answers.slice() });
+		}
+
+		function handleInput(data: string) {
+			if (matchesKey(data, Key.ctrl("c"))) {
+				cancel();
+				return;
+			}
+			if (matchesKey(data, Key.ctrl(Key.enter))) {
+				submitAndClose();
+				return;
+			}
+			if (matchesKey(data, Key.escape)) {
+				if (getMode() === "normal") {
+					cancel();
+					return;
+				}
+				editor.handleInput(data);
+				refresh();
+				return;
+			}
+			if (matchesKey(data, Key.shift(Key.tab))) {
+				goTo(index - 1);
+				return;
+			}
+			if (matchesKey(data, Key.tab)) {
+				if (index === total - 1) submitAndClose();
+				else goTo(index + 1);
+				return;
+			}
+			if (matchesKey(data, Key.enter)) {
+				if (index === total - 1) submitAndClose();
+				else goTo(index + 1);
+				return;
+			}
+			if (matchesKey(data, Key.up)) {
+				goTo(index - 1);
+				return;
+			}
+			if (matchesKey(data, Key.down)) {
+				if (index < total - 1) goTo(index + 1);
+				return;
+			}
+			editor.handleInput(data);
+			refresh();
+		}
+
+		function render(width: number): string[] {
+			if (cached) return cached;
+			const lines: string[] = [];
+			const totalWidth = Math.max(30, width);
+			const muted = (s: string) => theme.fg("borderMuted", s);
+			const frame = buildFrame(totalWidth, muted);
+
+			const headerLeft = `${theme.fg("accent", theme.bold(`Question ${index + 1} of ${total}`))} ${theme.fg(
+				"dim",
+				"·",
+			)} ${theme.fg("muted", "qna")}`;
+			const dots = Array.from({ length: total }, (_, i) =>
+				i === index ? theme.fg("accent", "●") : theme.fg("dim", "○"),
+			).join(" ");
+			const headerLeftWidth = visibleWidth(headerLeft);
+			const dotsWidth = visibleWidth(dots);
+			const headerGap = Math.max(1, frame.innerWidth - 2 - headerLeftWidth - dotsWidth);
+			const headerLine = ` ${headerLeft}${" ".repeat(headerGap)}${dots} `;
+
+			lines.push(frame.top);
+			lines.push(frame.mid(headerLine));
+			lines.push(frame.mid(""));
+
+			const qPrefix = theme.fg("accent", `Q${index + 1}.`);
+			const questionText = questions[index];
+			const wrapped = wrapText(questionText, frame.innerWidth - 6);
+			for (let i = 0; i < wrapped.length; i++) {
+				const body = wrapped[i];
+				const prefix = i === 0 ? `${qPrefix} ` : "   ";
+				lines.push(frame.mid(` ${prefix}${theme.fg("text", body)} `));
+			}
+			lines.push(frame.mid(""));
+			lines.push(frame.mid(` ${theme.fg("muted", "Your answer")} `));
+
+			const editorRows = editor.render(frame.innerWidth - 4);
+			for (const row of editorRows) {
+				lines.push(frame.mid(` ${row} `));
+			}
+			lines.push(frame.mid(""));
+
+			const isLast = index === total - 1;
+			const escLabel = ModalEditor ? "Esc×2" : "Esc";
+			const hint =
+				`${theme.fg("dim", "Tab/Enter")} ${theme.fg("muted", isLast ? "submit all" : "next")}  ` +
+				`${theme.fg("dim", "Shift+Tab")} ${theme.fg("muted", "back")}  ` +
+				`${theme.fg("dim", "Ctrl+Enter")} ${theme.fg("muted", "submit all")}  ` +
+				`${theme.fg("dim", escLabel)} ${theme.fg("muted", "cancel")}  ` +
+				`${theme.fg("dim", "Ctrl+C")} ${theme.fg("muted", "abort")}`;
+			lines.push(frame.mid(` ${hint} `));
+			lines.push(frame.bot);
+
+			cached = lines.map((l) => truncateToWidth(l, totalWidth, ""));
+			return cached;
+		}
+
+		return {
+			render,
+			invalidate: () => {
+				cached = undefined;
+			},
+			handleInput,
+		};
+	});
+}
+
+// ---------- Extension entrypoint ----------
+
 export default function qna(pi: ExtensionAPI) {
+	// Register command FIRST so it works even if tool registration fails
 	pi.registerCommand("qna", {
 		description:
 			"Extract questions from the agent's last message and answer them in a card UI. Pass --resume to reopen the last cancelled session.",
@@ -286,17 +522,14 @@ export default function qna(pi: ExtensionAPI) {
 				return;
 			}
 
-			// Accept `--resume`, `-r`, or bare `resume` to be forgiving
-			const argTokens = args
-				.trim()
-				.split(/\s+/)
-				.filter(Boolean);
-			const isResume = argTokens.some((t) => t === "--resume" || t === "-r" || t === "resume");
+			const argTokens = args.trim().split(/\s+/).filter(Boolean);
+			const isResume = argTokens.some(
+				(t) => t === "--resume" || t === "-r" || t === "resume",
+			);
 
 			let sourceText: string;
 			let preloadedQuestions: string[] | undefined;
 			let preloadedAnswers: string[] | undefined;
-
 			let preloadedStartIndex: number | undefined;
 
 			if (isResume) {
@@ -317,7 +550,6 @@ export default function qna(pi: ExtensionAPI) {
 				sourceText = stash.sourceText;
 				preloadedQuestions = stash.questions.slice();
 				preloadedAnswers = stash.answers.slice();
-				// Prefer explicit cursor; otherwise pick up at the first unanswered card
 				preloadedStartIndex =
 					typeof stash.lastIndex === "number" &&
 					stash.lastIndex >= 0 &&
@@ -325,7 +557,6 @@ export default function qna(pi: ExtensionAPI) {
 						? stash.lastIndex
 						: firstUnansweredIndex(preloadedAnswers);
 			} else {
-				// 1. Find last completed assistant message ------------------
 				const branch = ctx.sessionManager.getBranch();
 				const found = findLastAssistantText(branch as readonly unknown[]);
 				if (!found) {
@@ -333,70 +564,81 @@ export default function qna(pi: ExtensionAPI) {
 					return;
 				}
 				if (found.incompleteReason) {
-					ctx.ui.notify(`Last assistant message incomplete (${found.incompleteReason})`, "error");
+					ctx.ui.notify(
+						`Last assistant message incomplete (${found.incompleteReason})`,
+						"error",
+					);
 					return;
 				}
 				sourceText = found.text;
 			}
 
-			// 2. Resolve the extractor model --------------------------------
 			const extractor = preloadedQuestions
 				? null
 				: ctx.modelRegistry.find(EXTRACTOR_MODEL_PROVIDER, EXTRACTOR_MODEL_ID);
 			if (!preloadedQuestions && !extractor) {
-				ctx.ui.notify(`Extractor model ${EXTRACTOR_MODEL_PROVIDER}/${EXTRACTOR_MODEL_ID} not registered`, "error");
+				ctx.ui.notify(
+					`Extractor model ${EXTRACTOR_MODEL_PROVIDER}/${EXTRACTOR_MODEL_ID} not registered`,
+					"error",
+				);
 				return;
 			}
 
-			// 3. Run extraction (skipped when resuming) ---------------------
 			let extracted: string[] | null;
 			if (preloadedQuestions) {
 				extracted = preloadedQuestions;
 			} else {
-				// We early-returned above if extractor was missing, so it's non-null here.
 				const model = extractor as NonNullable<typeof extractor>;
 				extracted = await ctx.ui.custom<string[] | null>((tui, theme, _kb, done) => {
-				const loader = new BorderedLoader(tui, theme, `Extracting questions with ${model.id}…`);
-				loader.onAbort = () => done(null);
-
-				const work = async () => {
-					const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
-					if (!auth.ok) throw new Error(auth.error);
-					if (!auth.apiKey) throw new Error(`No API key configured for provider "${model.provider}"`);
-
-					const userMsg: UserMessage = {
-						role: "user",
-						content: [{ type: "text", text: sourceText }],
-						timestamp: Date.now(),
-					};
-					const messages: Message[] = [userMsg];
-
-					const response = await complete(
-						model,
-						{ systemPrompt: SYSTEM_PROMPT, messages, tools: [] },
-						{ apiKey: auth.apiKey, headers: auth.headers, signal: loader.signal },
+					const loader = new BorderedLoader(
+						tui,
+						theme,
+						`Extracting questions with ${model.id}…`,
 					);
+					loader.onAbort = () => done(null);
 
-					if (response.stopReason === "aborted") return null;
-					if (response.stopReason === "error") {
-						throw new Error(response.errorMessage ?? "Extractor call failed");
-					}
+					const work = async () => {
+						const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
+						if (!auth.ok) throw new Error(auth.error);
+						if (!auth.apiKey)
+							throw new Error(`No API key configured for provider "${model.provider}"`);
 
-					const text = response.content
-						.filter((c): c is { type: "text"; text: string } => c.type === "text")
-						.map((c) => c.text)
-						.join("\n");
-					return parseExtractorResponse(text);
-				};
+						const userMsg: UserMessage = {
+							role: "user",
+							content: [{ type: "text", text: sourceText }],
+							timestamp: Date.now(),
+						};
+						const messages: Message[] = [userMsg];
 
-				work()
-					.then((res) => done(res))
-					.catch((err) => {
-						ctx.ui.notify(`/qna extraction failed: ${err instanceof Error ? err.message : String(err)}`, "error");
-						done(null);
-					});
+						const response = await complete(
+							model,
+							{ systemPrompt: SYSTEM_PROMPT, messages, tools: [] },
+							{ apiKey: auth.apiKey, headers: auth.headers, signal: loader.signal },
+						);
 
-				return loader;
+						if (response.stopReason === "aborted") return null;
+						if (response.stopReason === "error") {
+							throw new Error(response.errorMessage ?? "Extractor call failed");
+						}
+
+						const text = response.content
+							.filter((c): c is { type: "text"; text: string } => c.type === "text")
+							.map((c) => c.text)
+							.join("\n");
+						return parseExtractorResponse(text);
+					};
+
+					work()
+						.then((res) => done(res))
+						.catch((err) => {
+							ctx.ui.notify(
+								`/qna extraction failed: ${err instanceof Error ? err.message : String(err)}`,
+								"error",
+							);
+							done(null);
+						});
+
+					return loader;
 				});
 			}
 
@@ -405,255 +647,21 @@ export default function qna(pi: ExtensionAPI) {
 				return;
 			}
 			if (extracted.length === 0) {
-				// Silent toast: don't open the card UI when there's nothing to ask
 				ctx.ui.notify("No questions found in the last assistant message", "info");
 				return;
 			}
 
-			// Capture into a non-null local so the closure below has a tight type
 			const questions: string[] = extracted;
 			const preAnswers = preloadedAnswers ?? new Array(questions.length).fill("");
 
-			// 4. Card UI ---------------------------------------------------
-			// Try to load pi-vim's ModalEditor. We do this before opening the
-			// custom UI so the closure can use it synchronously.
-			const ModalEditor = await loadModalEditor();
-
-			type CardResult =
-				| { kind: "submit"; answers: string[] }
-				| { kind: "cancel"; stashed: boolean; typedCount: number };
-
-			const result = await ctx.ui.custom<CardResult>((tui, theme, kb, done) => {
-				const total = questions.length;
-				const answers: string[] = preAnswers.slice(0, total);
-				while (answers.length < total) answers.push("");
-				// Land on the explicitly-requested start index for resume, otherwise card 0
-				let index =
-					typeof preloadedStartIndex === "number" && preloadedStartIndex < total
-						? preloadedStartIndex
-						: 0;
-				let cached: string[] | undefined;
-
-				const editorTheme: EditorTheme = {
-					borderColor: (s) => theme.fg("accent", s),
-					selectList: {
-						selectedPrefix: (t) => theme.fg("accent", t),
-						selectedText: (t) => theme.fg("accent", t),
-						description: (t) => theme.fg("muted", t),
-						scrollInfo: (t) => theme.fg("dim", t),
-						noMatch: (t) => theme.fg("warning", t),
-					},
-				};
-
-				const setModeStatus = (text: string | undefined) => ctx.ui.setStatus(QNA_STATUS_KEY, text);
-				const statusColorizers = {
-					insert: (s: string) => theme.fg("warning", s),
-					normal: (s: string) => theme.fg("borderAccent", s),
-				};
-
-				const editor = (
-					ModalEditor
-						? new ModalEditor(tui, editorTheme, kb, setModeStatus, statusColorizers)
-						: new Editor(tui, editorTheme)
-				) as Editor & { getMode?: () => "insert" | "normal" };
-				editor.disableSubmit = true; // We own Enter handling at the frame level
-
-				const getMode = (): "insert" | "normal" =>
-					typeof editor.getMode === "function" ? editor.getMode() : "insert";
-
-				// Prime the editor with whatever's stashed for the starting card.
-				// Matters when resuming; a fresh session lands on 0 with empty answers.
-				if (answers[index]) editor.setText(answers[index]);
-
-				const refresh = () => {
-					cached = undefined;
-					tui.requestRender();
-				};
-
-				const saveCurrent = () => {
-					answers[index] = editor.getText();
-				};
-
-				const loadCurrent = () => {
-					editor.setText(answers[index] ?? "");
-				};
-
-				const goTo = (next: number) => {
-					if (next < 0 || next >= total) return;
-					saveCurrent();
-					index = next;
-					loadCurrent();
-					refresh();
-				};
-
-
-
-				function cancel() {
-					saveCurrent();
-					const typedCount = answers.filter((a) => a.trim()).length;
-					const stashed = typedCount > 0;
-					if (stashed) {
-						saveStash({
-							questions: questions.slice(),
-							answers: answers.slice(),
-							sourceText,
-							savedAt: Date.now(),
-							lastIndex: index,
-						});
-					}
-					setModeStatus(undefined); // hand the pill back to the global editor
-					// Notify is deferred to the parent handler post-modal—notifies emitted
-					// while the custom UI is still on screen get swallowed by the renderer.
-					done({ kind: "cancel", stashed, typedCount });
-				}
-
-				function submitAndClose() {
-					saveCurrent();
-					// Keep the stash even on submit so /qna --resume can recover the
-					// most recent set if the user clears the editor and wants it back.
-					saveStash({
-						questions: questions.slice(),
-						answers: answers.slice(),
-						sourceText,
-						savedAt: Date.now(),
-						lastIndex: index,
-						completed: true,
-					});
-					setModeStatus(undefined);
-					done({ kind: "submit", answers: answers.slice() });
-				}
-
-				function handleInput(data: string) {
-					// Universal cancel
-					if (matchesKey(data, Key.ctrl("c"))) {
-						cancel();
-						return;
-					}
-
-					// Ctrl+Enter: submit-all from any card
-					if (matchesKey(data, Key.ctrl(Key.enter))) {
-						submitAndClose();
-						return;
-					}
-
-					// Esc: 1st (INSERT) -> editor handles transition to NORMAL.
-					//      2nd (already NORMAL) -> cancel the modal.
-					if (matchesKey(data, Key.escape)) {
-						if (getMode() === "normal") {
-							cancel();
-							return;
-						}
-						editor.handleInput(data);
-						refresh();
-						return;
-					}
-
-					// Card-level navigation, regardless of vim mode
-					if (matchesKey(data, Key.shift(Key.tab))) {
-						goTo(index - 1);
-						return;
-					}
-					if (matchesKey(data, Key.tab)) {
-						if (index === total - 1) submitAndClose();
-						else goTo(index + 1);
-						return;
-					}
-					if (matchesKey(data, Key.enter)) {
-						if (index === total - 1) submitAndClose();
-						else goTo(index + 1);
-						return;
-					}
-					if (matchesKey(data, Key.up)) {
-						goTo(index - 1);
-						return;
-					}
-					if (matchesKey(data, Key.down)) {
-						if (index < total - 1) goTo(index + 1);
-						return;
-					}
-
-					editor.handleInput(data);
-					refresh();
-				}
-
-				function render(width: number): string[] {
-					if (cached) return cached;
-
-					const lines: string[] = [];
-					const totalWidth = Math.max(30, width);
-
-					// Outer card frame in borderMuted (matches dashboard widget)
-					const muted = (s: string) => theme.fg("borderMuted", s);
-					const frame = buildFrame(totalWidth, muted);
-
-					// Header row: "Question N of M  ·  qna" left, progress dots right
-					const headerLeft = `${theme.fg("accent", theme.bold(`Question ${index + 1} of ${total}`))} ${theme.fg(
-						"dim",
-						"·",
-					)} ${theme.fg("muted", "qna")}`;
-					const dots = Array.from({ length: total }, (_, i) =>
-						i === index ? theme.fg("accent", "●") : theme.fg("dim", "○"),
-					).join(" ");
-					const headerLeftWidth = visibleWidth(headerLeft);
-					const dotsWidth = visibleWidth(dots);
-					const headerGap = Math.max(1, frame.innerWidth - 2 - headerLeftWidth - dotsWidth);
-					const headerLine = ` ${headerLeft}${" ".repeat(headerGap)}${dots} `;
-
-					lines.push(frame.top);
-					lines.push(frame.mid(headerLine));
-					lines.push(frame.mid(""));
-
-					// Question body — wrapped, dimmed accent for the "Q." marker
-					const qPrefix = theme.fg("accent", `Q${index + 1}.`);
-					const questionText = questions[index];
-					const wrapped = wrapText(questionText, frame.innerWidth - 6);
-					for (let i = 0; i < wrapped.length; i++) {
-						const body = wrapped[i];
-						const prefix = i === 0 ? `${qPrefix} ` : "   ";
-						lines.push(frame.mid(` ${prefix}${theme.fg("text", body)} `));
-					}
-					lines.push(frame.mid(""));
-
-					// Answer label
-					lines.push(frame.mid(` ${theme.fg("muted", "Your answer")} `));
-
-					// Editor area — render the editor and box each row inside the card
-					const editorRows = editor.render(frame.innerWidth - 4);
-					for (const row of editorRows) {
-						lines.push(frame.mid(` ${row} `));
-					}
-
-					lines.push(frame.mid(""));
-
-						// Footer keybinding hint
-					const isLast = index === total - 1;
-					const escLabel = ModalEditor ? "Esc×2" : "Esc";
-					const hint =
-						`${theme.fg("dim", "Tab/Enter")} ${theme.fg("muted", isLast ? "submit all" : "next")}  ` +
-						`${theme.fg("dim", "Shift+Tab")} ${theme.fg("muted", "back")}  ` +
-						`${theme.fg("dim", "Ctrl+Enter")} ${theme.fg("muted", "submit all")}  ` +
-						`${theme.fg("dim", escLabel)} ${theme.fg("muted", "cancel")}  ` +
-						`${theme.fg("dim", "Ctrl+C")} ${theme.fg("muted", "abort")}`;
-					lines.push(frame.mid(` ${hint} `));
-
-					lines.push(frame.bot);
-
-					cached = lines.map((l) => truncateToWidth(l, totalWidth, ""));
-					return cached;
-				}
-
-				return {
-					render,
-					invalidate: () => {
-						cached = undefined;
-					},
-					handleInput,
-				};
+			const result = await runQnaCardUI(ctx, {
+				questions,
+				preAnswers,
+				preloadedStartIndex,
+				sourceText,
 			});
 
 			if (result.kind === "cancel") {
-				// Toast AFTER the modal has been torn down; notifies emitted from inside
-				// the custom UI's done() handler don't reach the toast renderer.
 				if (result.stashed) {
 					ctx.ui.notify(
 						`/qna stashed (${result.typedCount}/${questions.length} typed) — use /qna --resume to continue`,
@@ -665,7 +673,6 @@ export default function qna(pi: ExtensionAPI) {
 				return;
 			}
 
-			// 5. Load the assembled Q&A into the editor for review ----------
 			const block = buildQAFromAnswers(questions, result.answers);
 			ctx.ui.setEditorText(block);
 			ctx.ui.notify(
@@ -674,4 +681,94 @@ export default function qna(pi: ExtensionAPI) {
 			);
 		},
 	});
+
+	// Register the launch_qna tool AFTER the command so /qna works even if this fails.
+	try {
+		pi.registerTool({
+			name: "launch_qna",
+			label: "Launch Q&A",
+			description:
+				"Opens the interactive Q&A card UI for questions in my last message. " +
+				"Call this after asking numbered or inline questions to let the user answer them in a structured card interface.",
+			promptSnippet:
+				"Launch interactive Q&A card UI for questions in the last assistant message",
+			promptGuidelines: [
+				"Use launch_qna after asking multiple questions that the user should answer one at a time.",
+			],
+			parameters: Type.Object({
+				questions: Type.Array(
+					Type.String({
+						description: "List of questions to ask the user one at a time",
+					}),
+				),
+			}),
+			async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+				const qs = params.questions;
+				if (!qs || qs.length === 0) {
+					return {
+						content: [
+							{
+								type: "text",
+								text: "launch_qna called with no questions. Pass an array of question strings.",
+							},
+						],
+						isError: true,
+					};
+				}
+				if (!ctx.hasUI) {
+					return {
+						content: [
+							{ type: "text", text: "Cannot launch Q&A: not in interactive mode." },
+						],
+						isError: true,
+					};
+				}
+
+				// Open the card UI directly (synchronously, during tool execution).
+				// This is the whole point of the tool: avoid sendUserMessage, which
+				// doesn't dispatch slash commands when called from extensions.
+				const result = await runQnaCardUI(ctx, {
+					questions: qs,
+					preAnswers: new Array(qs.length).fill(""),
+					sourceText: "",
+				});
+
+				if (result.kind === "cancel") {
+					if (result.stashed) {
+						return {
+							content: [
+								{
+									type: "text",
+									text: `User cancelled Q&A. ${result.typedCount}/${qs.length} answers were typed and stashed — they can resume with /qna --resume.`,
+								},
+							],
+						};
+					}
+					return {
+						content: [
+							{ type: "text", text: "User cancelled Q&A without answering." },
+						],
+					};
+				}
+
+				const block = buildQAFromAnswers(qs, result.answers);
+				// Intentionally NOT calling setEditorText here: the answers are
+				// returned to the agent via the tool result, and loading the block
+				// into the editor would cause the user to (accidentally) re-send the
+				// same content as a follow-up user message.
+				return {
+					content: [
+						{
+							type: "text",
+							text: `User answered ${qs.length} question${qs.length === 1 ? "" : "s"}:\n\n${block}`,
+						},
+					],
+				};
+			},
+		});
+	} catch (err) {
+		console.error(
+			`[qna] Failed to register launch_qna tool: ${err instanceof Error ? err.message : String(err)}`,
+		);
+	}
 }
