@@ -258,7 +258,7 @@ describe("AgentManager — lifetime usage + compaction count are eagerly initial
     });
     const record = manager.getRecord(id)!;
 
-    expect(record.lifetimeUsage).toEqual({ input: 0, output: 0, cacheWrite: 0 });
+    expect(record.lifetimeUsage).toEqual({ input: 0, output: 0, cacheWrite: 0, cost: 0 });
     expect(record.compactionCount).toBe(0);
 
     manager.abort(id);
@@ -285,7 +285,7 @@ describe("AgentManager — lifetime usage + compaction count are eagerly initial
 
     expect(captured).toBeDefined();
     expect(manager.getRecord(id)!.lifetimeUsage).toEqual({
-      input: 300, output: 130, cacheWrite: 30,
+      input: 300, output: 130, cacheWrite: 30, cost: 0,
     });
   });
 
@@ -337,7 +337,7 @@ describe("AgentManager — lifetime usage + compaction count are eagerly initial
     await manager.getRecord(id)!.promise;
 
     // Pre-resume: lifetimeUsage from spawn was zero (mock didn't call onAssistantUsage)
-    expect(manager.getRecord(id)!.lifetimeUsage).toEqual({ input: 0, output: 0, cacheWrite: 0 });
+    expect(manager.getRecord(id)!.lifetimeUsage).toEqual({ input: 0, output: 0, cacheWrite: 0, cost: 0 });
     expect(manager.getRecord(id)!.compactionCount).toBe(0);
 
     // Now resume — drive callbacks via the mocked resumeAgent
@@ -350,7 +350,7 @@ describe("AgentManager — lifetime usage + compaction count are eagerly initial
 
     await manager.resume(id, "more");
 
-    expect(manager.getRecord(id)!.lifetimeUsage).toEqual({ input: 70, output: 30, cacheWrite: 5 });
+    expect(manager.getRecord(id)!.lifetimeUsage).toEqual({ input: 70, output: 30, cacheWrite: 5, cost: 0 });
     expect(manager.getRecord(id)!.compactionCount).toBe(1);
   });
 });

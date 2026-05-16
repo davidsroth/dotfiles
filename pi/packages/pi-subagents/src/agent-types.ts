@@ -153,7 +153,7 @@ export function getConfig(type: string): {
 
   // Absolute fallback (should never happen)
   return {
-    displayName: "Agent",
+    displayName: "agent",
     description: "General-purpose agent for complex, multi-step tasks",
     builtinToolNames: BUILTIN_TOOL_NAMES,
     extensions: true,

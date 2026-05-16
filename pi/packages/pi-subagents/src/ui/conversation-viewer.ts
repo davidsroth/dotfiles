@@ -9,9 +9,9 @@ import type { AgentSession } from "@mariozechner/pi-coding-agent";
 import { type Component, matchesKey, type TUI, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@mariozechner/pi-tui";
 import { extractText } from "../context.js";
 import type { AgentRecord } from "../types.js";
-import { getLifetimeTotal, getSessionContextPercent } from "../usage.js";
+import { getLifetimeTotal, getSessionContextPercent, formatCost } from "../usage.js";
 import type { Theme } from "./agent-widget.js";
-import { type AgentActivity, buildInvocationTags, describeActivity, formatDuration, formatSessionTokens, getDisplayName, getPromptModeLabel } from "./agent-widget.js";
+import { type AgentActivity, buildInvocationTags, describeActivity, formatDuration, formatTokens, getDisplayName, getPromptModeLabel } from "./agent-widget.js";
 
 /** Base lines consumed by chrome: top border + header + header sep + footer sep + footer + bottom border. */
 const CHROME_LINES_BASE = 6;
@@ -103,17 +103,39 @@ export class ConversationViewer implements Component {
           : th.fg("dim", "○");
     const duration = formatDuration(this.record.startedAt, this.record.completedAt);
 
-    const headerParts: string[] = [duration];
+    // Build header stats with colored context-percent annotation
+    const statPieces: string[] = [];
     const toolUses = this.activity?.toolUses ?? this.record.toolUses;
-    if (toolUses > 0) headerParts.unshift(`${toolUses} tool${toolUses === 1 ? "" : "s"}`);
+    if (toolUses > 0) statPieces.push(th.fg("dim", `${toolUses} tool${toolUses === 1 ? "" : "s"}`));
+
     const tokens = getLifetimeTotal(this.activity?.lifetimeUsage);
     if (tokens > 0) {
+      const tokenStr = formatTokens(tokens);
       const percent = getSessionContextPercent(this.activity?.session);
-      headerParts.push(formatSessionTokens(tokens, percent, th, this.record.compactionCount));
+      const hasAnnot = percent !== null || this.record.compactionCount > 0;
+      if (hasAnnot) {
+        const annotInner: string[] = [];
+        if (percent !== null) {
+          const level = percent >= 85 ? "error" : percent >= 70 ? "warning" : "dim";
+          annotInner.push(th.fg(level, `${Math.round(percent)}%`));
+        }
+        if (this.record.compactionCount > 0) {
+          annotInner.push(th.fg("dim", `↻${this.record.compactionCount}`));
+        }
+        statPieces.push(th.fg("dim", `${tokenStr} (`) + annotInner.join(th.fg("dim", " · ")) + th.fg("dim", ")"));
+      } else {
+        statPieces.push(th.fg("dim", tokenStr));
+      }
     }
 
+    const cost = this.activity?.lifetimeUsage?.cost ?? this.record.lifetimeUsage?.cost ?? 0;
+    if (cost > 0) statPieces.push(th.fg("dim", formatCost(cost)));
+    statPieces.push(th.fg("dim", duration));
+
+    const statsLine = statPieces.join(th.fg("dim", " · "));
+
     lines.push(row(
-      `${statusIcon} ${th.bold(name)}${modeTag}  ${th.fg("muted", this.record.description)} ${th.fg("dim", "·")} ${th.fg("dim", headerParts.join(" · "))}`,
+      `${statusIcon} ${th.bold(name)}${modeTag}  ${th.fg("muted", this.record.description)} ${th.fg("dim", "·")} ${statsLine}`,
     ));
     const invocationLine = this.invocationLine();
     if (invocationLine) lines.push(row(invocationLine));

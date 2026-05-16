@@ -124,7 +124,7 @@ export class AgentManager {
       toolUses: 0,
       startedAt: Date.now(),
       abortController,
-      lifetimeUsage: { input: 0, output: 0, cacheWrite: 0 },
+      lifetimeUsage: { input: 0, output: 0, cacheWrite: 0, cost: 0 },
       compactionCount: 0,
       invocation: options.invocation,
     };

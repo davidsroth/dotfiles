@@ -5,11 +5,17 @@
  * Uses the callback form of setWidget for themed rendering.
  */
 
-import { truncateToWidth } from "@mariozechner/pi-tui";
+import { truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
+
+function padRight(text: string, width: number): string {
+	const textWidth = visibleWidth(text);
+	if (textWidth >= width) return truncateToWidth(text, width, "");
+	return text + " ".repeat(width - textWidth);
+}
 import type { AgentManager } from "../agent-manager.js";
 import { getConfig } from "../agent-types.js";
 import type { AgentInvocation, SubagentType } from "../types.js";
-import { getLifetimeTotal, getSessionContextPercent, type LifetimeUsage, type SessionLike } from "../usage.js";
+import { formatCost, getLifetimeTotal, getSessionContextPercent, type LifetimeUsage, type SessionLike } from "../usage.js";
 
 // ---- Constants ----
 
@@ -86,6 +92,7 @@ export interface AgentDetails {
   maxTurns?: number;
   agentId?: string;
   error?: string;
+  cost?: number;
 }
 
 // ---- Formatting helpers ----
@@ -99,28 +106,26 @@ export function formatTokens(count: number): string {
 
 /**
  * Token count with optional context-fill % and compaction-count annotations.
- * Thresholds for percent: <70% dim, 70–85% warning, ≥85% error.
- * Compaction count rendered as `↻N` in dim.
+ * Returns plain text; callers should apply coloring as needed.
  *
  *   "12.3k token"               — no annotations
  *   "12.3k token (45%)"         — percent only
- *   "12.3k token (↻2)"          — compactions only (e.g. right after compact)
+ *   "12.3k token (↻2)"          — compactions only
  *   "12.3k token (45% · ↻2)"    — both
  */
 export function formatSessionTokens(
   tokens: number,
   percent: number | null,
-  theme: Theme,
+  _theme: Theme,
   compactions = 0,
 ): string {
   const tokenStr = formatTokens(tokens);
   const annot: string[] = [];
   if (percent !== null) {
-    const color = percent >= 85 ? "error" : percent >= 70 ? "warning" : "dim";
-    annot.push(theme.fg(color, `${Math.round(percent)}%`));
+    annot.push(`${Math.round(percent)}%`);
   }
   if (compactions > 0) {
-    annot.push(theme.fg("dim", `↻${compactions}`));
+    annot.push(`↻${compactions}`);
   }
   if (annot.length === 0) return tokenStr;
   return `${tokenStr} (${annot.join(" · ")})`;
@@ -299,14 +304,18 @@ export class AgentWidget {
       statusText = theme.fg("warning", " aborted");
     }
 
-    const parts: string[] = [];
+    const statPieces: string[] = [];
     const activity = this.agentActivity.get(a.id);
-    if (activity) parts.push(formatTurns(activity.turnCount, activity.maxTurns));
-    if (a.toolUses > 0) parts.push(`${a.toolUses} tool use${a.toolUses === 1 ? "" : "s"}`);
-    parts.push(duration);
+    if (activity) statPieces.push(theme.fg("dim", formatTurns(activity.turnCount, activity.maxTurns)));
+    if (a.toolUses > 0) statPieces.push(theme.fg("dim", `${a.toolUses} tool use${a.toolUses === 1 ? "" : "s"}`));
+    const cost = activity?.lifetimeUsage?.cost ?? 0;
+    if (cost > 0) statPieces.push(theme.fg("dim", formatCost(cost)));
+    statPieces.push(theme.fg("dim", duration));
 
     const modeTag = modeLabel ? ` ${theme.fg("dim", `(${modeLabel})`)}` : "";
-    return `${icon} ${theme.fg("dim", name)}${modeTag}  ${theme.fg("dim", a.description)} ${theme.fg("dim", "·")} ${theme.fg("dim", parts.join(" · "))}${statusText}`;
+    const sep = theme.fg("borderMuted", " · ");
+    const statsLine = statPieces.join(sep);
+    return `${icon} ${theme.fg("dim", name)}${modeTag}  ${theme.fg("dim", a.description)} ${sep} ${statsLine}${statusText}`;
   }
 
   /**
@@ -331,15 +340,13 @@ export class AgentWidget {
     const w = tui.terminal.columns;
     const truncate = (line: string) => truncateToWidth(line, w);
     const headingColor = hasActive ? "accent" : "dim";
-    const headingIcon = hasActive ? "●" : "○";
-    const frame = SPINNER[this.widgetFrame % SPINNER.length];
 
     // Build sections separately for overflow-aware assembly.
     // Each running agent = 2 lines (header + activity), finished = 1 line, queued = 1 line.
 
     const finishedLines: string[] = [];
     for (const a of finished) {
-      finishedLines.push(truncate(theme.fg("dim", "├─") + " " + this.renderFinishedLine(a, theme)));
+      finishedLines.push(truncate("  " + this.renderFinishedLine(a, theme)));
     }
 
     const runningLines: string[][] = []; // each entry is [header, activity]
@@ -353,96 +360,106 @@ export class AgentWidget {
       const toolUses = bg?.toolUses ?? a.toolUses;
       const tokens = getLifetimeTotal(bg?.lifetimeUsage);
       const contextPercent = getSessionContextPercent(bg?.session);
-      const tokenText = tokens > 0 ? formatSessionTokens(tokens, contextPercent, theme, a.compactionCount) : "";
 
-      const parts: string[] = [];
-      if (bg) parts.push(formatTurns(bg.turnCount, bg.maxTurns));
-      if (toolUses > 0) parts.push(`${toolUses} tool use${toolUses === 1 ? "" : "s"}`);
-      if (tokenText) parts.push(tokenText);
-      parts.push(elapsed);
-      const statsText = parts.join(" · ");
+      // Build stat line with colored context-percent annotation
+      const statParts: string[] = [];
+      if (a.invocation?.modelName) statParts.push(theme.fg("dim", a.invocation.modelName));
+      if (bg) statParts.push(theme.fg("dim", formatTurns(bg.turnCount, bg.maxTurns)));
+      if (toolUses > 0) statParts.push(theme.fg("dim", `${toolUses} tool use${toolUses === 1 ? "" : "s"}`));
+
+      if (tokens > 0) {
+        const tokenStr = formatTokens(tokens);
+        const hasAnnot = contextPercent !== null || a.compactionCount > 0;
+        if (hasAnnot) {
+          const annotInner: string[] = [];
+          if (contextPercent !== null) {
+            const level = contextPercent >= 85 ? "error" : contextPercent >= 70 ? "warning" : "dim";
+            annotInner.push(theme.fg(level, `${Math.round(contextPercent)}%`));
+          }
+          if (a.compactionCount > 0) {
+            annotInner.push(theme.fg("dim", `↻${a.compactionCount}`));
+          }
+          statParts.push(theme.fg("dim", `${tokenStr} (`) + annotInner.join(theme.fg("dim", " · ")) + theme.fg("dim", ")"));
+        } else {
+          statParts.push(theme.fg("dim", tokenStr));
+        }
+      }
+
+      const cost = bg?.lifetimeUsage?.cost ?? 0;
+      if (cost > 0) statParts.push(theme.fg("dim", formatCost(cost)));
+      statParts.push(theme.fg("dim", elapsed));
+      const statsText = statParts.join(theme.fg("dim", "·"));
 
       const activity = bg ? describeActivity(bg.activeTools, bg.responseText) : "thinking…";
 
       runningLines.push([
-        truncate(theme.fg("dim", "├─") + ` ${theme.fg("accent", frame)} ${theme.bold(name)}${modeTag}  ${theme.fg("muted", a.description)} ${theme.fg("dim", "·")} ${theme.fg("dim", statsText)}`),
-        truncate(theme.fg("dim", "│  ") + theme.fg("dim", `  ⎿  ${activity}`)),
+        truncate(`  ${theme.bold(name)}${modeTag}  ${theme.fg("muted", a.description)} ${theme.fg("borderMuted", "·")} ${statsText}`),
+        truncate(`    ${theme.fg("dim", `⎿  ${activity}`)}`),
       ]);
     }
 
     const queuedLine = queued.length > 0
-      ? truncate(theme.fg("dim", "├─") + ` ${theme.fg("muted", "◦")} ${theme.fg("dim", `${queued.length} queued`)}`)
+      ? truncate(`  ${theme.fg("muted", "◦")} ${theme.fg("dim", `${queued.length} queued`)}`)
       : undefined;
 
-    // Assemble with overflow cap (heading + overflow indicator = 2 reserved lines).
-    const maxBody = MAX_WIDGET_LINES - 1; // heading takes 1 line
+    // Assemble content lines with overflow cap.
+    const maxBody = MAX_WIDGET_LINES - 2; // top + bottom borders = 2 lines
     const totalBody = finishedLines.length + runningLines.length * 2 + (queuedLine ? 1 : 0);
 
-    const lines: string[] = [truncate(theme.fg(headingColor, headingIcon) + " " + theme.fg(headingColor, "Agents"))];
+    const contentLines: string[] = [];
 
     if (totalBody <= maxBody) {
-      // Everything fits — add all lines and fix up connectors for the last item.
-      lines.push(...finishedLines);
-      for (const pair of runningLines) lines.push(...pair);
-      if (queuedLine) lines.push(queuedLine);
-
-      // Fix last connector: swap ├─ → └─ and │ → space for activity lines.
-      if (lines.length > 1) {
-        const last = lines.length - 1;
-        lines[last] = lines[last].replace("├─", "└─");
-        // If last item is a running agent activity line, fix indent of that line
-        // and fix the header line above it.
-        if (runningLines.length > 0 && !queuedLine) {
-          // The last two lines are the last running agent's header + activity.
-          if (last >= 2) {
-            lines[last - 1] = lines[last - 1].replace("├─", "└─");
-            lines[last] = lines[last].replace("│  ", "   ");
-          }
-        }
-      }
+      contentLines.push(...finishedLines);
+      for (const pair of runningLines) contentLines.push(...pair);
+      if (queuedLine) contentLines.push(queuedLine);
     } else {
       // Overflow — prioritize: running > queued > finished.
-      // Reserve 1 line for overflow indicator.
-      let budget = maxBody - 1;
+      let budget = maxBody - 1; // reserve 1 line for overflow indicator
       let hiddenRunning = 0;
       let hiddenFinished = 0;
 
-      // 1. Running agents (2 lines each)
       for (const pair of runningLines) {
         if (budget >= 2) {
-          lines.push(...pair);
+          contentLines.push(...pair);
           budget -= 2;
         } else {
           hiddenRunning++;
         }
       }
 
-      // 2. Queued line
       if (queuedLine && budget >= 1) {
-        lines.push(queuedLine);
+        contentLines.push(queuedLine);
         budget--;
       }
 
-      // 3. Finished agents
       for (const fl of finishedLines) {
         if (budget >= 1) {
-          lines.push(fl);
+          contentLines.push(fl);
           budget--;
         } else {
           hiddenFinished++;
         }
       }
 
-      // Overflow summary
       const overflowParts: string[] = [];
       if (hiddenRunning > 0) overflowParts.push(`${hiddenRunning} running`);
       if (hiddenFinished > 0) overflowParts.push(`${hiddenFinished} finished`);
       const overflowText = overflowParts.join(", ");
-      lines.push(truncate(theme.fg("dim", "└─") + ` ${theme.fg("dim", `+${hiddenRunning + hiddenFinished} more (${overflowText})`)}`)
-      );
+      contentLines.push(truncate(`  ${theme.fg("dim", `+${hiddenRunning + hiddenFinished} more (${overflowText})`)}`));
     }
 
-    return lines;
+    // Wrap in rounded box matching dashboard widget visual identity.
+    const heading = theme.fg(headingColor, "agents");
+    const topBorder = theme.fg("borderMuted", `╭─${heading} `) + theme.fg("borderMuted", "─".repeat(Math.max(0, w - visibleWidth(`╭─agents `) - 1))) + theme.fg("borderMuted", "╮");
+    const bottomBorder = theme.fg("borderMuted", `╰${"─".repeat(Math.max(0, w - 2))}╯`);
+
+    const boxedLines = contentLines.map((line) => {
+      const innerWidth = Math.max(0, w - 2);
+      const padded = padRight(line, innerWidth);
+      return theme.fg("borderMuted", "│") + truncateToWidth(padded, innerWidth, "") + theme.fg("borderMuted", "│");
+    });
+
+    return [topBorder, ...boxedLines, bottomBorder].map((line) => truncateToWidth(line, w, ""));
   }
 
   /** Force an immediate widget update. */

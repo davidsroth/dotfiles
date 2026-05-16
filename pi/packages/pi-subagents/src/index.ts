@@ -44,7 +44,7 @@ import {
   type UICtx,
 } from "./ui/agent-widget.js";
 import { showSchedulesMenu } from "./ui/schedule-menu.js";
-import { addUsage, getLifetimeTotal, getSessionContextPercent, type LifetimeUsage } from "./usage.js";
+import { addUsage, formatCost, getLifetimeTotal, getSessionContextPercent, type LifetimeUsage } from "./usage.js";
 
 // ---- Shared helpers ----
 
@@ -71,7 +71,7 @@ function createActivityTracker(maxTurns?: number, onStreamUpdate?: () => void) {
     maxTurns,
     responseText: "",
     session: undefined,
-    lifetimeUsage: { input: 0, output: 0, cacheWrite: 0 },
+    lifetimeUsage: { input: 0, output: 0, cacheWrite: 0, cost: 0 },
   };
 
   const callbacks = {
@@ -177,6 +177,7 @@ function buildDetails(
     status: record.status as AgentDetails["status"],
     agentId: record.id,
     error: record.error,
+    cost: record.lifetimeUsage.cost,
     ...overrides,
   };
 }
@@ -201,6 +202,7 @@ function buildNotificationDetails(record: AgentRecord, resultMaxLen: number, act
         ? record.result.slice(0, resultMaxLen) + "…"
         : record.result
       : "No output.",
+    cost: record.lifetimeUsage.cost,
   };
 }
 
@@ -227,6 +229,7 @@ export default function (pi: ExtensionAPI) {
         if (d.turnCount > 0) parts.push(formatTurns(d.turnCount, d.maxTurns));
         if (d.toolUses > 0) parts.push(`${d.toolUses} tool use${d.toolUses === 1 ? "" : "s"}`);
         if (d.totalTokens > 0) parts.push(formatTokens(d.totalTokens));
+        if (d.cost != null && d.cost > 0) parts.push(formatCost(d.cost));
         if (d.durationMs > 0) parts.push(formatMs(d.durationMs));
         if (parts.length) {
           line += "\n  " + parts.map(p => theme.fg("dim", p)).join(" " + theme.fg("dim", "·") + " ");
@@ -734,7 +737,7 @@ Guidelines:
         return new Text(text, 0, 0);
       }
 
-      // Helper: build "haiku · thinking: high · ⟳5≤30 · 3 tool uses · 33.8k tokens" stats string
+      // Helper: build "haiku · thinking: high · ⟳5≤30 · 3 tool uses · 33.8k tokens · $0.12" stats string
       const stats = (d: AgentDetails) => {
         const parts: string[] = [];
         if (d.modelName) parts.push(d.modelName);
@@ -744,14 +747,14 @@ Guidelines:
         }
         if (d.toolUses > 0) parts.push(`${d.toolUses} tool use${d.toolUses === 1 ? "" : "s"}`);
         if (d.tokens) parts.push(d.tokens);
+        if (d.cost != null && d.cost > 0) parts.push(formatCost(d.cost));
         return parts.map(p => theme.fg("dim", p)).join(" " + theme.fg("dim", "·") + " ");
       };
 
       // ---- While running (streaming) ----
       if (isPartial || details.status === "running") {
-        const frame = SPINNER[details.spinnerFrame ?? 0];
         const s = stats(details);
-        let line = theme.fg("accent", frame) + (s ? " " + s : "");
+        let line = s ? s : "";
         line += "\n" + theme.fg("dim", `  ⎿  ${details.activity ?? "thinking…"}`);
         return new Text(line, 0, 0);
       }
