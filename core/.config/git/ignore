@@ -40,5 +40,6 @@ credentials/
 .tmp/
 
 # pi-coding-agent runtime state (subagents settings, schedules, sessions)
-# Created in any project cwd by /agents settings, scheduling, etc.
-.pi/
+# Created at the project root by /agents settings, scheduling, etc.
+# Keep this root-anchored so dotfiles can version pi/.pi/agent/*.
+/.pi/
