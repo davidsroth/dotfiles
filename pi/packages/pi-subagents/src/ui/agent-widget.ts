@@ -12,6 +12,26 @@ function padRight(text: string, width: number): string {
 	if (textWidth >= width) return truncateToWidth(text, width, "");
 	return text + " ".repeat(width - textWidth);
 }
+
+/**
+ * Compose a line with `left` flush-left and `right` flush-right, separated by
+ * spaces, filling exactly `width` visible columns.
+ *
+ * When the two halves can't both fit (visible widths + 1 separator > width),
+ * the left half is truncated; the right half is always kept intact (stats are
+ * usually the most important info to preserve at the right edge).
+ */
+function joinLeftRight(left: string, right: string, width: number): string {
+	const lw = visibleWidth(left);
+	const rw = visibleWidth(right);
+	const gap = width - lw - rw;
+	if (gap < 2) {
+		// Not enough room for both — truncate the left side to make room.
+		const maxLeft = Math.max(0, width - rw - 1);
+		return `${truncateToWidth(left, maxLeft, "")} ${right}`;
+	}
+	return `${left}${" ".repeat(gap)}${right}`;
+}
 import type { AgentManager } from "../agent-manager.js";
 import { getConfig } from "../agent-types.js";
 import type { AgentInvocation, SubagentType } from "../types.js";
@@ -277,8 +297,8 @@ export class AgentWidget {
     }
   }
 
-  /** Render a finished agent line. */
-  private renderFinishedLine(a: { id: string; type: SubagentType; status: string; description: string; toolUses: number; startedAt: number; completedAt?: number; error?: string }, theme: Theme): string {
+  /** Render a finished agent line, with stats right-justified within `width`. */
+  private renderFinishedLine(a: { id: string; type: SubagentType; status: string; description: string; toolUses: number; startedAt: number; completedAt?: number; error?: string }, theme: Theme, width: number): string {
     const name = getDisplayName(a.type);
     const modeLabel = getPromptModeLabel(a.type);
     const duration = formatMs((a.completedAt ?? Date.now()) - a.startedAt);
@@ -315,7 +335,9 @@ export class AgentWidget {
     const modeTag = modeLabel ? ` ${theme.fg("dim", `(${modeLabel})`)}` : "";
     const sep = theme.fg("borderMuted", " · ");
     const statsLine = statPieces.join(sep);
-    return `${icon} ${theme.fg("dim", name)}${modeTag}  ${theme.fg("dim", a.description)} ${sep} ${statsLine}${statusText}`;
+    const leftPart = `  ${icon} ${theme.fg("dim", name)}${modeTag}  ${theme.fg("dim", a.description)}`;
+    const rightPart = `${statsLine}${statusText}`;
+    return joinLeftRight(leftPart, rightPart, width);
   }
 
   /**
@@ -341,12 +363,20 @@ export class AgentWidget {
     const truncate = (line: string) => truncateToWidth(line, w);
     const headingColor = hasActive ? "accent" : "dim";
 
+    // Width available for line content inside the box.
+    //   w           = full terminal width
+    //   -2          = left `│` + right `│`
+    //   -1          = 1-char breathing room before the right border
+    // padRight() in the box-rendering pass tops the line up to w-2 with a
+    // trailing space, producing that visual margin.
+    const contentWidth = Math.max(0, w - 3);
+
     // Build sections separately for overflow-aware assembly.
     // Each running agent = 2 lines (header + activity), finished = 1 line, queued = 1 line.
 
     const finishedLines: string[] = [];
     for (const a of finished) {
-      finishedLines.push(truncate("  " + this.renderFinishedLine(a, theme)));
+      finishedLines.push(this.renderFinishedLine(a, theme, contentWidth));
     }
 
     const runningLines: string[][] = []; // each entry is [header, activity]
@@ -392,8 +422,10 @@ export class AgentWidget {
 
       const activity = bg ? describeActivity(bg.activeTools, bg.responseText) : "thinking…";
 
+      const headerLeft = `  ${theme.bold(name)}${modeTag}  ${theme.fg("muted", a.description)}`;
+      const headerRight = statsText;
       runningLines.push([
-        truncate(`  ${theme.bold(name)}${modeTag}  ${theme.fg("muted", a.description)} ${theme.fg("borderMuted", "·")} ${statsText}`),
+        joinLeftRight(headerLeft, headerRight, contentWidth),
         truncate(`    ${theme.fg("dim", `⎿  ${activity}`)}`),
       ]);
     }
