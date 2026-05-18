@@ -1,0 +1,24 @@
+{
+  "_comment_1": "Copy this file to ~/.pi/agent/slack-mcp.json (NOT stowed; per-machine secrets).",
+  "_comment_2": "Use one of the auth methods below. Priority: XOXP > XOXB > XOXC+XOXD.",
+
+  "command": "npx",
+  "args": ["-y", "slack-mcp-server@latest", "--transport", "stdio"],
+
+  "env": {
+    "SLACK_MCP_XOXP_TOKEN": "xoxp-..."
+  },
+
+  "_comment_xoxb": "Bot token alternative:",
+  "_env_xoxb_example": { "SLACK_MCP_XOXB_TOKEN": "xoxb-..." },
+
+  "_comment_xoxc": "Stealth (browser session) alternative; see https://github.com/korotovsky/slack-mcp-server/blob/master/docs/01-authentication-setup.md",
+  "_env_xoxc_example": {
+    "SLACK_MCP_XOXC_TOKEN": "xoxc-...",
+    "SLACK_MCP_XOXD_TOKEN": "xoxd-..."
+  },
+
+  "autoConnect": true,
+  "toolPrefix": "slack_",
+  "startupTimeoutMs": 30000
+}
