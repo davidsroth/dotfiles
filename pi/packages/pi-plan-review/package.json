@@ -1,0 +1,29 @@
+{
+  "name": "pi-plan-review",
+  "version": "0.1.0",
+  "description": "Browser-based plan review and last-message markup for Pi",
+  "type": "module",
+  "license": "MIT",
+  "author": "David Roth",
+  "keywords": [
+    "pi-package",
+    "pi-extension",
+    "pi-coding-agent",
+    "plan",
+    "review",
+    "markup"
+  ],
+  "files": [
+    "extensions",
+    "README.md",
+    "LICENSE"
+  ],
+  "pi": {
+    "extensions": [
+      "./extensions/miniplan/index.ts"
+    ]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  }
+}

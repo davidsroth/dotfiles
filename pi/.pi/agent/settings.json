@@ -13,6 +13,8 @@
     "../../packages/pi-subagents",
     "../../packages/pi-btw",
     "../../packages/pi-intercom",
+    "../../packages/pi-qna",
+    "../../packages/pi-plan-review",
     "npm:@feniix/pi-notion@2.2.2",
     "npm:pi-web-access"
   ],

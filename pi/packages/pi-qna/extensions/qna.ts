@@ -34,14 +34,13 @@ import {
 } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 
-// ModalEditor (vim mode) is loaded dynamically from the locally-vendored
-// pi-vim package. If it can't be resolved we fall back to the plain Editor so
-// the file stays portable.
+// ModalEditor (vim mode) is loaded dynamically from pi-vim when available.
+// If it can't be resolved we fall back to the plain Editor so the package stays
+// portable for users who do not install pi-vim.
 //
 // We deliberately keep this typed as `unknown` and duck-type the result, because
-// pi-vim's `ModalEditor` declares the @mariozechner/* type packages as its
-// base classes; those resolve to the same runtime bundle as @earendil-works/*
-// via pi's extension loader, but TypeScript sees them as nominally distinct.
+// pi-vim's `ModalEditor` may be compiled against a separately-namespaced pi TUI
+// package; runtime compatibility is sufficient here.
 type ModalEditorCtor = new (
 	tui: unknown,
 	theme: unknown,
@@ -51,17 +50,25 @@ type ModalEditorCtor = new (
 ) => unknown;
 
 async function loadModalEditor(): Promise<ModalEditorCtor | undefined> {
-	try {
-		// Path is .ts because bun resolves TypeScript directly at runtime; the
-		// `as unknown` cast skips TS's structural check against pi-vim's own
-		// (incompatibly-namespaced) type surface.
-		const mod = (await import("../../../packages/pi-vim/index.ts")) as unknown as {
-			ModalEditor?: ModalEditorCtor;
-		};
-		return mod.ModalEditor;
-	} catch {
-		return undefined;
+	const candidates = [
+		"pi-vim",
+		// Dotfiles/dev layout: pi/packages/pi-qna/extensions/qna.ts next to
+		// pi/packages/pi-vim/index.ts.
+		"../../pi-vim/index.ts",
+	];
+
+	for (const specifier of candidates) {
+		try {
+			const mod = (await import(specifier)) as unknown as {
+				ModalEditor?: ModalEditorCtor;
+			};
+			if (mod.ModalEditor) return mod.ModalEditor;
+		} catch {
+			// Try the next optional location.
+		}
 	}
+
+	return undefined;
 }
 
 // Use the same status-pill slot as pi-vim's global editor so the INSERT/NORMAL

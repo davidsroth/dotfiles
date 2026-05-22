@@ -2,7 +2,7 @@
  * Plan — Lightweight plan review for pi.
  *
  * Agent calls submit_plan with a markdown file path.
- * User can run /last to review the agent's last message.
+ * User can run /markup to review the agent's last message.
  * Browser opens a clean review page: select text to annotate, reply, approve, or send feedback.
  * Inherits the active pi theme for colors.
  */
@@ -11,7 +11,7 @@ import { exec, execFile } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { readFileSync, statSync } from "node:fs";
 import { createServer } from "node:http";
-import { extname, isAbsolute, relative, resolve } from "node:path";
+import { extname, resolve } from "node:path";
 import { promisify } from "node:util";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 
@@ -74,12 +74,10 @@ function scriptJson(value: unknown): string {
 		.replace(/\u2029/g, "\\u2029");
 }
 
-function isMarkdownPath(input: string, cwd: string): boolean {
-	if (!input) return false;
+function resolveMarkdownPath(input: string, cwd: string): string | null {
+	if (!input) return null;
 	const abs = resolve(cwd, input);
-	const rel = relative(resolve(cwd), abs);
-	if (rel === "" || rel.startsWith("..") || isAbsolute(rel)) return false;
-	return new Set([".md", ".mdx"]).has(extname(abs).toLowerCase());
+	return new Set([".md", ".mdx"]).has(extname(abs).toLowerCase()) ? abs : null;
 }
 
 interface AssistantTextResult {
@@ -1004,7 +1002,7 @@ export default function plan(pi: ExtensionAPI): void {
 	}
 
 	function formatMessageReference(found: AssistantTextResult): string {
-		if (!found.entryId) return "assistant message opened with /last";
+		if (!found.entryId) return "assistant message opened with /markup";
 		const shortId = found.entryId.slice(0, 8);
 		const when = found.timestamp ? `, ${found.timestamp}` : "";
 		return `assistant message ${shortId} (entryId: ${found.entryId}${when})`;
@@ -1034,7 +1032,7 @@ export default function plan(pi: ExtensionAPI): void {
 
 	function reviewLastAssistantMessage(ctx: ExtensionContext): void {
 		if (!ctx.hasUI) {
-			ctx.ui.notify("/last requires interactive mode", "error");
+			ctx.ui.notify("/markup requires interactive mode", "error");
 			return;
 		}
 
@@ -1077,7 +1075,7 @@ export default function plan(pi: ExtensionAPI): void {
 			});
 	}
 
-	pi.registerCommand("last", {
+	pi.registerCommand("markup", {
 		description: "Open the last assistant message in the browser markup UI",
 		handler: (_args, ctx) => reviewLastAssistantMessage(ctx),
 	});
@@ -1092,7 +1090,7 @@ export default function plan(pi: ExtensionAPI): void {
 		parameters: {
 			type: "object",
 			properties: {
-				filePath: { type: "string", description: "Relative path to the markdown plan file (.md or .mdx)." },
+				filePath: { type: "string", description: "Path to the markdown plan file (.md or .mdx). Relative paths are resolved against cwd; absolute paths are allowed." },
 			},
 			required: ["filePath"],
 		},
@@ -1100,10 +1098,10 @@ export default function plan(pi: ExtensionAPI): void {
 		async execute(_id, params, _signal, _onUpdate, ctx) {
 			const inputPath = (params as { filePath?: string })?.filePath?.trim();
 			if (!inputPath) return { content: [{ type: "text", text: "Error: submit_plan requires filePath." }] };
-			if (!isMarkdownPath(inputPath, ctx.cwd)) {
-				return { content: [{ type: "text", text: `Error: file must be .md/.mdx inside cwd. Got: ${inputPath}` }] };
+			const fullPath = resolveMarkdownPath(inputPath, ctx.cwd);
+			if (!fullPath) {
+				return { content: [{ type: "text", text: `Error: file must be .md/.mdx. Got: ${inputPath}` }] };
 			}
-			const fullPath = resolve(ctx.cwd, inputPath);
 			let content: string;
 			try {
 				if (!statSync(fullPath).isFile()) throw new Error("not a file");

@@ -8,6 +8,8 @@ Current packages:
 - `pi-subagents`
 - `pi-btw`
 - `pi-intercom`
+- `pi-qna`
+- `pi-plan-review`
 
 These packages are loaded by Pi via relative paths from:
 
@@ -41,4 +43,5 @@ Recommended workflow:
 ## Notes
 
 - `pi-subagents` is the most active/complex vendored package and is the most likely to need compatibility updates as Pi evolves
+- `pi-qna` and `pi-plan-review` are local packages extracted from this dotfiles config for easier sharing with coworkers
 - Relative package loading assumes the stowed Pi config layout used by this repo
