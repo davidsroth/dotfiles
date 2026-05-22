@@ -270,7 +270,11 @@ case "${1:-}" in
     ;;
 esac
 
-selection="$(list_sessions all | fzf \
+# If the user selects an entry while the producer is still streaming, fzf exits
+# successfully and the producer gets SIGPIPE. With global pipefail enabled that
+# would make the whole pipeline look failed and skip the selected session.
+set +o pipefail
+if ! selection="$(list_sessions all | fzf \
   --no-tmux \
   --delimiter=$'\t' \
   --with-nth=1 \
@@ -289,7 +293,11 @@ selection="$(list_sessions all | fzf \
   --bind="ctrl-d:execute-silent($quoted_script_path --kill {})+reload($quoted_script_path --list all)" \
   --preview-window=hidden \
   --info=inline \
-  --padding=1)" || exit 0
+  --padding=1)"; then
+  set -o pipefail
+  exit 0
+fi
+set -o pipefail
 
 [[ -n "$selection" ]] || exit 0
 
