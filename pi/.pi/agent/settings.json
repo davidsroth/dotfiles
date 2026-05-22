@@ -15,6 +15,7 @@
     "../../packages/pi-intercom",
     "../../packages/pi-qna",
     "../../packages/pi-plan-review",
+    "../../packages/pi-memory",
     "npm:@feniix/pi-notion@2.2.2",
     "npm:pi-web-access"
   ],

@@ -1,0 +1,29 @@
+{
+  "name": "pi-memory",
+  "version": "0.1.0",
+  "description": "Minimal filesystem-backed long-term memory for Pi",
+  "type": "module",
+  "license": "MIT",
+  "author": "David Roth",
+  "keywords": [
+    "pi-package",
+    "pi-extension",
+    "pi-coding-agent",
+    "memory"
+  ],
+  "files": [
+    "extensions",
+    "README.md",
+    "LICENSE"
+  ],
+  "pi": {
+    "extensions": [
+      "./extensions/memory.ts"
+    ]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*",
+    "typebox": "*"
+  }
+}
