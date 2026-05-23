@@ -261,6 +261,25 @@ list_sessions() {
   esac
 }
 
+selection_target() {
+  local selection="$1"
+  local _ target _src
+  IFS=$'\t' read -r _ target _src <<<"$selection"
+  printf '%s\n' "$target"
+}
+
+connect_selection() {
+  local target
+  target="$(selection_target "$1")"
+  [[ -n "$target" ]] || exit 0
+
+  # If fzf `become`s this command while the list producer is still hydrating,
+  # do not keep the producer pipe open. Closing stdin lets the producer take
+  # SIGPIPE immediately instead of delaying the tmux switch.
+  exec </dev/null
+  exec sesh connect --switch "$target"
+}
+
 kill_if_tmux_session() {
   local selection="$1"
   local target src
@@ -280,13 +299,16 @@ case "${1:-}" in
     kill_if_tmux_session "${2:-}"
     exit 0
     ;;
+  --connect)
+    connect_selection "${2:-}"
+    ;;
 esac
 
-# If the user selects an entry while the producer is still streaming, fzf exits
-# successfully and the producer gets SIGPIPE. With global pipefail enabled that
-# would make the whole pipeline look failed and skip the selected session.
+# Let fzf directly `become` the connect command. Capturing fzf output in a
+# command substitution makes Bash wait for the still-hydrating producer before
+# it can run `sesh connect`, which feels like a long delay after pressing enter.
 set +o pipefail
-if ! selection="$(list_sessions all | fzf \
+list_sessions all | fzf \
   --no-tmux \
   --delimiter=$'\t' \
   --with-nth=1 \
@@ -298,6 +320,7 @@ if ! selection="$(list_sessions all | fzf \
   --algo=v1 \
   --tiebreak=begin,length \
   --bind='tab:down,btab:up' \
+  --bind="enter:become($quoted_script_path --connect {})" \
   --bind="ctrl-a:change-prompt(> )+reload($quoted_script_path --list all)" \
   --bind="ctrl-t:change-prompt( )+reload($quoted_script_path --list tmux)" \
   --bind="ctrl-z:change-prompt( )+reload($quoted_script_path --list zoxide)" \
@@ -305,15 +328,4 @@ if ! selection="$(list_sessions all | fzf \
   --bind="ctrl-d:execute-silent($quoted_script_path --kill {})+reload($quoted_script_path --list all)" \
   --preview-window=hidden \
   --info=inline \
-  --padding=1)"; then
-  set -o pipefail
-  exit 0
-fi
-set -o pipefail
-
-[[ -n "$selection" ]] || exit 0
-
-IFS=$'\t' read -r _ target _ <<<"$selection"
-[[ -n "$target" ]] || exit 0
-
-exec sesh connect --switch "$target"
+  --padding=1 || exit 0
