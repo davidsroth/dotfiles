@@ -277,7 +277,16 @@ connect_selection() {
   # do not keep the producer pipe open. Closing stdin lets the producer take
   # SIGPIPE immediately instead of delaying the tmux switch.
   exec </dev/null
-  exec sesh connect --switch "$target"
+
+  # `become` switches quickly, but the parent popup shell can stay alive until
+  # the still-hydrating producer exits. Close the popup explicitly after the
+  # switch so the overlay disappears immediately.
+  sesh connect --switch "$target"
+  local status=$?
+  if [[ -n "${TMUX:-}" ]]; then
+    tmux display-popup -C 2>/dev/null || true
+  fi
+  exit "$status"
 }
 
 kill_if_tmux_session() {
