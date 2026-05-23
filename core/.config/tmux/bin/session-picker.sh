@@ -26,7 +26,10 @@ sesh_lines() {
 
   sesh list "${args[@]}" | python3 -c '
 import json
+import signal
 import sys
+
+signal.signal(signal.SIGPIPE, signal.SIG_DFL)
 
 icons = {
     "tmux": "",
@@ -57,7 +60,10 @@ candidate_paths() {
   if command -v sesh >/dev/null 2>&1; then
     sesh list --json --zoxide 2>/dev/null | python3 -c '
 import json
+import signal
 import sys
+
+signal.signal(signal.SIGPIPE, signal.SIG_DFL)
 
 try:
     sessions = json.load(sys.stdin) or []
@@ -82,8 +88,11 @@ for session in sessions:
 candidate_repo_roots() {
   candidate_paths | python3 -c '
 import os
+import signal
 import subprocess
 import sys
+
+signal.signal(signal.SIGPIPE, signal.SIG_DFL)
 
 raw_paths = []
 seen_input = set()
@@ -130,8 +139,11 @@ for path in raw_paths:
 list_worktrees() {
   candidate_repo_roots | python3 -c '
 import os
+import signal
 import subprocess
 import sys
+
+signal.signal(signal.SIGPIPE, signal.SIG_DFL)
 
 ICON = ""
 
