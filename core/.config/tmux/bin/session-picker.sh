@@ -4,26 +4,31 @@ set -euo pipefail
 script_path="${BASH_SOURCE[0]}"
 quoted_script_path="$(printf '%q' "$script_path")"
 
-active_pi_paths() {
+active_pi_sessions() {
   command -v tmux >/dev/null 2>&1 || return 0
 
-  while read -r pane_pid cwd; do
-    [[ -n "$pane_pid" && -n "$cwd" ]] || continue
+  while IFS=$'\t' read -r target pane_pid cwd; do
+    [[ -n "$target" && -n "$pane_pid" && -n "$cwd" ]] || continue
     while read -r cpid; do
       [[ -n "$cpid" ]] || continue
       local comm
       comm="$(ps -p "$cpid" -o comm= 2>/dev/null || true)"
       if [[ "$comm" == "pi" ]]; then
-        printf '%s\n' "$cwd"
+        local status="idle" pane_text
+        pane_text="$(tmux capture-pane -p -S -20 -t "$target" 2>/dev/null || true)"
+        if grep -Eq 'Working\.\.\.|Thinking\.\.\.|Generating\.\.\.|Running tool' <<<"$pane_text"; then
+          status="working"
+        fi
+        printf '%s\t%s\n' "$cwd" "$status"
         break
       fi
     done < <(pgrep -P "$pane_pid" 2>/dev/null || true)
-  done < <(tmux list-panes -a -F '#{pane_pid} #{pane_current_path}' 2>/dev/null || true)
+  done < <(tmux list-panes -a -F '#{session_name}:#{window_index}.#{pane_index}	#{pane_pid}	#{pane_current_path}' 2>/dev/null || true)
 }
 
-export_active_pi_paths() {
-  PI_SESSION_PICKER_PI_PATHS="$(active_pi_paths | awk 'NF && !seen[$0]++')"
-  export PI_SESSION_PICKER_PI_PATHS
+export_active_pi_sessions() {
+  PI_SESSION_PICKER_PI_SESSIONS="$(active_pi_sessions | awk -F '\t' 'NF >= 2 && !seen[$1]++')"
+  export PI_SESSION_PICKER_PI_SESSIONS
 }
 
 sesh_lines() {
@@ -54,14 +59,22 @@ import sys
 
 signal.signal(signal.SIGPIPE, signal.SIG_DFL)
 
-pi_paths = [os.path.realpath(p) for p in os.environ.get("PI_SESSION_PICKER_PI_PATHS", "").splitlines() if p]
+pi_sessions = {}
+for line in os.environ.get("PI_SESSION_PICKER_PI_SESSIONS", "").splitlines():
+    path, sep, status = line.partition("\t")
+    if path and sep:
+        pi_sessions[os.path.realpath(path)] = status or "idle"
 
 
-def has_pi_inside(path):
+def pi_marker(path):
     if not path:
-        return False
-    real = os.path.realpath(path)
-    return any(pi == real or pi.startswith(real + os.sep) for pi in pi_paths)
+        return ""
+    status = pi_sessions.get(os.path.realpath(path))
+    if status == "working":
+        return "π… "
+    if status == "idle":
+        return "π "
+    return ""
 
 
 icons = {
@@ -80,7 +93,7 @@ for session in sessions:
         target = session.get("Name") or name
     else:
         target = path or name
-    marker = "π " if has_pi_inside(path or target) else ""
+    marker = pi_marker(path or target)
     print(f"{icons.get(src, "•")} {marker}{name}\t{target}\t{src}")
 '
 }
@@ -182,14 +195,22 @@ signal.signal(signal.SIGPIPE, signal.SIG_DFL)
 
 ICON = ""
 
-pi_paths = [os.path.realpath(p) for p in os.environ.get("PI_SESSION_PICKER_PI_PATHS", "").splitlines() if p]
+pi_sessions = {}
+for line in os.environ.get("PI_SESSION_PICKER_PI_SESSIONS", "").splitlines():
+    path, sep, status = line.partition("\t")
+    if path and sep:
+        pi_sessions[os.path.realpath(path)] = status or "idle"
 
 
-def has_pi_inside(path):
+def pi_marker(path):
     if not path:
-        return False
-    real = os.path.realpath(path)
-    return any(pi == real or pi.startswith(real + os.sep) for pi in pi_paths)
+        return ""
+    status = pi_sessions.get(os.path.realpath(path))
+    if status == "working":
+        return "π… "
+    if status == "idle":
+        return "π "
+    return ""
 
 
 def parse_worktree_porcelain(text):
@@ -279,7 +300,7 @@ for root in [line.rstrip("\n") for line in sys.stdin if line.strip()]:
 
         branch = ref_label(record)
         locked = " 🔒" if "locked" in record else ""
-        marker = "π " if has_pi_inside(path) else ""
+        marker = pi_marker(path)
         name = f"{marker}{label}:{branch}{locked}  {path}"
         print(f"{ICON} {name}\t{path}\tworktree")
 '
@@ -288,7 +309,7 @@ for root in [line.rstrip("\n") for line in sys.stdin if line.strip()]:
 list_sessions() {
   local mode="${1:-all}"
 
-  export_active_pi_paths
+  export_active_pi_sessions
 
   case "$mode" in
     all)
@@ -371,7 +392,7 @@ list_sessions all | fzf \
   --height=100% \
   --border-label=' Sessions ' \
   --prompt='> ' \
-  --header='π: active pi under path · enter: connect · ctrl-a: all · ctrl-t: tmux · ctrl-z: zoxide · ctrl-w: worktrees · ctrl-d: kill tmux session' \
+  --header='π: idle pi at path · π…: working pi at path · enter: connect · ctrl-a/t/z/w filters · ctrl-d: kill tmux session' \
   --reverse \
   --algo=v1 \
   --tiebreak=begin,length \
