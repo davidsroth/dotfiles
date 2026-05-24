@@ -2,8 +2,8 @@
   "lastChangelogVersion": "0.74.1",
   "defaultThinkingLevel": "high",
   "theme": "catppuccin-mocha",
-  "defaultProvider": "openai",
-  "defaultModel": "gpt-5.5",
+  "defaultProvider": "anthropic",
+  "defaultModel": "claude-opus-4-7",
   "terminal": {
     "showTerminalProgress": true
   },
