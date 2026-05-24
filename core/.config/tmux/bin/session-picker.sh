@@ -200,14 +200,19 @@ for line in os.environ.get("PI_SESSION_PICKER_PI_SESSIONS", "").splitlines():
         pi_sessions[os.path.realpath(path)] = status or "idle"
 
 
+GREEN = "\033[32m"
+GREY = "\033[90m"
+RESET = "\033[0m"
+
+
 def pi_marker(path):
     if not path:
         return ""
     status = pi_sessions.get(os.path.realpath(path))
     if status == "working":
-        return "π… "
+        return f"{GREEN}π…{RESET} "
     if status == "idle":
-        return "π "
+        return f"{GREY}π{RESET} "
     return ""
 
 
@@ -461,12 +466,17 @@ for line in os.environ.get("PI_SESSION_PICKER_PI_SESSIONS", "").splitlines():
         pi_sessions[os.path.realpath(path)] = status or "idle"
 
 
+GREEN = "\033[32m"
+GREY = "\033[90m"
+RESET = "\033[0m"
+
+
 def pi_marker(path):
     status = pi_sessions.get(os.path.realpath(path))
     if status == "working":
-        return "π… "
+        return f"{GREEN}π…{RESET} "
     if status == "idle":
-        return "π "
+        return f"{GREY}π{RESET} "
     return ""
 
 
@@ -582,8 +592,9 @@ list_sessions all | fzf \
   --height=100% \
   --border-label=' Sessions ' \
   --prompt='> ' \
-  --header='π: idle pi at path · π…: working pi at path · enter: connect · ctrl-a/t/z/w filters · ctrl-d: kill tmux session' \
+  --header='grey π: idle pi at path · green π…: working pi at path · enter: connect · ctrl-a/t/z/w filters · ctrl-d: kill tmux session' \
   --reverse \
+  --ansi \
   --algo=v1 \
   --tiebreak=begin,length \
   --bind='tab:down,btab:up' \
