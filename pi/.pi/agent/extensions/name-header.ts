@@ -125,6 +125,17 @@ type PullRequest = {
 	updatedAt?: string;
 };
 
+type PrView = "open" | "closed" | "merged";
+
+type PrListState = {
+	prs: PullRequest[];
+	prsLoading: boolean;
+	prsError?: string;
+	prsFetchedAt?: number;
+};
+
+const PR_VIEWS: PrView[] = ["open", "closed", "merged"];
+
 type DashboardState = {
 	weather?: WeatherData;
 	weatherLoading: boolean;
@@ -313,28 +324,37 @@ function parsePrsJson(payload: string): PullRequest[] {
 		});
 }
 
-async function fetchPRs(): Promise<PullRequest[]> {
+async function fetchPRs(view: PrView = "open"): Promise<PullRequest[]> {
 	if (CUSTOM_PRS_COMMAND) {
 		const stdout = await execFileText(process.env.SHELL ?? "/bin/zsh", ["-lc", CUSTOM_PRS_COMMAND], PRS_TIMEOUT_MS);
 		return parsePrsJson(stdout);
 	}
 
-	const stdout = await execFileText(
-		"gh",
-		[
-			"search",
-			"prs",
-			"--author=@me",
-			"--state=open",
-			"--sort=updated",
-			"--limit",
-			String(PR_FETCH_LIMIT),
-			"--json",
-			"number,title,repository,url,isDraft,updatedAt",
-		],
-		PRS_TIMEOUT_MS,
-	);
+	const args = [
+		"search",
+		"prs",
+		"--author=@me",
+		"--sort=updated",
+		"--limit",
+		String(PR_FETCH_LIMIT),
+		"--json",
+		"number,title,repository,url,isDraft,updatedAt",
+	];
+	if (view === "open") {
+		args.push("--state=open");
+	} else if (view === "merged") {
+		args.push("--merged");
+	} else {
+		args.push("--state=closed", "--", "-is:merged");
+	}
+
+	const stdout = await execFileText("gh", args, PRS_TIMEOUT_MS);
 	return parsePrsJson(stdout);
+}
+
+async function closePR(pr: PullRequest): Promise<void> {
+	if (!pr.url) throw new Error("No URL for this PR");
+	await execFileText("gh", ["pr", "close", pr.url], PRS_TIMEOUT_MS);
 }
 
 function formatWeatherLine(theme: Theme, state: DashboardState): string {
@@ -364,23 +384,27 @@ function formatAgendaEntry(theme: Theme, label: string, event?: AgendaEvent): st
 	return `${theme.fg("dim", label)} ${theme.fg("muted", formatClock(start))} ${theme.fg("text", event.title)}`;
 }
 
-function formatPrSummary(theme: Theme, state: DashboardState): string {
+function formatPrSummary(theme: Theme, state: PrListState, view: PrView = "open"): string {
+	const label = view === "open" ? "PRs:" : `${view[0]!.toUpperCase()}${view.slice(1)}:`;
 	if (state.prsLoading && state.prs.length === 0) {
-		return `${theme.fg("dim", "PRs:")} ${theme.fg("muted", "Loading…")}`;
+		return `${theme.fg("dim", label)} ${theme.fg("muted", "Loading…")}`;
 	}
 	if (state.prsError && state.prs.length === 0) {
-		return `${theme.fg("dim", "PRs:")} ${theme.fg("muted", "unavailable")}`;
+		return `${theme.fg("dim", label)} ${theme.fg("muted", "unavailable")}`;
 	}
 	const total = state.prs.length;
 	if (total === 0) {
-		return `${theme.fg("dim", "PRs:")} ${theme.fg("muted", "none open")}`;
+		return `${theme.fg("dim", label)} ${theme.fg("muted", `none ${view}`)}`;
+	}
+	if (view !== "open") {
+		return `${theme.fg("dim", label)} ${theme.fg("accent", String(total))}`;
 	}
 	const drafts = state.prs.filter((pr) => pr.isDraft).length;
 	const ready = total - drafts;
 	const parts = [`${total} open`];
 	if (ready > 0) parts.push(`${ready} ready`);
 	if (drafts > 0) parts.push(`${drafts} draft`);
-	return `${theme.fg("dim", "PRs:")} ${theme.fg("accent", String(total))} ${theme.fg("dim", "·")} ${theme.fg("muted", parts.slice(1).join(" · ") || "open")}`;
+	return `${theme.fg("dim", label)} ${theme.fg("accent", String(total))} ${theme.fg("dim", "·")} ${theme.fg("muted", parts.slice(1).join(" · ") || "open")}`;
 }
 
 function formatPrEntry(theme: Theme, pr: PullRequest): string {
@@ -390,9 +414,9 @@ function formatPrEntry(theme: Theme, pr: PullRequest): string {
 	return `${marker} ${num} ${repo}${theme.fg("text", pr.title)}`;
 }
 
-function formatPrLines(theme: Theme, state: DashboardState): string[] {
-	if (PR_LIMIT === 0) return [formatPrSummary(theme, state)];
-	const lines: string[] = [formatPrSummary(theme, state)];
+function formatPrLines(theme: Theme, state: PrListState, view: PrView = "open"): string[] {
+	if (PR_LIMIT === 0) return [formatPrSummary(theme, state, view)];
+	const lines: string[] = [formatPrSummary(theme, state, view)];
 	const rows = state.prs.slice(0, PR_LIMIT);
 	for (const pr of rows) {
 		lines.push(formatPrEntry(theme, pr));
@@ -480,7 +504,7 @@ export default function dashboardWidget(pi: ExtensionAPI) {
 	let refreshTimer: NodeJS.Timeout | undefined;
 	let weatherPromise: Promise<void> | undefined;
 	let agendaPromise: Promise<void> | undefined;
-	let prsPromise: Promise<void> | undefined;
+	const prsPromises: Partial<Record<PrView, Promise<void>>> = {};
 	let activePickerRender: (() => void) | undefined;
 	let activePickerDone: (() => void) | undefined;
 
@@ -490,6 +514,11 @@ export default function dashboardWidget(pi: ExtensionAPI) {
 		agendaLoading: true,
 		prs: [],
 		prsLoading: !PRS_DISABLED,
+	};
+	const prLists: Record<PrView, PrListState> = {
+		open: state,
+		closed: { prs: [], prsLoading: false },
+		merged: { prs: [], prsLoading: false },
 	};
 
 	function requestRender() {
@@ -507,7 +536,7 @@ export default function dashboardWidget(pi: ExtensionAPI) {
 		// Kick off a refresh if we have nothing yet; otherwise refresh in the background
 		// so the picker shows whatever's cached immediately but stays fresh.
 		if (state.prs.length === 0 || !state.prsFetchedAt || Date.now() - state.prsFetchedAt >= PRS_REFRESH_MS) {
-			void refreshPRs(true);
+			void refreshPRs("open", true);
 		}
 
 		// Keep the dashboard widget rendered at its normal height while the overlay
@@ -520,11 +549,38 @@ export default function dashboardWidget(pi: ExtensionAPI) {
 				(tui, theme, _kb, done) => {
 					activePickerRender = () => tui.requestRender();
 					activePickerDone = () => done(undefined);
+					let view: PrView = "open";
 					let selected = 0;
 					let scrollTop = 0;
 
+					function listState(): PrListState {
+						return prLists[view];
+					}
+
 					function list(): PullRequest[] {
-						return state.prs;
+						return listState().prs;
+					}
+
+					function setView(next: PrView): void {
+						if (view === next) return;
+						view = next;
+						selected = 0;
+						scrollTop = 0;
+						void refreshPRs(view);
+						tui.requestRender();
+					}
+
+					function moveView(delta: number): void {
+						const current = PR_VIEWS.indexOf(view);
+						const next = PR_VIEWS[Math.max(0, Math.min(PR_VIEWS.length - 1, current + delta))]!;
+						setView(next);
+					}
+
+					function formatViewTabs(): string {
+						return PR_VIEWS.map((candidate) => {
+							const label = candidate === view ? `[${candidate}]` : ` ${candidate} `;
+							return candidate === view ? theme.bold(theme.fg("accent", label)) : theme.fg("dim", label);
+						}).join(theme.fg("dim", "  "));
 					}
 
 					function clampSelection(): void {
@@ -560,6 +616,26 @@ export default function dashboardWidget(pi: ExtensionAPI) {
 						done(undefined);
 					}
 
+					async function closeSelected(): Promise<void> {
+						if (view !== "open") {
+							ctx.ui.notify("Only open PRs can be closed", "warning");
+							return;
+						}
+						const pr = list()[selected];
+						if (!pr) return;
+						try {
+							await closePR(pr);
+							state.prs = state.prs.filter((candidate) => candidate.url !== pr.url || candidate.number !== pr.number);
+							selected = Math.min(selected, Math.max(0, state.prs.length - 1));
+							ctx.ui.notify(`Closed #${pr.number}`, "info");
+							void refreshPRs("closed", true);
+							tui.requestRender();
+						} catch (error) {
+							const msg = error instanceof Error ? error.message : String(error);
+							ctx.ui.notify(`Failed to close #${pr.number}: ${msg}`, "error");
+						}
+					}
+
 					return {
 						invalidate() {},
 						render(width: number): string[] {
@@ -567,16 +643,16 @@ export default function dashboardWidget(pi: ExtensionAPI) {
 							const prs = list();
 							const inner = Math.max(20, width - 2);
 
-							// Match the widget's PR section format exactly, but with a selection cursor.
-							const summary = formatPrSummary(theme, state);
-							const bodyLines: string[] = [summary];
+							const currentState = listState();
+							const summary = formatPrSummary(theme, currentState, view);
+							const bodyLines: string[] = [formatViewTabs(), summary];
 
-							if (state.prsLoading && prs.length === 0) {
+							if (currentState.prsLoading && prs.length === 0) {
 								bodyLines.push(theme.fg("muted", "  Loading…"));
-							} else if (state.prsError && prs.length === 0) {
-								bodyLines.push(theme.fg("error", `  Error: ${state.prsError}`));
+							} else if (currentState.prsError && prs.length === 0) {
+								bodyLines.push(theme.fg("error", `  Error: ${currentState.prsError}`));
 							} else if (prs.length === 0) {
-								bodyLines.push(theme.fg("muted", "  No open PRs"));
+								bodyLines.push(theme.fg("muted", `  No ${view} PRs`));
 							} else {
 								const maxRows = Math.max(3, prs.length);
 								if (selected < scrollTop) scrollTop = selected;
@@ -594,20 +670,29 @@ export default function dashboardWidget(pi: ExtensionAPI) {
 								}
 							}
 
-							const hint = theme.fg("dim", "tab/j/↓ next · shift-tab/k/↑ prev · enter open · r refresh · esc/shortcut exit");
 							const paddedBody = bodyLines.map((line) => padRight(truncateToWidth(line, inner, "…"), inner));
-							const paddedHint = padRight(truncateToWidth(hint, inner, "…"), inner);
 
 							return [
 								theme.fg("borderAccent", `╭${"─".repeat(inner)}╮`),
 								...paddedBody.map((line) => theme.fg("borderAccent", "│") + line + theme.fg("borderAccent", "│")),
-								theme.fg("borderAccent", "│") + paddedHint + theme.fg("borderAccent", "│"),
 								theme.fg("borderAccent", `╰${"─".repeat(inner)}╯`),
 							].map((line) => truncateToWidth(line, width, ""));
 						},
 						handleInput(data: string): void {
 							if (matchesKey(data, Key.ctrlAlt("p")) || matchesKey(data, Key.escape) || matchesKey(data, Key.ctrl("c")) || data === "q") {
 								done(undefined);
+								return;
+							}
+							if (data === "h") {
+								moveView(-1);
+								return;
+							}
+							if (data === "l") {
+								moveView(1);
+								return;
+							}
+							if (data === "x") {
+								void closeSelected();
 								return;
 							}
 							if (matchesKey(data, Key.shift(Key.tab)) || matchesKey(data, Key.up) || data === "k") {
@@ -640,7 +725,7 @@ export default function dashboardWidget(pi: ExtensionAPI) {
 								return;
 							}
 							if (data === "r") {
-								void refreshPRs(true);
+								void refreshPRs(view, true);
 								return;
 							}
 						},
@@ -681,11 +766,12 @@ export default function dashboardWidget(pi: ExtensionAPI) {
 		return Date.now() - state.agendaFetchedAt >= AGENDA_REFRESH_MS;
 	}
 
-	function shouldRefreshPRs(force = false): boolean {
+	function shouldRefreshPRs(view: PrView = "open", force = false): boolean {
 		if (PRS_DISABLED) return false;
 		if (force) return true;
-		if (!state.prsFetchedAt) return true;
-		return Date.now() - state.prsFetchedAt >= PRS_REFRESH_MS;
+		const listState = prLists[view];
+		if (!listState.prsFetchedAt) return true;
+		return Date.now() - listState.prsFetchedAt >= PRS_REFRESH_MS;
 	}
 
 	function refreshWeather(force = false) {
@@ -732,30 +818,31 @@ export default function dashboardWidget(pi: ExtensionAPI) {
 		return agendaPromise;
 	}
 
-	function refreshPRs(force = false) {
-		if (!shouldRefreshPRs(force)) return prsPromise;
-		if (prsPromise) return prsPromise;
+	function refreshPRs(view: PrView = "open", force = false) {
+		if (!shouldRefreshPRs(view, force)) return prsPromises[view];
+		if (prsPromises[view]) return prsPromises[view];
 
-		state.prsLoading = true;
+		const listState = prLists[view];
+		listState.prsLoading = true;
 		requestRender();
-		prsPromise = (async () => {
+		prsPromises[view] = (async () => {
 			try {
-				state.prs = await fetchPRs();
-				state.prsError = undefined;
+				listState.prs = await fetchPRs(view);
+				listState.prsError = undefined;
 			} catch (error) {
-				state.prsError = error instanceof Error ? error.message : String(error);
+				listState.prsError = error instanceof Error ? error.message : String(error);
 			} finally {
-				state.prsFetchedAt = Date.now();
-				state.prsLoading = false;
-				prsPromise = undefined;
+				listState.prsFetchedAt = Date.now();
+				listState.prsLoading = false;
+				prsPromises[view] = undefined;
 				requestRender();
 			}
 		})();
-		return prsPromise;
+		return prsPromises[view];
 	}
 
 	function refreshData(force = false) {
-		void Promise.allSettled([refreshWeather(force), refreshAgenda(force), refreshPRs(force)]);
+		void Promise.allSettled([refreshWeather(force), refreshAgenda(force), refreshPRs("open", force)]);
 	}
 
 	function startRefreshTimer() {
@@ -813,7 +900,7 @@ export default function dashboardWidget(pi: ExtensionAPI) {
 		activePickerDone = undefined;
 		weatherPromise = undefined;
 		agendaPromise = undefined;
-		prsPromise = undefined;
+		for (const view of PR_VIEWS) prsPromises[view] = undefined;
 	});
 
 	pi.registerCommand("toggle-dashboard-widget", {
@@ -844,7 +931,7 @@ export default function dashboardWidget(pi: ExtensionAPI) {
 	});
 
 	pi.registerCommand("prs", {
-		description: "Open the open-PR picker (tab/shift-tab or j/k navigate, enter opens in browser)",
+		description: "Open the PR picker",
 		handler: async (_args, ctx) => {
 			if (PRS_DISABLED) {
 				ctx.ui.notify("PR section is disabled (PI_DASHBOARD_PRS_DISABLED)", "info");
