@@ -591,7 +591,7 @@ list_sessions all | fzf \
   --height=100% \
   --border-label=' Sessions ' \
   --prompt='> ' \
-  --header='π: pi at path (green working, grey idle) · enter: connect · ctrl-a/t/z/w filters · ctrl-d: kill tmux session' \
+  --header='enter: connect · ctrl-a/t/z/w filters · ctrl-d: kill tmux session' \
   --reverse \
   --ansi \
   --algo=v1 \
