@@ -4,6 +4,28 @@ set -euo pipefail
 script_path="${BASH_SOURCE[0]}"
 quoted_script_path="$(printf '%q' "$script_path")"
 
+active_pi_paths() {
+  command -v tmux >/dev/null 2>&1 || return 0
+
+  while read -r pane_pid cwd; do
+    [[ -n "$pane_pid" && -n "$cwd" ]] || continue
+    while read -r cpid; do
+      [[ -n "$cpid" ]] || continue
+      local comm
+      comm="$(ps -p "$cpid" -o comm= 2>/dev/null || true)"
+      if [[ "$comm" == "pi" ]]; then
+        printf '%s\n' "$cwd"
+        break
+      fi
+    done < <(pgrep -P "$pane_pid" 2>/dev/null || true)
+  done < <(tmux list-panes -a -F '#{pane_pid} #{pane_current_path}' 2>/dev/null || true)
+}
+
+export_active_pi_paths() {
+  PI_SESSION_PICKER_PI_PATHS="$(active_pi_paths | awk 'NF && !seen[$0]++')"
+  export PI_SESSION_PICKER_PI_PATHS
+}
+
 sesh_lines() {
   local mode="${1:-all}"
   local args=(--json)
@@ -26,10 +48,21 @@ sesh_lines() {
 
   sesh list "${args[@]}" | python3 -c '
 import json
+import os
 import signal
 import sys
 
 signal.signal(signal.SIGPIPE, signal.SIG_DFL)
+
+pi_paths = [os.path.realpath(p) for p in os.environ.get("PI_SESSION_PICKER_PI_PATHS", "").splitlines() if p]
+
+
+def has_pi_inside(path):
+    if not path:
+        return False
+    real = os.path.realpath(path)
+    return any(pi == real or pi.startswith(real + os.sep) for pi in pi_paths)
+
 
 icons = {
     "tmux": "",
@@ -42,11 +75,13 @@ sessions = json.load(sys.stdin) or []
 for session in sessions:
     src = session.get("Src", "")
     name = session.get("Name") or session.get("Path") or ""
+    path = session.get("Path") or ""
     if src in {"tmux", "config", "tmuxinator"}:
         target = session.get("Name") or name
     else:
-        target = session.get("Path") or name
-    print(f"{icons.get(src, "•")} {name}\t{target}\t{src}")
+        target = path or name
+    marker = "π " if has_pi_inside(path or target) else ""
+    print(f"{icons.get(src, "•")} {marker}{name}\t{target}\t{src}")
 '
 }
 
@@ -147,6 +182,15 @@ signal.signal(signal.SIGPIPE, signal.SIG_DFL)
 
 ICON = ""
 
+pi_paths = [os.path.realpath(p) for p in os.environ.get("PI_SESSION_PICKER_PI_PATHS", "").splitlines() if p]
+
+
+def has_pi_inside(path):
+    if not path:
+        return False
+    real = os.path.realpath(path)
+    return any(pi == real or pi.startswith(real + os.sep) for pi in pi_paths)
+
 
 def parse_worktree_porcelain(text):
     records = []
@@ -235,13 +279,16 @@ for root in [line.rstrip("\n") for line in sys.stdin if line.strip()]:
 
         branch = ref_label(record)
         locked = " 🔒" if "locked" in record else ""
-        name = f"{label}:{branch}{locked}  {path}"
+        marker = "π " if has_pi_inside(path) else ""
+        name = f"{marker}{label}:{branch}{locked}  {path}"
         print(f"{ICON} {name}\t{path}\tworktree")
 '
 }
 
 list_sessions() {
   local mode="${1:-all}"
+
+  export_active_pi_paths
 
   case "$mode" in
     all)
@@ -324,7 +371,7 @@ list_sessions all | fzf \
   --height=100% \
   --border-label=' Sessions ' \
   --prompt='> ' \
-  --header='enter: connect · ctrl-a: all · ctrl-t: tmux · ctrl-z: zoxide · ctrl-w: worktrees · ctrl-d: kill tmux session' \
+  --header='π: active pi under path · enter: connect · ctrl-a: all · ctrl-t: tmux · ctrl-z: zoxide · ctrl-w: worktrees · ctrl-d: kill tmux session' \
   --reverse \
   --algo=v1 \
   --tiebreak=begin,length \
