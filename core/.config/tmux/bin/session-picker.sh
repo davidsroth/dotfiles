@@ -109,7 +109,7 @@ for line in panes:
 
 refresh_pi_cache() {
   mkdir -p "$cache_dir"
-  if ! acquire_cache_lock "$pi_lock_dir"; then
+  if ! acquire_cache_lock "$pi_lock_dir" 10; then
     return 0
   fi
 
@@ -118,27 +118,26 @@ refresh_pi_cache() {
   active_pi_sessions_raw | python3 -c '
 import os
 import signal
-import subprocess
 import sys
 
 signal.signal(signal.SIGPIPE, signal.SIG_DFL)
+
+
+def git_root(path):
+    cur = os.path.realpath(path)
+    while cur and cur != os.path.dirname(cur):
+        if os.path.exists(os.path.join(cur, ".git")):
+            return cur
+        cur = os.path.dirname(cur)
+    return os.path.realpath(path)
+
 
 sessions = {}
 for line in sys.stdin:
     cwd, sep, status = line.rstrip("\n").partition("\t")
     if not cwd or not sep:
         continue
-    try:
-        root = subprocess.check_output(
-            ["git", "-C", cwd, "rev-parse", "--show-toplevel"],
-            stderr=subprocess.DEVNULL,
-            text=True,
-            timeout=0.5,
-        ).strip() or cwd
-    except Exception:
-        root = cwd
-
-    root = os.path.realpath(root)
+    root = git_root(cwd)
     # If multiple pi sessions share a root, working wins over idle.
     if sessions.get(root) != "working":
         sessions[root] = status or "idle"
@@ -210,7 +209,7 @@ def pi_marker(path):
         return ""
     status = pi_sessions.get(os.path.realpath(path))
     if status == "working":
-        return f"{GREEN}π…{RESET} "
+        return f"{GREEN}π{RESET} "
     if status == "idle":
         return f"{GREY}π{RESET} "
     return ""
@@ -426,7 +425,7 @@ for root in [line.rstrip("\n") for line in sys.stdin if line.strip()]:
 
 refresh_worktree_cache() {
   mkdir -p "$cache_dir"
-  if ! acquire_cache_lock "$worktree_lock_dir"; then
+  if ! acquire_cache_lock "$worktree_lock_dir" 60; then
     return 0
   fi
 
@@ -474,7 +473,7 @@ RESET = "\033[0m"
 def pi_marker(path):
     status = pi_sessions.get(os.path.realpath(path))
     if status == "working":
-        return f"{GREEN}π…{RESET} "
+        return f"{GREEN}π{RESET} "
     if status == "idle":
         return f"{GREY}π{RESET} "
     return ""
@@ -592,7 +591,7 @@ list_sessions all | fzf \
   --height=100% \
   --border-label=' Sessions ' \
   --prompt='> ' \
-  --header='grey π: idle pi at path · green π…: working pi at path · enter: connect · ctrl-a/t/z/w filters · ctrl-d: kill tmux session' \
+  --header='π: pi at path (green working, grey idle) · enter: connect · ctrl-a/t/z/w filters · ctrl-d: kill tmux session' \
   --reverse \
   --ansi \
   --algo=v1 \
