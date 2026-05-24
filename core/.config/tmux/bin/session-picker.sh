@@ -9,7 +9,7 @@ worktree_lock_dir="$cache_dir/worktrees.lock"
 worktree_cache_ttl=60
 pi_cache="$cache_dir/pi-sessions.tsv"
 pi_lock_dir="$cache_dir/pi-sessions.lock"
-pi_cache_ttl=5
+pi_cache_ttl=2
 
 cache_mtime() {
   stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null || printf '0'
@@ -42,23 +42,69 @@ acquire_cache_lock() {
 active_pi_sessions_raw() {
   command -v tmux >/dev/null 2>&1 || return 0
 
-  while IFS=$'\t' read -r target pane_pid cwd; do
-    [[ -n "$target" && -n "$pane_pid" && -n "$cwd" ]] || continue
-    while read -r cpid; do
-      [[ -n "$cpid" ]] || continue
-      local comm
-      comm="$(ps -p "$cpid" -o comm= 2>/dev/null || true)"
-      if [[ "$comm" == "pi" ]]; then
-        local status="idle" pane_text
-        pane_text="$(tmux capture-pane -p -S -20 -t "$target" 2>/dev/null || true)"
-        if grep -Eq 'Working\.\.\.|Thinking\.\.\.|Generating\.\.\.|Running tool' <<<"$pane_text"; then
-          status="working"
-        fi
-        printf '%s\t%s\n' "$cwd" "$status"
-        break
-      fi
-    done < <(pgrep -P "$pane_pid" 2>/dev/null || true)
-  done < <(tmux list-panes -a -F '#{session_name}:#{window_index}.#{pane_index}	#{pane_pid}	#{pane_current_path}' 2>/dev/null || true)
+  python3 -c '
+import os
+import re
+import signal
+import subprocess
+
+signal.signal(signal.SIGPIPE, signal.SIG_DFL)
+
+try:
+    panes = subprocess.check_output(
+        ["tmux", "list-panes", "-a", "-F", "#{session_name}:#{window_index}.#{pane_index}\t#{pane_pid}\t#{pane_current_path}"],
+        stderr=subprocess.DEVNULL,
+        text=True,
+    ).splitlines()
+except Exception:
+    panes = []
+
+try:
+    ps_lines = subprocess.check_output(
+        ["ps", "-ax", "-o", "pid=,ppid=,comm="],
+        stderr=subprocess.DEVNULL,
+        text=True,
+    ).splitlines()
+except Exception:
+    ps_lines = []
+
+children = {}
+for line in ps_lines:
+    parts = line.split(None, 2)
+    if len(parts) < 3:
+        continue
+    pid, ppid, comm = parts
+    children.setdefault(ppid, []).append(os.path.basename(comm))
+
+input_re = re.compile(r"Question \d+ of \d+|Your answer|Ctrl\+Enter submit all")
+working_re = re.compile(r"Working\.\.\.|Thinking\.\.\.|Generating\.\.\.|Running tool|\d+ running agent")
+
+for line in panes:
+    try:
+        target, pane_pid, cwd = line.split("\t", 2)
+    except ValueError:
+        continue
+    if "pi" not in children.get(pane_pid, []):
+        continue
+
+    try:
+        pane_text = subprocess.check_output(
+            ["tmux", "capture-pane", "-p", "-S", "-12", "-t", target],
+            stderr=subprocess.DEVNULL,
+            text=True,
+        )
+    except Exception:
+        pane_text = ""
+
+    status = "idle"
+    # The pi TUI can leave a spinner visible while a Q&A card is waiting for
+    # input, so treat explicit input cards as idle before looking for activity
+    # strings. This is still heuristic until pi exposes a status heartbeat.
+    if not input_re.search(pane_text) and working_re.search(pane_text):
+        status = "working"
+
+    print(f"{cwd}\t{status}")
+'
 }
 
 refresh_pi_cache() {
@@ -109,18 +155,11 @@ for root, status in sessions.items():
   return "$status"
 }
 
-refresh_pi_cache_async() {
-  cache_file_fresh "$pi_cache" "$pi_cache_ttl" && return 0
-  (
-    refresh_pi_cache
-  ) </dev/null >/dev/null 2>&1 &
-}
-
 export_active_pi_sessions() {
-  if [[ ! -f "$pi_cache" ]]; then
+  # Pi status is cheap enough to refresh synchronously when stale. Rendering a
+  # stale busy/idle marker is more confusing than spending ~100ms here.
+  if ! cache_file_fresh "$pi_cache" "$pi_cache_ttl"; then
     refresh_pi_cache 2>/dev/null || true
-  else
-    refresh_pi_cache_async
   fi
   PI_SESSION_PICKER_PI_SESSIONS="$(cat "$pi_cache" 2>/dev/null || true)"
   export PI_SESSION_PICKER_PI_SESSIONS
