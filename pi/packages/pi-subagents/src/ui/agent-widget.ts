@@ -156,9 +156,15 @@ export function formatTurns(turnCount: number, maxTurns?: number | null): string
   return maxTurns != null ? `⟳${turnCount}≤${maxTurns}` : `⟳${turnCount}`;
 }
 
-/** Format milliseconds as human-readable duration. */
+/** Format milliseconds as compact duration, trimming leading zero units: `42s`, `5m30s`, `1h2m3s`. */
 export function formatMs(ms: number): string {
-  return `${(ms / 1000).toFixed(1)}s`;
+  const totalSec = Math.max(0, Math.floor(ms / 1000));
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  const s = totalSec % 60;
+  if (h > 0) return `${h}h${m}m${s}s`;
+  if (m > 0) return `${m}m${s}s`;
+  return `${s}s`;
 }
 
 /** Format duration from start/completed timestamps. */
