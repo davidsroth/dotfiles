@@ -1,22 +1,42 @@
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import type { ExtensionAPI, ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
-import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { Key, matchesKey, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 
 // Optional env overrides (reload pi after changing them):
 // - PI_DASHBOARD_LOCATION="San Francisco"
 // - PI_DASHBOARD_TEMP_UNIT="F" | "C"
 // - PI_DASHBOARD_EVENTS_COMMAND='echo "[{\"title\":\"Standup\",\"start\":\"2026-04-30T09:30:00-07:00\"}]"'
+// - PI_DASHBOARD_PRS_DISABLED=1                # hide the PR section
+// - PI_DASHBOARD_PR_LIMIT=3                    # number of PR rows (default 3)
+// - PI_DASHBOARD_PRS_COMMAND='gh search prs ...' # custom JSON-producing command
+// - PI_DASHBOARD_PR_OPENER='open -a Zen'       # opener cmd for `enter` in the picker (default: `open` on macOS, `xdg-open` elsewhere)
+// - PI_DASHBOARD_PR_PICKER_KEY='ctrl+alt+p'    # shortcut to toggle the PR picker (default: ctrl+alt+p)
 const WIDGET_ID = "dashboard-strip";
 const RENDER_REFRESH_MS = 30_000;
 const WEATHER_REFRESH_MS = 30 * 60_000;
 const AGENDA_REFRESH_MS = 2 * 60_000;
+const PRS_REFRESH_MS = 5 * 60_000;
 const WEATHER_TIMEOUT_MS = 4_000;
 const AGENDA_TIMEOUT_MS = 10_000;
+const PRS_TIMEOUT_MS = 10_000;
 const AGENDA_LOOKAHEAD_HOURS = 12;
+const DEFAULT_PR_LIMIT = 3;
+const PR_FETCH_LIMIT = 20;
 
 const CUSTOM_EVENTS_COMMAND = process.env.PI_DASHBOARD_EVENTS_COMMAND?.trim();
+const CUSTOM_PRS_COMMAND = process.env.PI_DASHBOARD_PRS_COMMAND?.trim();
+const PRS_DISABLED = /^(1|true|yes|on)$/i.test(process.env.PI_DASHBOARD_PRS_DISABLED?.trim() ?? "");
+const PR_LIMIT = (() => {
+	const raw = process.env.PI_DASHBOARD_PR_LIMIT?.trim();
+	if (!raw) return DEFAULT_PR_LIMIT;
+	const parsed = Number.parseInt(raw, 10);
+	if (!Number.isFinite(parsed) || parsed < 0) return DEFAULT_PR_LIMIT;
+	return Math.min(parsed, 8);
+})();
 const WEATHER_LOCATION = process.env.PI_DASHBOARD_LOCATION?.trim() || "New York";
 const WEATHER_UNIT = process.env.PI_DASHBOARD_TEMP_UNIT?.trim()?.toUpperCase() || "F";
+const PR_PICKER_KEY = process.env.PI_DASHBOARD_PR_PICKER_KEY?.trim() || "ctrl+alt+p";
+const PR_OPENER = process.env.PI_DASHBOARD_PR_OPENER?.trim() || (process.platform === "darwin" ? "open" : "xdg-open");
 
 const MACOS_CALENDAR_SWIFT = String.raw`
 import Foundation
@@ -96,6 +116,15 @@ type AgendaEvent = {
 	calendar?: string;
 };
 
+type PullRequest = {
+	number: number;
+	title: string;
+	repo: string;
+	url?: string;
+	isDraft: boolean;
+	updatedAt?: string;
+};
+
 type DashboardState = {
 	weather?: WeatherData;
 	weatherLoading: boolean;
@@ -105,6 +134,10 @@ type DashboardState = {
 	agendaLoading: boolean;
 	agendaError?: string;
 	agendaFetchedAt?: number;
+	prs: PullRequest[];
+	prsLoading: boolean;
+	prsError?: string;
+	prsFetchedAt?: number;
 };
 
 function execFileText(file: string, args: string[], timeout: number): Promise<string> {
@@ -243,6 +276,67 @@ async function fetchAgenda(): Promise<AgendaEvent[]> {
 	return parseAgendaJson(stdout);
 }
 
+function parsePrsJson(payload: string): PullRequest[] {
+	const parsed = JSON.parse(payload) as unknown;
+	if (!Array.isArray(parsed)) return [];
+
+	return parsed
+		.map((item) => {
+			if (!item || typeof item !== "object") return undefined;
+			const pr = item as Record<string, unknown>;
+			const number = typeof pr.number === "number" ? pr.number : Number.parseInt(String(pr.number ?? ""), 10);
+			if (!Number.isFinite(number)) return undefined;
+			const title = sanitizeText(pr.title, "Untitled");
+			const repoField = pr.repository;
+			let repo = "";
+			if (repoField && typeof repoField === "object") {
+				const r = repoField as Record<string, unknown>;
+				repo = sanitizeText(r.name ?? r.nameWithOwner, "");
+			} else if (typeof repoField === "string") {
+				repo = repoField;
+			}
+			if (repo.includes("/")) repo = repo.split("/").pop() ?? repo;
+			return {
+				number,
+				title,
+				repo,
+				url: typeof pr.url === "string" ? pr.url : undefined,
+				isDraft: Boolean(pr.isDraft),
+				updatedAt: typeof pr.updatedAt === "string" ? pr.updatedAt : undefined,
+			} satisfies PullRequest;
+		})
+		.filter((pr): pr is PullRequest => Boolean(pr))
+		.sort((a, b) => {
+			const at = a.updatedAt ? Date.parse(a.updatedAt) : 0;
+			const bt = b.updatedAt ? Date.parse(b.updatedAt) : 0;
+			return bt - at;
+		});
+}
+
+async function fetchPRs(): Promise<PullRequest[]> {
+	if (CUSTOM_PRS_COMMAND) {
+		const stdout = await execFileText(process.env.SHELL ?? "/bin/zsh", ["-lc", CUSTOM_PRS_COMMAND], PRS_TIMEOUT_MS);
+		return parsePrsJson(stdout);
+	}
+
+	const stdout = await execFileText(
+		"gh",
+		[
+			"search",
+			"prs",
+			"--author=@me",
+			"--state=open",
+			"--sort=updated",
+			"--limit",
+			String(PR_FETCH_LIMIT),
+			"--json",
+			"number,title,repository,url,isDraft,updatedAt",
+		],
+		PRS_TIMEOUT_MS,
+	);
+	return parsePrsJson(stdout);
+}
+
 function formatWeatherLine(theme: Theme, state: DashboardState): string {
 	if (state.weather) {
 		return `${theme.fg("accent", state.weather.temperature)} ${theme.fg("dim", "·")} ${theme.fg("muted", `${state.weather.condition} · ${state.weather.location}`)}`;
@@ -268,6 +362,42 @@ function formatAgendaEntry(theme: Theme, label: string, event?: AgendaEvent): st
 	}
 
 	return `${theme.fg("dim", label)} ${theme.fg("muted", formatClock(start))} ${theme.fg("text", event.title)}`;
+}
+
+function formatPrSummary(theme: Theme, state: DashboardState): string {
+	if (state.prsLoading && state.prs.length === 0) {
+		return `${theme.fg("dim", "PRs:")} ${theme.fg("muted", "Loading…")}`;
+	}
+	if (state.prsError && state.prs.length === 0) {
+		return `${theme.fg("dim", "PRs:")} ${theme.fg("muted", "unavailable")}`;
+	}
+	const total = state.prs.length;
+	if (total === 0) {
+		return `${theme.fg("dim", "PRs:")} ${theme.fg("muted", "none open")}`;
+	}
+	const drafts = state.prs.filter((pr) => pr.isDraft).length;
+	const ready = total - drafts;
+	const parts = [`${total} open`];
+	if (ready > 0) parts.push(`${ready} ready`);
+	if (drafts > 0) parts.push(`${drafts} draft`);
+	return `${theme.fg("dim", "PRs:")} ${theme.fg("accent", String(total))} ${theme.fg("dim", "·")} ${theme.fg("muted", parts.slice(1).join(" · ") || "open")}`;
+}
+
+function formatPrEntry(theme: Theme, pr: PullRequest): string {
+	const marker = pr.isDraft ? theme.fg("dim", "◐") : theme.fg("accent", "●");
+	const num = theme.fg("accent", `#${pr.number}`);
+	const repo = pr.repo ? `${theme.fg("muted", pr.repo)} ${theme.fg("dim", "·")} ` : "";
+	return `${marker} ${num} ${repo}${theme.fg("text", pr.title)}`;
+}
+
+function formatPrLines(theme: Theme, state: DashboardState): string[] {
+	if (PR_LIMIT === 0) return [formatPrSummary(theme, state)];
+	const lines: string[] = [formatPrSummary(theme, state)];
+	const rows = state.prs.slice(0, PR_LIMIT);
+	for (const pr of rows) {
+		lines.push(formatPrEntry(theme, pr));
+	}
+	return lines;
 }
 
 function formatAgendaLines(theme: Theme, state: DashboardState): [string, string] {
@@ -307,46 +437,231 @@ function formatAgendaLines(theme: Theme, state: DashboardState): [string, string
 	return [formatAgendaEntry(theme, firstLabel, first), formatAgendaEntry(theme, "Then:", second)];
 }
 
-function renderLines(theme: Theme, width: number, state: DashboardState): string[] {
+function renderLines(theme: Theme, width: number, state: DashboardState, hidePrs: boolean): string[] {
 	const now = new Date();
 	const time = theme.bold(theme.fg("accent", formatClock(now)));
 	const date = theme.fg("muted", now.toLocaleDateString([], { weekday: "long", month: "short", day: "numeric" }));
 	const weather = formatWeatherLine(theme, state);
 	const [next, then] = formatAgendaLines(theme, state);
+	const prLines = PRS_DISABLED || hidePrs ? [] : formatPrLines(theme, state);
 
 	if (width >= 80) {
 		const agendaColumnWidth = Math.max(visibleWidth(next), visibleWidth(then));
-		return [
+		const lines = [
 			joinLeftRight(date, time, width),
 			joinWithRightColumn(weather, next, agendaColumnWidth, width),
 			renderRightColumn(then, agendaColumnWidth, width),
 		];
+		if (prLines.length > 0) {
+			lines.push(theme.fg("borderMuted", "─".repeat(width)));
+			for (const line of prLines) lines.push(truncateToWidth(line, width, ""));
+		}
+		return lines;
 	}
 
-	return [
+	const lines = [
 		truncateToWidth(`${time} ${theme.fg("dim", "·")} ${date}`, width, ""),
 		truncateToWidth(weather, width, ""),
 		truncateToWidth(next, width, ""),
 		truncateToWidth(then, width, ""),
 	];
+	if (prLines.length > 0) {
+		lines.push(theme.fg("borderMuted", "─".repeat(width)));
+		for (const line of prLines) lines.push(truncateToWidth(line, width, ""));
+	}
+	return lines;
 }
 
 export default function dashboardWidget(pi: ExtensionAPI) {
 	let enabled = true;
 	let visible = true;
+	let prFocused = false;
 	let activeRequestRender: (() => void) | undefined;
 	let refreshTimer: NodeJS.Timeout | undefined;
 	let weatherPromise: Promise<void> | undefined;
 	let agendaPromise: Promise<void> | undefined;
+	let prsPromise: Promise<void> | undefined;
+	let activePickerRender: (() => void) | undefined;
+	let activePickerDone: (() => void) | undefined;
 
 	const state: DashboardState = {
 		weatherLoading: true,
 		agenda: [],
 		agendaLoading: true,
+		prs: [],
+		prsLoading: !PRS_DISABLED,
 	};
 
 	function requestRender() {
 		activeRequestRender?.();
+		activePickerRender?.();
+	}
+
+	async function openPrPicker(ctx: ExtensionContext): Promise<void> {
+		if (!ctx.hasUI) return;
+		if (prFocused) {
+			activePickerDone?.();
+			return;
+		}
+
+		// Kick off a refresh if we have nothing yet; otherwise refresh in the background
+		// so the picker shows whatever's cached immediately but stays fresh.
+		if (state.prs.length === 0 || !state.prsFetchedAt || Date.now() - state.prsFetchedAt >= PRS_REFRESH_MS) {
+			void refreshPRs(true);
+		}
+
+		// Hide the PR section in the widget while focus is active so the focused
+		// overlay (rendered just above the editor) appears to replace it in place.
+		prFocused = true;
+		activeRequestRender?.();
+
+		try {
+			await ctx.ui.custom<void>(
+				(tui, theme, _kb, done) => {
+					activePickerRender = () => tui.requestRender();
+					activePickerDone = () => done(undefined);
+					let selected = 0;
+					let scrollTop = 0;
+
+					function list(): PullRequest[] {
+						return state.prs;
+					}
+
+					function clampSelection(): void {
+						const total = list().length;
+						if (total === 0) {
+							selected = 0;
+							scrollTop = 0;
+							return;
+						}
+						if (selected >= total) selected = total - 1;
+						if (selected < 0) selected = 0;
+					}
+
+					function openSelected(): void {
+						const pr = list()[selected];
+						if (!pr?.url) {
+							ctx.ui.notify("No URL for this PR", "warning");
+							return;
+						}
+						try {
+							const parts = PR_OPENER.split(/\s+/);
+							const cmd = parts[0]!;
+							const args = [...parts.slice(1), pr.url];
+							const child = spawn(cmd, args, { detached: true, stdio: "ignore" });
+							child.on("error", (err) => ctx.ui.notify(`Failed to open: ${err.message}`, "error"));
+							child.unref();
+							ctx.ui.notify(`Opened #${pr.number}`, "info");
+						} catch (error) {
+							const msg = error instanceof Error ? error.message : String(error);
+							ctx.ui.notify(`Failed to open: ${msg}`, "error");
+							return;
+						}
+						done(undefined);
+					}
+
+					return {
+						invalidate() {},
+						render(width: number): string[] {
+							clampSelection();
+							const prs = list();
+							const inner = Math.max(20, width - 2);
+
+							// Match the widget's PR section format exactly, but with a selection cursor.
+							const summary = formatPrSummary(theme, state);
+							const bodyLines: string[] = [summary];
+
+							if (state.prsLoading && prs.length === 0) {
+								bodyLines.push(theme.fg("muted", "  Loading…"));
+							} else if (state.prsError && prs.length === 0) {
+								bodyLines.push(theme.fg("error", `  Error: ${state.prsError}`));
+							} else if (prs.length === 0) {
+								bodyLines.push(theme.fg("muted", "  No open PRs"));
+							} else {
+								const maxRows = Math.max(3, prs.length);
+								if (selected < scrollTop) scrollTop = selected;
+								if (selected >= scrollTop + maxRows) scrollTop = selected - maxRows + 1;
+								const windowPrs = prs.slice(scrollTop, scrollTop + maxRows);
+								for (let i = 0; i < windowPrs.length; i++) {
+									const pr = windowPrs[i]!;
+									const isSel = scrollTop + i === selected;
+									const pointer = isSel ? theme.fg("accent", "▸") : " ";
+									const marker = pr.isDraft ? theme.fg("dim", "◐") : theme.fg("accent", "●");
+									const num = theme.fg("accent", `#${pr.number}`);
+									const repo = pr.repo ? `${theme.fg("muted", pr.repo)} ${theme.fg("dim", "·")} ` : "";
+									const title = isSel ? theme.bold(theme.fg("text", pr.title)) : theme.fg("text", pr.title);
+									bodyLines.push(`${pointer} ${marker} ${num} ${repo}${title}`);
+								}
+							}
+
+							const hint = theme.fg("dim", "tab/j/↓ next · shift-tab/k/↑ prev · enter open · r refresh · esc/shortcut exit");
+							const paddedBody = bodyLines.map((line) => padRight(truncateToWidth(line, inner, "…"), inner));
+							const paddedHint = padRight(truncateToWidth(hint, inner, "…"), inner);
+
+							return [
+								theme.fg("borderAccent", `╭${"─".repeat(inner)}╮`),
+								...paddedBody.map((line) => theme.fg("borderAccent", "│") + line + theme.fg("borderAccent", "│")),
+								theme.fg("borderAccent", "│") + paddedHint + theme.fg("borderAccent", "│"),
+								theme.fg("borderAccent", `╰${"─".repeat(inner)}╯`),
+							].map((line) => truncateToWidth(line, width, ""));
+						},
+						handleInput(data: string): void {
+							if (matchesKey(data, Key.ctrlAlt("p")) || matchesKey(data, Key.escape) || matchesKey(data, Key.ctrl("c")) || data === "q") {
+								done(undefined);
+								return;
+							}
+							if (matchesKey(data, Key.shift(Key.tab)) || matchesKey(data, Key.up) || data === "k") {
+								if (selected > 0) {
+									selected--;
+									tui.requestRender();
+								}
+								return;
+							}
+							if (matchesKey(data, Key.tab) || matchesKey(data, Key.down) || data === "j") {
+								if (selected < list().length - 1) {
+									selected++;
+									tui.requestRender();
+								}
+								return;
+							}
+							if (data === "g") {
+								selected = 0;
+								tui.requestRender();
+								return;
+							}
+							if (data === "G") {
+								selected = Math.max(0, list().length - 1);
+								tui.requestRender();
+								return;
+							}
+							if (matchesKey(data, Key.enter)) {
+								if (list().length === 0) return;
+								openSelected();
+								return;
+							}
+							if (data === "r") {
+								void refreshPRs(true);
+								return;
+							}
+						},
+					};
+				},
+				{
+					overlay: true,
+					overlayOptions: {
+						// Sit immediately above the editor, where the widget's PR section was.
+						anchor: "bottom-center",
+						width: "100%",
+						margin: { left: 0, right: 0, bottom: 1, top: 0 },
+					},
+				},
+			);
+		} finally {
+			prFocused = false;
+			activePickerRender = undefined;
+			activePickerDone = undefined;
+			activeRequestRender?.();
+		}
 	}
 
 	function stopRefreshTimer() {
@@ -364,6 +679,13 @@ export default function dashboardWidget(pi: ExtensionAPI) {
 		if (force) return true;
 		if (!state.agendaFetchedAt) return true;
 		return Date.now() - state.agendaFetchedAt >= AGENDA_REFRESH_MS;
+	}
+
+	function shouldRefreshPRs(force = false): boolean {
+		if (PRS_DISABLED) return false;
+		if (force) return true;
+		if (!state.prsFetchedAt) return true;
+		return Date.now() - state.prsFetchedAt >= PRS_REFRESH_MS;
 	}
 
 	function refreshWeather(force = false) {
@@ -410,8 +732,30 @@ export default function dashboardWidget(pi: ExtensionAPI) {
 		return agendaPromise;
 	}
 
+	function refreshPRs(force = false) {
+		if (!shouldRefreshPRs(force)) return prsPromise;
+		if (prsPromise) return prsPromise;
+
+		state.prsLoading = true;
+		requestRender();
+		prsPromise = (async () => {
+			try {
+				state.prs = await fetchPRs();
+				state.prsError = undefined;
+			} catch (error) {
+				state.prsError = error instanceof Error ? error.message : String(error);
+			} finally {
+				state.prsFetchedAt = Date.now();
+				state.prsLoading = false;
+				prsPromise = undefined;
+				requestRender();
+			}
+		})();
+		return prsPromise;
+	}
+
 	function refreshData(force = false) {
-		void Promise.allSettled([refreshWeather(force), refreshAgenda(force)]);
+		void Promise.allSettled([refreshWeather(force), refreshAgenda(force), refreshPRs(force)]);
 	}
 
 	function startRefreshTimer() {
@@ -433,7 +777,7 @@ export default function dashboardWidget(pi: ExtensionAPI) {
 			return {
 				render(width: number): string[] {
 					const innerWidth = Math.max(20, width - 2);
-					const lines = renderLines(theme, innerWidth, state).map((line) => padRight(line, innerWidth));
+					const lines = renderLines(theme, innerWidth, state, prFocused).map((line) => padRight(line, innerWidth));
 					return [
 						theme.fg("borderMuted", `╭${"─".repeat(innerWidth)}╮`),
 						...lines.map((line) => theme.fg("borderMuted", "│") + line + theme.fg("borderMuted", "│")),
@@ -465,8 +809,11 @@ export default function dashboardWidget(pi: ExtensionAPI) {
 	pi.on("session_shutdown", () => {
 		stopRefreshTimer();
 		activeRequestRender = undefined;
+		activePickerRender = undefined;
+		activePickerDone = undefined;
 		weatherPromise = undefined;
 		agendaPromise = undefined;
+		prsPromise = undefined;
 	});
 
 	pi.registerCommand("toggle-dashboard-widget", {
@@ -487,7 +834,7 @@ export default function dashboardWidget(pi: ExtensionAPI) {
 	});
 
 	pi.registerCommand("refresh-dashboard-widget", {
-		description: "Refresh weather and agenda data for the startup widget",
+		description: "Refresh weather, agenda, and PR data for the startup widget",
 		handler: async (_args, ctx) => {
 			refreshData(true);
 			visible = enabled;
@@ -495,4 +842,24 @@ export default function dashboardWidget(pi: ExtensionAPI) {
 			ctx.ui.notify("Refreshing dashboard widget…", "info");
 		},
 	});
+
+	pi.registerCommand("prs", {
+		description: "Open the open-PR picker (tab/shift-tab or j/k navigate, enter opens in browser)",
+		handler: async (_args, ctx) => {
+			if (PRS_DISABLED) {
+				ctx.ui.notify("PR section is disabled (PI_DASHBOARD_PRS_DISABLED)", "info");
+				return;
+			}
+			await openPrPicker(ctx);
+		},
+	});
+
+	if (!PRS_DISABLED) {
+		pi.registerShortcut(PR_PICKER_KEY, {
+			description: "Toggle the PR picker from the dashboard widget",
+			handler: async (ctx) => {
+				await openPrPicker(ctx);
+			},
+		});
+	}
 }
