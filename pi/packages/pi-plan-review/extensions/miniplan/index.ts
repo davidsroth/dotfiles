@@ -87,6 +87,27 @@ interface AssistantTextResult {
 	incompleteReason?: string;
 }
 
+/**
+ * Find the last *user-facing* assistant reply on the branch.
+ *
+ * pi sessions interleave three message roles: `user`, `assistant`, and
+ * `toolResult`. Assistant turns come in two flavours:
+ *   - `stopReason: "toolUse"` — intermediate turn that ends in a tool call.
+ *     Its content may include `thinking`, `toolCall`, and sometimes a short
+ *     `text` preamble ("let me check…"). These are NOT the real reply.
+ *   - `stopReason: "stop"` — the actual final reply to the user.
+ *
+ * We walk entries backwards and accept only the most recent assistant turn
+ * with `stopReason === "stop"`. Everything else — user messages, toolResult
+ * entries, intermediate `toolUse` turns, non-`message` entries (model_change,
+ * custom_message, etc.) — is skipped. If the agent is mid-action (the latest
+ * assistant turn is still `toolUse`), we keep looking back for the previous
+ * completed reply rather than erroring out.
+ *
+ * If we find a completed assistant turn but it has no text parts (e.g. an
+ * empty/aborted reply), we report it as incomplete so the caller can show a
+ * useful message.
+ */
 function findLastAssistantText(branchEntries: readonly unknown[]): AssistantTextResult | null {
 	for (let i = branchEntries.length - 1; i >= 0; i--) {
 		const entry = branchEntries[i] as { type?: string; id?: string; timestamp?: string; message?: unknown } | null | undefined;
@@ -99,15 +120,16 @@ function findLastAssistantText(branchEntries: readonly unknown[]): AssistantText
 				}
 			| undefined;
 		if (!msg || msg.role !== "assistant") continue;
-		if (msg.stopReason && msg.stopReason !== "stop") {
-			return { text: "", entryId: entry.id, timestamp: entry.timestamp, incompleteReason: msg.stopReason };
-		}
+		// Skip intermediate tool-call turns — they aren't the final reply.
+		if (msg.stopReason !== "stop") continue;
+
 		const textParts = (msg.content ?? [])
 			.filter((c): c is { type: "text"; text: string } => c?.type === "text" && typeof c.text === "string")
 			.map((c) => c.text);
-		if (textParts.length > 0) {
-			return { text: textParts.join("\n"), entryId: entry.id, timestamp: entry.timestamp };
+		if (textParts.length === 0) {
+			return { text: "", entryId: entry.id, timestamp: entry.timestamp, incompleteReason: "no text" };
 		}
+		return { text: textParts.join("\n"), entryId: entry.id, timestamp: entry.timestamp };
 	}
 	return null;
 }
