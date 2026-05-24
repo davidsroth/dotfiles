@@ -437,13 +437,13 @@ function formatAgendaLines(theme: Theme, state: DashboardState): [string, string
 	return [formatAgendaEntry(theme, firstLabel, first), formatAgendaEntry(theme, "Then:", second)];
 }
 
-function renderLines(theme: Theme, width: number, state: DashboardState, hidePrs: boolean): string[] {
+function renderLines(theme: Theme, width: number, state: DashboardState): string[] {
 	const now = new Date();
 	const time = theme.bold(theme.fg("accent", formatClock(now)));
 	const date = theme.fg("muted", now.toLocaleDateString([], { weekday: "long", month: "short", day: "numeric" }));
 	const weather = formatWeatherLine(theme, state);
 	const [next, then] = formatAgendaLines(theme, state);
-	const prLines = PRS_DISABLED || hidePrs ? [] : formatPrLines(theme, state);
+	const prLines = PRS_DISABLED ? [] : formatPrLines(theme, state);
 
 	if (width >= 80) {
 		const agendaColumnWidth = Math.max(visibleWidth(next), visibleWidth(then));
@@ -510,10 +510,10 @@ export default function dashboardWidget(pi: ExtensionAPI) {
 			void refreshPRs(true);
 		}
 
-		// Hide the PR section in the widget while focus is active so the focused
-		// overlay (rendered just above the editor) appears to replace it in place.
+		// Keep the dashboard widget rendered at its normal height while the overlay
+		// is open. Hiding the PR section here changes the base layout height and can
+		// pull the bottom bar upward, leaving blank space underneath in some states.
 		prFocused = true;
-		activeRequestRender?.();
 
 		try {
 			await ctx.ui.custom<void>(
@@ -777,7 +777,7 @@ export default function dashboardWidget(pi: ExtensionAPI) {
 			return {
 				render(width: number): string[] {
 					const innerWidth = Math.max(20, width - 2);
-					const lines = renderLines(theme, innerWidth, state, prFocused).map((line) => padRight(line, innerWidth));
+					const lines = renderLines(theme, innerWidth, state).map((line) => padRight(line, innerWidth));
 					return [
 						theme.fg("borderMuted", `╭${"─".repeat(innerWidth)}╮`),
 						...lines.map((line) => theme.fg("borderMuted", "│") + line + theme.fg("borderMuted", "│")),
