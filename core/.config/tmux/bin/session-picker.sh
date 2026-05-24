@@ -39,6 +39,11 @@ acquire_cache_lock() {
   return 1
 }
 
+current_tmux_session() {
+  [[ -n "${TMUX:-}" ]] || return 0
+  tmux display-message -p '#S' 2>/dev/null || true
+}
+
 active_pi_sessions_raw() {
   command -v tmux >/dev/null 2>&1 || return 0
 
@@ -184,13 +189,18 @@ sesh_lines() {
       ;;
   esac
 
-  sesh list "${args[@]}" | python3 -c '
+  local current_session
+  current_session="$(current_tmux_session)"
+
+  sesh list "${args[@]}" | CURRENT_TMUX_SESSION="$current_session" python3 -c '
 import json
 import os
 import signal
 import sys
 
 signal.signal(signal.SIGPIPE, signal.SIG_DFL)
+
+current_tmux_session = os.environ.get("CURRENT_TMUX_SESSION", "")
 
 pi_sessions = {}
 for line in os.environ.get("PI_SESSION_PICKER_PI_SESSIONS", "").splitlines():
@@ -227,6 +237,8 @@ for session in sessions:
     src = session.get("Src", "")
     name = session.get("Name") or session.get("Path") or ""
     path = session.get("Path") or ""
+    if src == "tmux" and name == current_tmux_session:
+        continue
     if src in {"tmux", "config", "tmuxinator"}:
         target = session.get("Name") or name
     else:
