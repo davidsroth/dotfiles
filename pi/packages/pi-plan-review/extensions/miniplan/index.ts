@@ -453,7 +453,7 @@ body {
   background: var(--surface); color: var(--text); line-height: 1.65; display: flex;
   font-size: 14px;
 }
-main { flex: 1; overflow-y: auto; padding: 32px 40px; }
+main { flex: 1; min-width: 0; overflow-y: auto; padding: 32px 40px; }
 main h1 { font-size: 1.35rem; font-weight: 700; letter-spacing: -0.01em; border-bottom: 1px solid var(--border); padding-bottom: .35em; margin-bottom: .7em; }
 main h2 { font-size: 1.15rem; font-weight: 700; letter-spacing: -0.01em; margin-top: 1.6em; margin-bottom: .4em; }
 main h3 { font-size: 1.05rem; font-weight: 700; letter-spacing: -0.01em; margin-top: 1.3em; }
@@ -462,7 +462,7 @@ main a { color: var(--interactive); text-decoration: none; border-bottom: 1px so
 main a:hover { border-bottom-color: var(--interactive); }
 main blockquote { border-left: 2px solid var(--border); margin: .8em 0; padding-left: 1em; color: var(--text-muted); }
 main code { font-family: inherit; font-size: .92em; background: var(--code-bg); padding: .05em .3em; border-radius: 2px; }
-main pre { background: var(--code-bg); padding: .9em; border-radius: 2px; overflow-x: auto; line-height: 1.5; margin: .7em 0; border: 1px solid var(--border); }
+main pre { background: var(--code-bg); padding: .9em; border-radius: 2px; overflow-x: auto; max-width: 100%; line-height: 1.5; margin: .7em 0; border: 1px solid var(--border); }
 main pre code { padding: 0; background: none; white-space: pre; }
 main pre[data-lang]::before { content: attr(data-lang); display: block; color: var(--text-muted); font-size: .76rem; margin-bottom: .4em; text-transform: uppercase; letter-spacing: .04em; }
 main ul, main ol { margin: .55em 0 .75em 1.45em; padding: 0; }
@@ -473,7 +473,7 @@ main li.task > ul, main li.task > ol { margin-left: 2.5em; }
 main li.task .bx { user-select: none; color: var(--text-muted); margin-right: .45em; }
 main li.task.done { color: var(--text-muted); }
 main del { color: var(--text-muted); }
-main table { width: 100%; border-collapse: collapse; margin: .9em 0; font-size: .92em; }
+main table { width: 100%; border-collapse: collapse; margin: .9em 0; font-size: .92em; display: block; overflow-x: auto; }
 main th, main td { border: 1px solid var(--border); padding: .35em .55em; text-align: left; vertical-align: top; }
 main th { background: var(--code-bg); font-weight: 700; }
 main hr { border: none; border-top: 1px solid var(--border); margin: 1.4em 0; }
@@ -481,7 +481,7 @@ main hr { border: none; border-top: 1px solid var(--border); margin: 1.4em 0; }
 .hl { background: var(--interactive-subtle); border-bottom: 2px solid var(--interactive); color: inherit; padding: 0 2px; border-radius: 1px; }
 .path { color: var(--text-muted); font-size: .82rem; margin-bottom: 1.6em; }
 
-aside { width: var(--side); border-left: 1px solid var(--border); background: var(--surface); display: flex; flex-direction: column; }
+aside { width: var(--side); flex-shrink: 0; min-width: 0; border-left: 1px solid var(--border); background: var(--surface); display: flex; flex-direction: column; }
 aside header { padding: 12px 16px; border-bottom: 1px solid var(--border); font-weight: 700; font-size: .9rem; display: flex; justify-content: space-between; align-items: center; text-transform: uppercase; letter-spacing: 0.04em; }
 #list { flex: 1; overflow-y: auto; padding: 12px 14px; }
 .empty { color: var(--text-muted); text-align: center; padding: 32px 10px; font-size: .88rem; }
@@ -503,12 +503,14 @@ button.success:hover { background: var(--success-hover); }
 #load { display: none; padding: 12px; text-align: center; color: var(--text-muted); font-size: .88rem; }
 
 .float {
-  position: absolute;
+  position: fixed;
   display: flex; flex-direction: column; gap: 6px;
   padding: 10px; background: var(--surface-elevated);
   border: 1px solid var(--border); border-radius: 2px;
   box-shadow: 0 4px 16px rgba(0,0,0,.2);
-  min-width: 220px; z-index: 100;
+  width: min(280px, calc(100vw - 16px));
+  max-width: calc(100vw - 16px);
+  z-index: 100;
 }
 .float textarea {
   width: 100%; min-height: 50px; resize: vertical;
@@ -523,6 +525,25 @@ button.success:hover { background: var(--success-hover); }
 .float .row .cancel { background: transparent; color: var(--text-muted); border: 1px solid var(--border)!important; }
 .float .row .ok { background: var(--interactive); color: #fff; }
 .notice { padding: 14px; text-align: center; font-weight: 600; font-family: inherit; }
+
+/* ── Narrow viewport: stack main + aside vertically, let body scroll ── */
+@media (max-width: 720px) {
+  html, body { height: auto; overflow: visible; }
+  body { flex-direction: column; min-height: 100vh; }
+  main { flex: 0 0 auto; padding: 18px 14px 24px; overflow-y: visible; }
+  main h1 { font-size: 1.2rem; }
+  main h2 { font-size: 1.05rem; }
+  main h3 { font-size: 1rem; }
+  .path { margin-bottom: 1em; }
+  aside {
+    width: 100%; flex: 0 0 auto;
+    border-left: none; border-top: 1px solid var(--border);
+  }
+  aside header { padding: 10px 14px; }
+  #list { flex: 0 0 auto; max-height: 40vh; padding: 10px 12px; }
+  footer { padding: 10px; }
+  footer textarea { min-height: 56px; }
+}
 `;
 }
 
@@ -1076,20 +1097,28 @@ export default function plan(pi: ExtensionAPI): void {
 		try { ctx.ui.notify("Markup: opening last assistant message in browser…", "info"); } catch {}
 
 		void startServer(found.text, LAST_REPLY_OPTIONS, colors, isLight)
-			.then(async (result) => {
+			.then((result) => {
 				const reply = formatLastReply(result, found).trim();
 				if (!reply) {
 					ctx.ui.notify("No reply captured.", "info");
 					return;
 				}
 
-				let existing = "";
+				// Send the captured reply as a fresh user message instead of
+				// stuffing it into the editor. When the agent is mid-turn we
+				// queue as a follow-up; otherwise it kicks off a new turn
+				// immediately. Mirrors the pattern used in pi-btw.
 				try {
-					const ui = ctx.ui as unknown as { getEditorText?: () => string | Promise<string> };
-					existing = (await ui.getEditorText?.())?.trimEnd() ?? "";
-				} catch { /* older UI APIs may not expose getEditorText */ }
-				ctx.ui.setEditorText(existing ? `${existing}\n\n${reply}` : reply);
-				ctx.ui.notify(existing ? "Appended reply to the editor. Review and send when ready." : "Loaded reply into the editor. Review and send when ready.", "info");
+					if (ctx.isIdle()) {
+						pi.sendUserMessage(reply);
+					} else {
+						pi.sendUserMessage(reply, { deliverAs: "followUp" });
+					}
+					ctx.ui.notify(ctx.isIdle() ? "Reply sent." : "Reply queued as follow-up.", "info");
+				} catch (err) {
+					const msg = err instanceof Error ? err.message : String(err);
+					ctx.ui.notify(`Failed to send reply: ${msg}`, "error");
+				}
 			})
 			.catch((err) => {
 				const msg = err instanceof Error ? err.message : String(err);
