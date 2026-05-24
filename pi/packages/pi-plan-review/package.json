@@ -20,7 +20,8 @@
   ],
   "pi": {
     "extensions": [
-      "./extensions/miniplan/index.ts"
+      "./extensions/miniplan/index.ts",
+      "./extensions/draft/index.ts"
     ]
   },
   "peerDependencies": {
