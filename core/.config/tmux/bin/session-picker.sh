@@ -3,8 +3,43 @@ set -euo pipefail
 
 script_path="${BASH_SOURCE[0]}"
 quoted_script_path="$(printf '%q' "$script_path")"
+cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}/tmux-session-picker"
+worktree_cache="$cache_dir/worktrees.tsv"
+worktree_lock_dir="$cache_dir/worktrees.lock"
+worktree_cache_ttl=60
+pi_cache="$cache_dir/pi-sessions.tsv"
+pi_lock_dir="$cache_dir/pi-sessions.lock"
+pi_cache_ttl=5
 
-active_pi_sessions() {
+cache_mtime() {
+  stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null || printf '0'
+}
+
+cache_file_fresh() {
+  local file="$1" ttl="$2" now mtime
+  [[ -f "$file" ]] || return 1
+  now="$(date +%s)"
+  mtime="$(cache_mtime "$file")"
+  [[ "$mtime" =~ ^[0-9]+$ ]] || return 1
+  (( now - mtime < ttl ))
+}
+
+acquire_cache_lock() {
+  local lock_dir="$1" stale_after="${2:-300}" now mtime
+  mkdir "$lock_dir" 2>/dev/null && return 0
+  [[ -d "$lock_dir" ]] || return 1
+
+  now="$(date +%s)"
+  mtime="$(cache_mtime "$lock_dir")"
+  [[ "$mtime" =~ ^[0-9]+$ ]] || return 1
+  if (( now - mtime > stale_after )); then
+    rmdir "$lock_dir" 2>/dev/null || return 1
+    mkdir "$lock_dir" 2>/dev/null && return 0
+  fi
+  return 1
+}
+
+active_pi_sessions_raw() {
   command -v tmux >/dev/null 2>&1 || return 0
 
   while IFS=$'\t' read -r target pane_pid cwd; do
@@ -26,8 +61,68 @@ active_pi_sessions() {
   done < <(tmux list-panes -a -F '#{session_name}:#{window_index}.#{pane_index}	#{pane_pid}	#{pane_current_path}' 2>/dev/null || true)
 }
 
+refresh_pi_cache() {
+  mkdir -p "$cache_dir"
+  if ! acquire_cache_lock "$pi_lock_dir"; then
+    return 0
+  fi
+
+  local tmp status=0
+  tmp="$(mktemp "$cache_dir/pi-sessions.XXXXXX")"
+  active_pi_sessions_raw | python3 -c '
+import os
+import signal
+import subprocess
+import sys
+
+signal.signal(signal.SIGPIPE, signal.SIG_DFL)
+
+sessions = {}
+for line in sys.stdin:
+    cwd, sep, status = line.rstrip("\n").partition("\t")
+    if not cwd or not sep:
+        continue
+    try:
+        root = subprocess.check_output(
+            ["git", "-C", cwd, "rev-parse", "--show-toplevel"],
+            stderr=subprocess.DEVNULL,
+            text=True,
+            timeout=0.5,
+        ).strip() or cwd
+    except Exception:
+        root = cwd
+
+    root = os.path.realpath(root)
+    # If multiple pi sessions share a root, working wins over idle.
+    if sessions.get(root) != "working":
+        sessions[root] = status or "idle"
+
+for root, status in sessions.items():
+    print(f"{root}\t{status}")
+' >"$tmp" || status=$?
+  if (( status == 0 )); then
+    mv "$tmp" "$pi_cache"
+  else
+    rm -f "$tmp"
+  fi
+  rmdir "$pi_lock_dir" 2>/dev/null || true
+  return "$status"
+}
+
+refresh_pi_cache_async() {
+  cache_file_fresh "$pi_cache" "$pi_cache_ttl" && return 0
+  (
+    refresh_pi_cache
+  ) </dev/null >/dev/null 2>&1 &
+}
+
 export_active_pi_sessions() {
-  PI_SESSION_PICKER_PI_SESSIONS="$(active_pi_sessions | awk -F '\t' 'NF >= 2 && !seen[$1]++')"
+  if [[ ! -f "$pi_cache" ]]; then
+    refresh_pi_cache 2>/dev/null || true
+  else
+    refresh_pi_cache_async
+  fi
+  PI_SESSION_PICKER_PI_SESSIONS="$(cat "$pi_cache" 2>/dev/null || true)"
   export PI_SESSION_PICKER_PI_SESSIONS
 }
 
@@ -184,7 +279,7 @@ for path in raw_paths:
 '
 }
 
-list_worktrees() {
+discover_worktrees_raw() {
   candidate_repo_roots | python3 -c '
 import os
 import signal
@@ -192,25 +287,6 @@ import subprocess
 import sys
 
 signal.signal(signal.SIGPIPE, signal.SIG_DFL)
-
-ICON = ""
-
-pi_sessions = {}
-for line in os.environ.get("PI_SESSION_PICKER_PI_SESSIONS", "").splitlines():
-    path, sep, status = line.partition("\t")
-    if path and sep:
-        pi_sessions[os.path.realpath(path)] = status or "idle"
-
-
-def pi_marker(path):
-    if not path:
-        return ""
-    status = pi_sessions.get(os.path.realpath(path))
-    if status == "working":
-        return "π… "
-    if status == "idle":
-        return "π "
-    return ""
 
 
 def parse_worktree_porcelain(text):
@@ -300,10 +376,85 @@ for root in [line.rstrip("\n") for line in sys.stdin if line.strip()]:
 
         branch = ref_label(record)
         locked = " 🔒" if "locked" in record else ""
-        marker = pi_marker(path)
-        name = f"{marker}{label}:{branch}{locked}  {path}"
-        print(f"{ICON} {name}\t{path}\tworktree")
+        print(f"{path}\t{label}\t{branch}\t{locked}")
 '
+}
+
+refresh_worktree_cache() {
+  mkdir -p "$cache_dir"
+  if ! acquire_cache_lock "$worktree_lock_dir"; then
+    return 0
+  fi
+
+  local tmp status=0
+  tmp="$(mktemp "$cache_dir/worktrees.XXXXXX")"
+  discover_worktrees_raw >"$tmp" || status=$?
+  if (( status == 0 )); then
+    mv "$tmp" "$worktree_cache"
+  else
+    rm -f "$tmp"
+  fi
+  rmdir "$worktree_lock_dir" 2>/dev/null || true
+  return "$status"
+}
+
+refresh_worktree_cache_async() {
+  cache_file_fresh "$worktree_cache" "$worktree_cache_ttl" && return 0
+  (
+    refresh_worktree_cache
+  ) </dev/null >/dev/null 2>&1 &
+}
+
+render_worktrees() {
+  python3 -c '
+import os
+import signal
+import sys
+
+signal.signal(signal.SIGPIPE, signal.SIG_DFL)
+
+ICON = ""
+
+pi_sessions = {}
+for line in os.environ.get("PI_SESSION_PICKER_PI_SESSIONS", "").splitlines():
+    path, sep, status = line.partition("\t")
+    if path and sep:
+        pi_sessions[os.path.realpath(path)] = status or "idle"
+
+
+def pi_marker(path):
+    status = pi_sessions.get(os.path.realpath(path))
+    if status == "working":
+        return "π… "
+    if status == "idle":
+        return "π "
+    return ""
+
+
+seen_paths = set()
+for line in sys.stdin:
+    path, label, branch, locked = (line.rstrip("\n").split("\t") + [""] * 4)[:4]
+    if not path or path in seen_paths or not os.path.isdir(path):
+        continue
+    seen_paths.add(path)
+    name = f"{pi_marker(path)}{label}:{branch}{locked}  {path}"
+    print(f"{ICON} {name}\t{path}\tworktree")
+'
+}
+
+list_worktrees() {
+  local on_miss="${1:-async}"
+  mkdir -p "$cache_dir"
+  if [[ ! -f "$worktree_cache" ]]; then
+    if [[ "$on_miss" == "sync" ]]; then
+      refresh_worktree_cache 2>/dev/null || true
+    else
+      refresh_worktree_cache_async
+    fi
+  else
+    refresh_worktree_cache_async
+  fi
+  [[ -f "$worktree_cache" ]] && render_worktrees <"$worktree_cache"
 }
 
 list_sessions() {
@@ -314,13 +465,13 @@ list_sessions() {
   case "$mode" in
     all)
       sesh_lines all
-      list_worktrees
+      list_worktrees async
       ;;
     tmux|zoxide)
       sesh_lines "$mode"
       ;;
     worktree)
-      list_worktrees
+      list_worktrees sync
       ;;
     *)
       printf 'Unknown session list mode: %s\n' "$mode" >&2

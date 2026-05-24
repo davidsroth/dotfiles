@@ -20,7 +20,7 @@ Modular tmux configuration with vim-like keybindings and session management.
 - `C-g` - Main prefix key (instead of default `C-b`)
 
 ### Session Management
-- `C-g s` - Sesh session picker (tmux + zoxide + git worktrees; `ctrl-t` tmux only, `ctrl-z` zoxide only, `ctrl-w` worktrees only)
+- `C-g s` - Sesh session picker (tmux + zoxide + cached git worktrees; `ctrl-t` tmux only, `ctrl-z` zoxide only, `ctrl-w` worktrees only; `π`/`π…` mark idle/working pi sessions at that root)
 - `C-g C-f` - tmux-fzf picker
 - `C-g C-c` - Create new session
 - `C-s` / `C-g S` - Switch to last session
@@ -90,6 +90,8 @@ Uses `sesh` for enhanced session management. Install with:
 ```bash
 brew install sesh
 ```
+
+The custom picker caches expensive git worktree discovery under `~/.cache/tmux-session-picker/` and refreshes it in the background, so the popup opens from tmux/zoxide data immediately. Pi-session markers are also cached briefly and normalized to git/worktree roots.
 
 ## Mouse Support
 
