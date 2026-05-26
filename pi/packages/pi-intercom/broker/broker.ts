@@ -16,6 +16,11 @@ interface ConnectedSession {
   info: SessionInfo;
 }
 
+interface SessionLookup {
+  targets: ConnectedSession[];
+  match: "id" | "name" | "idPrefix" | "none";
+}
+
 function isAttachment(value: unknown): value is Attachment {
   if (typeof value !== "object" || value === null) {
     return false;
@@ -123,6 +128,18 @@ class IntercomBroker {
   private handleConnection(socket: net.Socket): void {
     let sessionId: string | null = null;
 
+    const cleanupRegisteredSession = (): void => {
+      if (!sessionId) {
+        return;
+      }
+      const id = sessionId;
+      sessionId = null;
+      if (this.sessions.delete(id)) {
+        this.broadcast({ type: "session_left", sessionId: id }, id);
+        this.scheduleShutdownCheck();
+      }
+    };
+
     const reader = createMessageReader((msg) => {
       this.handleMessage(socket, msg, sessionId, (id) => {
         sessionId = id;
@@ -132,18 +149,14 @@ class IntercomBroker {
     });
 
     socket.on("data", reader);
-
-    socket.on("close", () => {
-      if (sessionId) {
-        this.sessions.delete(sessionId);
-        this.broadcast({ type: "session_left", sessionId }, sessionId);
-
-        this.scheduleShutdownCheck();
-      }
-    });
+    socket.on("close", cleanupRegisteredSession);
 
     socket.on("error", (error) => {
       console.error("Socket error:", error);
+      cleanupRegisteredSession();
+      if (!socket.destroyed) {
+        socket.destroy();
+      }
     });
   }
 
@@ -231,8 +244,10 @@ class IntercomBroker {
           break;
         }
 
-        const targets = this.findSessions(clientMessage.to);
+        const lookup = this.findSessions(clientMessage.to);
+        const targets = lookup.targets;
         if (targets.length === 1) {
+          const target = targets[0];
           const fromSession = this.sessions.get(currentId);
           if (!fromSession) {
             writeMessage(socket, {
@@ -242,11 +257,30 @@ class IntercomBroker {
             });
             break;
           }
-          writeMessage(targets[0].socket, {
-            type: "message",
-            from: fromSession.info,
-            message,
-          });
+          if (!this.isSocketWritable(target.socket)) {
+            this.removeSession(target.info.id, "Session disconnected");
+            writeMessage(socket, {
+              type: "delivery_failed",
+              messageId: message.id,
+              reason: "Session disconnected",
+            });
+            break;
+          }
+          try {
+            writeMessage(target.socket, {
+              type: "message",
+              from: fromSession.info,
+              message,
+            });
+          } catch {
+            this.removeSession(target.info.id, "Session disconnected");
+            writeMessage(socket, {
+              type: "delivery_failed",
+              messageId: message.id,
+              reason: "Session disconnected",
+            });
+            break;
+          }
           writeMessage(socket, { type: "delivered", messageId: message.id });
           break;
         }
@@ -255,7 +289,9 @@ class IntercomBroker {
           writeMessage(socket, {
             type: "delivery_failed",
             messageId: message.id,
-            reason: `Multiple sessions named \"${clientMessage.to}\" are connected. Use the session ID instead.`,
+            reason: lookup.match === "idPrefix"
+              ? `Multiple sessions match ID prefix \"${clientMessage.to}\". Use the full session ID instead.`
+              : `Multiple sessions named \"${clientMessage.to}\" are connected. Use the session ID instead.`,
           });
           break;
         }
@@ -300,14 +336,45 @@ class IntercomBroker {
     }
   }
 
-  private findSessions(nameOrId: string): ConnectedSession[] {
-    const byId = this.sessions.get(nameOrId);
-    if (byId) {
-      return [byId];
+  private findSessions(nameOrId: string): SessionLookup {
+    const target = nameOrId.trim();
+    if (!target) {
+      return { targets: [], match: "none" };
     }
 
-    const lowerName = nameOrId.toLowerCase();
-    return Array.from(this.sessions.values()).filter(session => session.info.name?.toLowerCase() === lowerName);
+    const byId = this.sessions.get(target);
+    if (byId) {
+      return { targets: [byId], match: "id" };
+    }
+
+    const lowerTarget = target.toLowerCase();
+    const byName = Array.from(this.sessions.values()).filter(session => session.info.name?.toLowerCase() === lowerTarget);
+    if (byName.length > 0) {
+      return { targets: byName, match: "name" };
+    }
+
+    const byIdPrefix = Array.from(this.sessions.values()).filter(session => session.info.id.toLowerCase().startsWith(lowerTarget));
+    if (byIdPrefix.length > 0) {
+      return { targets: byIdPrefix, match: "idPrefix" };
+    }
+
+    return { targets: [], match: "none" };
+  }
+
+  private isSocketWritable(socket: net.Socket): boolean {
+    return !socket.destroyed && !socket.writableEnded && socket.writable;
+  }
+
+  private removeSession(sessionId: string, reason: string): void {
+    const session = this.sessions.get(sessionId);
+    if (!session) {
+      return;
+    }
+    this.sessions.delete(sessionId);
+    session.socket.destroy();
+    console.log(`Removed intercom session ${sessionId}: ${reason}`);
+    this.broadcast({ type: "session_left", sessionId }, sessionId);
+    this.scheduleShutdownCheck();
   }
 
   private broadcast(msg: BrokerMessage, exclude?: string): void {

@@ -1,6 +1,7 @@
 {
-  "name": "pi-intercom",
-  "version": "0.6.0",
+  "name": "@davidroth/pi-intercom",
+  "version": "0.7.0",
+  "author": "David Roth",
   "license": "MIT",
   "type": "module",
   "main": "index.ts",

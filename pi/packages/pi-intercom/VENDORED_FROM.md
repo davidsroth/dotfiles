@@ -1,9 +1,22 @@
-# Vendored from
+# Forked from
+
+This package is now maintained as `@davidroth/pi-intercom` in David Roth's
+dotfiles repo.
+
+## Original upstream
 
 - Repository: https://github.com/nicobailon/pi-intercom
 - Commit: `5caa4aa1bd060cf0aebbf1a5dfbb1abb6e23e457`
 - Released as: `pi-intercom@0.6.0`
 - Retrieved: 2026-05-04
+- License: MIT
+
+## Local divergence
+
+- Diverged: 2026-05-25
+- New package identity: `@davidroth/pi-intercom@0.7.0`
+- Directory remains `pi/packages/pi-intercom/` so existing dotfiles package
+  paths and broker scripts continue to work.
 
 Notes:
 - `.git/`, `.github/`, and `node_modules/` were omitted from the vendored copy.

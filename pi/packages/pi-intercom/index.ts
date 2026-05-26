@@ -696,6 +696,14 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
       }
       handleIncomingMessage(liveContext, from, message);
     });
+    nextClient.on("session_left", (sessionId: string) => {
+      if (client !== nextClient || !replyWaiter) {
+        return;
+      }
+      if (replyWaiter.from.toLowerCase() === sessionId.toLowerCase()) {
+        rejectReplyWaiter(new Error("Recipient session ended before replying"));
+      }
+    });
     nextClient.on("disconnected", (error: Error) => {
       if (client !== nextClient) {
         return;
@@ -780,17 +788,31 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
     return nextReconnectPromise;
   }
   async function resolveSessionTarget(activeClient: IntercomClient, nameOrId: string): Promise<string | null> {
+    const target = nameOrId.trim();
+    if (!target) {
+      return null;
+    }
+
     const sessions = await activeClient.listSessions();
-    const byId = sessions.find(s => s.id === nameOrId);
+    const lowerTarget = target.toLowerCase();
+    const byId = sessions.find(s => s.id.toLowerCase() === lowerTarget);
     if (byId) {
       return byId.id;
     }
-    const lowerName = nameOrId.toLowerCase();
-    const byName = sessions.filter(s => s.name?.toLowerCase() === lowerName);
+
+    const byName = sessions.filter(s => s.name?.toLowerCase() === lowerTarget);
     if (byName.length > 1) {
       throw new Error(`Multiple sessions named "${nameOrId}" are connected. Use the session ID instead.`);
     }
-    return byName[0]?.id ?? null;
+    if (byName.length === 1) {
+      return byName[0]!.id;
+    }
+
+    const byIdPrefix = sessions.filter(s => s.id.toLowerCase().startsWith(lowerTarget));
+    if (byIdPrefix.length > 1) {
+      throw new Error(`Multiple sessions match ID prefix "${nameOrId}". Use the full session ID instead.`);
+    }
+    return byIdPrefix[0]?.id ?? null;
   }
   function deliverLocalSubagentRelayMessage(sender: "subagent-control" | "subagent-result", status: string, messageText: string): void {
     const now = Date.now();

@@ -7,7 +7,8 @@ Current packages:
 - `pi-vim`
 - `pi-subagents`
 - `pi-btw`
-- `pi-intercom`
+- `@davidroth/pi-intercom` (directory: `pi-intercom`)
+- `pi-intercom-tailnet`
 - `pi-qna`
 - `pi-plan-review`
 

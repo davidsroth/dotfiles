@@ -288,6 +288,26 @@ async function waitForSessionModel(client: InstanceType<typeof IntercomClient>, 
   throw new Error(`Timed out waiting for ${name} model ${model}; saw ${JSON.stringify(sessions.map((session) => ({ name: session.name, model: session.model })))}`);
 }
 
+test("broker routes messages addressed by unique session ID prefix", { concurrency: false }, async () => {
+  const { planner, orchestrator, cleanup } = await setupClients();
+
+  try {
+    const targetPrefix = orchestrator.sessionId!.slice(0, 8);
+    const messagePromise = once(orchestrator, "message") as Promise<[SessionInfo, Message]>;
+    const delivered = await planner.send(targetPrefix, {
+      messageId: "short-prefix-send",
+      text: "hello by short id",
+    });
+
+    assert.equal(delivered.delivered, true);
+    const [from, message] = await messagePromise;
+    assert.equal(from.id, planner.sessionId);
+    assert.equal(message.content.text, "hello by short id");
+  } finally {
+    await cleanup();
+  }
+});
+
 test("intercom tool renders compact call and result rows", async () => {
   const { default: piIntercomExtension } = await import("./index.ts");
   const harness = createExtensionHarness();

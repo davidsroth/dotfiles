@@ -4,7 +4,10 @@
 
 # Pi Intercom
 
-Direct 1:1 messaging between pi sessions on the same machine. Send context, findings, or requests from one session to another — whether you're driving the conversation or letting agents coordinate.
+David Roth's maintained fork of pi-intercom (`@davidroth/pi-intercom`).
+Direct 1:1 messaging between pi sessions on the same machine. Send context,
+findings, or requests from one session to another — whether you're driving the
+conversation or letting agents coordinate.
 
 ```text
 User flow: press Alt+M or run /intercom to pick a session and send a message
@@ -29,7 +32,7 @@ Each pi session that has `pi-intercom` loaded and enabled connects to a tiny loc
 ## Install
 
 ```bash
-pi install npm:pi-intercom
+pi install npm:@davidroth/pi-intercom
 ```
 
 Then restart Pi. The extension auto-connects to the broker on startup and registers the bundled `pi-intercom` skill for common coordination patterns.
@@ -49,7 +52,7 @@ Coordinate with other local pi sessions on related codebases. Use `/skill:pi-int
 ```
 
 A session becomes intercom-connected when all of these are true:
-- the `pi-intercom` extension is installed and loaded in that session
+- the `@davidroth/pi-intercom` extension is installed and loaded in that session
 - `enabled` is not set to `false` in `~/.pi/agent/intercom/config.json`
 - the session has started or reloaded after the extension was installed
 - the local broker is running or can be auto-started
@@ -313,7 +316,7 @@ The supervisor can reply with plain JSON or a fenced `json` block. If the reply 
 | Parameter | Type | Description |
 |-----------|------|-------------|
 | `action` | string | `"list"`, `"send"`, `"ask"`, `"reply"`, `"pending"`, or `"status"` |
-| `to` | string | Target session name or ID (for send/ask, or to disambiguate reply) |
+| `to` | string | Target session name, full session ID, or unique session ID prefix (for send/ask, or to disambiguate reply) |
 | `message` | string | Message text (for send/ask/reply) |
 | `attachments` | array | Optional `file`, `snippet`, or `context` attachments |
 | `replyTo` | string | Optional message ID for threading or replying to an `ask` |
@@ -336,7 +339,7 @@ Only registered in sessions where `pi-subagents` supplied the required child bri
 
 ### intercom actions
 
-**`list`** — Returns the current session plus other active intercom-connected sessions with name, short ID, working directory, model, and live status. Status is derived automatically from Pi lifecycle events: `idle`, `thinking`, or `tool:<name>`.
+**`list`** — Returns the current session plus other active intercom-connected sessions with name, short ID, working directory, model, and live status. The short ID shown in parentheses is addressable when it uniquely matches a session ID prefix. Status is derived automatically from Pi lifecycle events: `idle`, `thinking`, or `tool:<name>`.
 
 **`send`** — Sends a message to the specified session. By default it sends immediately, including in interactive sessions. Set `confirmSend: true` in config if you want a confirmation dialog for non-reply sends. Replies that include `replyTo` skip confirmation. Returns delivery confirmation.
 

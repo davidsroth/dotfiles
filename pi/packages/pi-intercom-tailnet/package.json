@@ -1,0 +1,41 @@
+{
+  "name": "pi-intercom-tailnet",
+  "version": "0.1.0-pre",
+  "license": "MIT",
+  "type": "module",
+  "main": "index.ts",
+  "private": true,
+  "files": [
+    "index.ts",
+    "types.ts",
+    "config.ts",
+    "framing.ts",
+    "tailscale.ts",
+    "relay/**/*.ts",
+    "skills/**/*"
+  ],
+  "scripts": {
+    "test": "tsx --test test/*.test.ts"
+  },
+  "keywords": [
+    "pi-package",
+    "tailscale"
+  ],
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ]
+  },
+  "peerDependencies": {
+    "@davidroth/pi-intercom": "*",
+    "@mariozechner/pi-coding-agent": "*"
+  },
+  "peerDependenciesMeta": {
+    "@davidroth/pi-intercom": {
+      "optional": true
+    }
+  },
+  "dependencies": {
+    "tsx": "^4.20.0"
+  }
+}
