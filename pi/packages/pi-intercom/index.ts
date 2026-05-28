@@ -543,6 +543,7 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
       startedAt: sessionStartedAt,
       lastActivity: Date.now(),
       status: currentStatus(),
+      originSessionId: currentSessionId,
     };
   }
   function syncPresenceIdentity(sessionId: string): void {

@@ -308,6 +308,55 @@ test("broker routes messages addressed by unique session ID prefix", { concurren
   }
 });
 
+test("register evicts a prior registration with the same originSessionId", { concurrency: false }, async () => {
+  const { planner, cleanup } = await setupClients();
+
+  try {
+    const originSessionId = "session-reconnect-origin";
+    const first = new IntercomClient();
+    await first.connect({
+      name: "reconnecting-worker",
+      cwd: repoDir,
+      model: "test-model",
+      pid: process.pid,
+      startedAt: Date.now(),
+      lastActivity: Date.now(),
+      originSessionId,
+    });
+    const firstId = first.sessionId;
+    assert.ok(firstId);
+
+    const leftPromise = once(planner, "session_left") as Promise<[string]>;
+
+    const second = new IntercomClient();
+    await second.connect({
+      name: "reconnecting-worker",
+      cwd: repoDir,
+      model: "test-model",
+      pid: process.pid,
+      startedAt: Date.now(),
+      lastActivity: Date.now(),
+      originSessionId,
+    });
+    const secondId = second.sessionId;
+    assert.ok(secondId);
+    assert.notEqual(secondId, firstId);
+
+    const [leftId] = await leftPromise;
+    assert.equal(leftId, firstId);
+
+    const sessions = await planner.listSessions();
+    const matching = sessions.filter(s => s.originSessionId === originSessionId);
+    assert.equal(matching.length, 1);
+    assert.equal(matching[0]?.id, secondId);
+
+    await second.disconnect().catch(() => undefined);
+    await first.disconnect().catch(() => undefined);
+  } finally {
+    await cleanup();
+  }
+});
+
 test("intercom tool renders compact call and result rows", async () => {
   const { default: piIntercomExtension } = await import("./index.ts");
   const harness = createExtensionHarness();

@@ -96,6 +96,10 @@ function isSessionRegistration(value: unknown): value is Omit<SessionInfo, "id">
     return false;
   }
 
+  if (session.originSessionId !== undefined && typeof session.originSessionId !== "string") {
+    return false;
+  }
+
   return session.status === undefined || typeof session.status === "string";
 }
 
@@ -197,7 +201,23 @@ class IntercomBroker {
         if (currentId) {
           throw new Error("Received duplicate register message");
         }
-        
+
+        // Evict any prior registration from the same pi session. When a
+        // session reconnects (transient drop or broker restart) it registers
+        // with a fresh UUID; the old row is only cleaned when its previous
+        // socket emits `close`, which does not always fire. Keying eviction on
+        // the stable originSessionId removes the duplicate immediately, even
+        // when the stale socket still looks writable.
+        const originSessionId = clientMessage.session.originSessionId;
+        if (originSessionId) {
+          const superseded = Array.from(this.sessions.values()).filter(
+            existing => existing.info.originSessionId === originSessionId && existing.socket !== socket,
+          );
+          for (const existing of superseded) {
+            this.removeSession(existing.info.id, "superseded by reconnect");
+          }
+        }
+
         const id = randomUUID();
         setId(id);
         const info: SessionInfo = { ...clientMessage.session, id };

@@ -101,6 +101,10 @@ function isSessionInfo(value: unknown): value is SessionInfo {
     return false;
   }
 
+  if (session.originSessionId !== undefined && typeof session.originSessionId !== "string") {
+    return false;
+  }
+
   return session.status === undefined || typeof session.status === "string";
 }
 

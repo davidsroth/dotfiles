@@ -7,6 +7,14 @@ export interface SessionInfo {
   startedAt: number;
   lastActivity: number;
   status?: string;
+  /**
+   * Stable per-session identity (the pi session id) that survives broker
+   * reconnects. The broker uses this to evict a prior registration from the
+   * same session when it reconnects with a fresh UUID, so duplicate rows do
+   * not accumulate when the old socket's `close` never fires. Optional for
+   * backward compatibility with clients that predate this field.
+   */
+  originSessionId?: string;
 }
 
 export interface Message {
