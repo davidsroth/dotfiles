@@ -14,6 +14,8 @@ interface SendOptions {
   attachments?: Attachment[];
   replyTo?: string;
   expectsReply?: boolean;
+  /** Mark this as an out-of-band "aside" question (see Message.aside). */
+  aside?: boolean;
   messageId?: string;
 }
 
@@ -441,6 +443,7 @@ export class IntercomClient extends EventEmitter {
       timestamp: Date.now(),
       replyTo: options.replyTo,
       expectsReply: options.expectsReply,
+      aside: options.aside,
       content: {
         text: options.text,
         attachments: options.attachments,

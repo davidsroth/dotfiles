@@ -48,6 +48,10 @@ export function isMessage(value: unknown): value is Message {
     return false;
   }
 
+  if (message.aside !== undefined && typeof message.aside !== "boolean") {
+    return false;
+  }
+
   if (typeof message.content !== "object" || message.content === null) {
     return false;
   }

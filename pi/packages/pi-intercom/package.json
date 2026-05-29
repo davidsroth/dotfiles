@@ -11,6 +11,7 @@
     "config.ts",
     "reply-tracker.ts",
     "presence-name.ts",
+    "side-session.ts",
     "broker/broker.ts",
     "broker/client.ts",
     "broker/framing.ts",
@@ -35,6 +36,7 @@
     ]
   },
   "peerDependencies": {
+    "@mariozechner/pi-ai": "*",
     "@mariozechner/pi-coding-agent": "*",
     "@mariozechner/pi-tui": "*"
   },

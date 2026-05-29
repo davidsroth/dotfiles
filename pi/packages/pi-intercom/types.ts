@@ -34,6 +34,16 @@ export interface Message {
   timestamp: number;
   replyTo?: string;
   expectsReply?: boolean;
+  /**
+   * Marks this as a one-off "aside" question: the recipient answers it out of
+   * band using an in-memory forked sub-session seeded with its current
+   * context, instead of injecting it into the timeline / triggering a turn.
+   * The recipient's persisted history is never touched and its current work is
+   * not interrupted. The answer comes back through the normal reply path
+   * (`replyTo` = this message id). Optional and forward-compatible: peers that
+   * predate this field simply treat the message as a normal send.
+   */
+  aside?: boolean;
   content: {
     text: string;
     attachments?: Attachment[];

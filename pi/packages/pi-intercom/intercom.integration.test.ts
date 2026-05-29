@@ -314,6 +314,34 @@ test("broker routes messages addressed by unique session ID prefix", { concurren
   }
 });
 
+test("the aside flag survives the broker round-trip", { concurrency: false }, async () => {
+  const { planner, orchestrator, cleanup } = await setupClients();
+
+  try {
+    const messagePromise = once(orchestrator, "message") as Promise<[SessionInfo, Message]>;
+    const delivered = await planner.send(orchestrator.sessionId!, {
+      messageId: "aside-roundtrip",
+      text: "quick question",
+      expectsReply: true,
+      aside: true,
+    });
+    assert.equal(delivered.delivered, true);
+    const [, message] = await messagePromise;
+    // The broker forwards the message verbatim; the recipient uses message.aside
+    // to route it to the out-of-band answerer instead of the timeline.
+    assert.equal(message.aside, true);
+    assert.equal(message.expectsReply, true);
+
+    // A normal send leaves aside unset so it follows the regular delivery path.
+    const normalPromise = once(orchestrator, "message") as Promise<[SessionInfo, Message]>;
+    await planner.send(orchestrator.sessionId!, { messageId: "normal-roundtrip", text: "hi" });
+    const [, normal] = await normalPromise;
+    assert.notEqual(normal.aside, true);
+  } finally {
+    await cleanup();
+  }
+});
+
 test("broker rejects a message a session addresses to itself", { concurrency: false }, async () => {
   const { planner, cleanup } = await setupClients();
 

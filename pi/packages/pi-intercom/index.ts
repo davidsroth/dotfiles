@@ -16,6 +16,7 @@ import { loadConfig, type IntercomConfig } from "./config.ts";
 import type { SessionInfo, Message, Attachment } from "./types.ts";
 import { ReplyTracker } from "./reply-tracker.ts";
 import { resolveIntercomPresenceName } from "./presence-name.ts";
+import { answerAside } from "./side-session.ts";
 
 const SUBAGENT_CONTROL_INTERCOM_EVENT = "subagent:control-intercom";
 const SUBAGENT_RESULT_INTERCOM_EVENT = "subagent:result-intercom";
@@ -435,6 +436,9 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
   let reconnectAttempt = 0;
   let shuttingDown = false;
   let disposed = true;
+  // In-flight "aside" answers (forked sub-sessions). Tracked so they can be
+  // aborted on shutdown/reload instead of leaking an LLM turn.
+  const activeAsides = new Set<AbortController>();
   let runtimeStarted = false;
   let runtimeGeneration = 0;
   let agentRunning = false;
@@ -715,6 +719,44 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
     }
     scheduleInboundFlush();
   }
+  // Answer an inbound "aside" question out of band: run it against an
+  // in-memory fork of this session's context and send the answer back through
+  // the normal reply path. Intentionally does NOT gate on idle, queue, trigger
+  // a turn, or write to history — the point is to answer concurrently without
+  // interrupting the recipient or polluting its transcript.
+  function answerAsideQuestion(ctx: ExtensionContext, from: SessionInfo, message: Message, generation = runtimeGeneration): void {
+    const senderDisplay = from.name || from.id.slice(0, 8);
+    const attachmentText = message.content.attachments?.length
+      ? formatAttachments(message.content.attachments)
+      : "";
+    const question = `${message.content.text}${attachmentText}`;
+    const controller = new AbortController();
+    activeAsides.add(controller);
+    void (async () => {
+      let answer: string;
+      let failed = false;
+      try {
+        const liveCtx = getLiveContext(ctx, generation);
+        if (!liveCtx) return;
+        answer = await answerAside(liveCtx, question, { signal: controller.signal });
+      } catch (error) {
+        failed = true;
+        answer = `Could not answer the aside: ${getErrorMessage(error)}`;
+      } finally {
+        activeAsides.delete(controller);
+      }
+      const replyClient = client;
+      if (!replyClient?.isConnected()) return;
+      try {
+        await replyClient.send(from.id, { text: answer, replyTo: message.id });
+      } catch {
+        // Best-effort; the asker's wait will time out if the reply can't be sent.
+      }
+      if (!failed) {
+        notifyIfLive(ctx, `Answered an aside from ${senderDisplay}`, "info", generation);
+      }
+    })();
+  }
   function handleIncomingMessage(ctx: ExtensionContext, from: SessionInfo, message: Message): void {
     const messageGeneration = runtimeGeneration;
     const liveContext = getLiveContext(ctx, messageGeneration);
@@ -730,6 +772,13 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
         replyWaiter.resolve(message);
         return;
       }
+    }
+    // An inbound aside question is answered out of band and never enters the
+    // timeline/history. (Its eventual reply is a normal message that the
+    // replyWaiter branch above resolves on the asker's side.)
+    if (message.aside && !message.replyTo) {
+      answerAsideQuestion(liveContext, from, message, messageGeneration);
+      return;
     }
     const attachmentText = message.content.attachments?.length
       ? formatAttachments(message.content.attachments)
@@ -1058,6 +1107,8 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
     clearPresenceSyncTimer();
     lastSentStatus = null;
     rejectReplyWaiter(new Error("Session shutting down"));
+    for (const controller of activeAsides) controller.abort();
+    activeAsides.clear();
     replyTracker.reset();
     pendingIdleMessages.length = 0;
     clearInboundFlushTimer();
@@ -1502,7 +1553,8 @@ Use this to communicate findings, request help, or coordinate work with other se
 Usage:
   intercom({ action: "list" })                    → List active sessions
   intercom({ action: "send", to: "session-name", message: "..." })  → Send message
-  intercom({ action: "ask", to: "session-name", message: "..." })   → Ask and wait for reply
+  intercom({ action: "ask", to: "session-name", message: "..." })   → Ask and wait for reply (interrupts the peer, enters its history)
+  intercom({ action: "aside", to: "session-name", message: "..." }) → Ask a one-off question answered out of band: the peer answers from its current context without interrupting its work or adding anything to its history
   intercom({ action: "reply", message: "..." })                      → Reply to the active/single pending ask
   intercom({ action: "pending" })                                      → List unresolved inbound asks
   intercom({ action: "status" })                  → Show connection status`,
@@ -1511,13 +1563,13 @@ Usage:
 
     parameters: Type.Object({
       action: Type.String({
-        description: "Action: 'list', 'send', 'ask', 'reply', 'pending', or 'status'",
+        description: "Action: 'list', 'send', 'ask', 'aside', 'reply', 'pending', or 'status'",
       }),
       to: Type.Optional(Type.String({
-        description: "Target session name or ID (for 'send', 'ask', or disambiguating 'reply')",
+        description: "Target session name or ID (for 'send', 'ask', 'aside', or disambiguating 'reply')",
       })),
       message: Type.Optional(Type.String({
-        description: "Message to send (for 'send', 'ask', or 'reply' action)",
+        description: "Message to send (for 'send', 'ask', 'aside', or 'reply' action)",
       })),
       attachments: Type.Optional(Type.Array(Type.Object({
         type: Type.Union([Type.Literal("file"), Type.Literal("snippet"), Type.Literal("context")]),
@@ -1661,7 +1713,12 @@ Usage:
           }
         }
 
-        case "ask": {
+        case "ask":
+        case "aside": {
+          // `aside` is `ask` that the recipient answers out of band (forked
+          // sub-session) without interrupting its work or touching its
+          // history. The asker side is identical: send and await the reply.
+          const isAside = action === "aside";
           if (!to || !message) {
             return {
               content: [{ type: "text", text: "Missing 'to' or 'message' parameter" }],
@@ -1726,6 +1783,7 @@ Usage:
               attachments,
               replyTo,
               expectsReply: true,
+              aside: isAside,
             });
 
             if (!sendResult.delivered) {
@@ -1765,7 +1823,7 @@ Usage:
               timestamp: replyMessage.timestamp,
             });
             return {
-              content: [{ type: "text", text: `**Reply from ${to}:**\n${replyText}${replyAttachments}` }],
+              content: [{ type: "text", text: `**${isAside ? "Aside reply" : "Reply"} from ${to}:**\n${replyText}${replyAttachments}` }],
               isError: false,
             };
           } catch (error) {
@@ -1854,7 +1912,7 @@ Usage:
       const messagePreview = previewText(args.message, 96);
       const attachmentCount = Array.isArray(args.attachments) ? args.attachments.length : 0;
       let text = theme.fg("toolTitle", theme.bold("intercom "));
-      text += theme.fg(action === "ask" ? "warning" : action === "reply" ? "success" : "accent", action);
+      text += theme.fg(action === "ask" ? "warning" : action === "aside" ? "mdLink" : action === "reply" ? "success" : "accent", action);
       if (target) {
         text += " " + theme.fg("muted", "→") + " " + theme.fg("accent", target);
       }

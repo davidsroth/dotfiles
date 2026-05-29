@@ -35,6 +35,8 @@ test("isMessage requires id/timestamp/content.text and validates attachments", (
   assert.equal(isMessage({ id: "m1", timestamp: 1, content: { text: 5 } }), false);
   assert.equal(isMessage({ id: "m1", content: { text: "hi" } }), false);
   assert.equal(isMessage({ id: "m1", timestamp: 1, expectsReply: "yes", content: { text: "hi" } }), false);
+  assert.equal(isMessage({ id: "m1", timestamp: 1, aside: true, expectsReply: true, content: { text: "hi" } }), true);
+  assert.equal(isMessage({ id: "m1", timestamp: 1, aside: "yes", content: { text: "hi" } }), false);
   assert.equal(
     isMessage({ id: "m1", timestamp: 1, content: { text: "hi", attachments: [{ type: "bad" }] } }),
     false,

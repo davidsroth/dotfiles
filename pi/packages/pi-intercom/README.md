@@ -187,6 +187,22 @@ intercom({
 // → Reply from planner: Looks good. Move on to task-4.
 ```
 
+**Ask a one-off question without interrupting the peer (`aside`):**
+```typescript
+intercom({
+  action: "aside",
+  to: "worker",
+  message: "Roughly where did you land on the retry backoff — fixed or exponential?"
+})
+// → Aside reply from worker: Exponential, starting at 100ms, capped at 2s.
+```
+Unlike `ask`, an `aside` never interrupts the peer's current turn and never
+enters its session history. The peer answers from a throwaway, in-memory fork
+of its current context (with read-only inspection tools: read/ls/find/grep),
+so its main work and transcript are untouched. The answer comes back to you
+through the normal reply path. Use it for quick "what's your take / where did
+you get to" questions you don't want to derail another session over.
+
 ### Communication Patterns
 
 | Pattern | Action | Why |
@@ -195,6 +211,7 @@ intercom({
 | **Clarification Request** | Worker uses `ask` | Worker needs the answer to proceed. Blocks until reply. |
 | **Discovery Escalation** | Worker uses `ask` | Worker needs approval before changing course. |
 | **Completion Report** | Worker uses `ask` | Planner might have follow-up instructions or the next task. |
+| **Quick Side Question** | Either uses `aside` | One-off question answered out of band — no interruption, nothing added to the peer's history. |
 
 ### Reply Hints
 
@@ -318,7 +335,7 @@ The supervisor can reply with plain JSON or a fenced `json` block. If the reply 
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `action` | string | `"list"`, `"send"`, `"ask"`, `"reply"`, `"pending"`, or `"status"` |
+| `action` | string | `"list"`, `"send"`, `"ask"`, `"aside"`, `"reply"`, `"pending"`, or `"status"` |
 | `to` | string | Target session name, full session ID, or unique session ID prefix (for send/ask, or to disambiguate reply) |
 | `message` | string | Message text (for send/ask/reply) |
 | `attachments` | array | Optional `file`, `snippet`, or `context` attachments |
