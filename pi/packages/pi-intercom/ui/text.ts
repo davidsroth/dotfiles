@@ -5,6 +5,12 @@ export function shortSessionId(sessionId: string): string {
   return sessionId.slice(0, 8);
 }
 
+/** Last path segment of a cwd, for a compact project label (e.g. `~/x/app` → `app`). */
+export function cwdLabel(cwd: string): string {
+  const trimmed = cwd.replace(/\/$/, "");
+  return trimmed.split("/").filter(Boolean).pop() || cwd || "?";
+}
+
 /**
  * Truncate `text` to `maxWidth` display columns, eliding the middle with an
  * ellipsis so both ends remain visible (useful for long paths/ids).

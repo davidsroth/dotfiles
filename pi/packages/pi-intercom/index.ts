@@ -2069,7 +2069,9 @@ Usage:
       }
       currentSession = foundCurrentSession;
       duplicates = duplicateSessionNames(allSessions);
-      sessions = allSessions.filter(s => s.id !== mySessionId);
+      // Single list including this session (the picker tags it `self` and
+      // ignores Enter on it), sorted active-first like the agent picker.
+      sessions = sortSessionsForPicker(allSessions);
     } catch (error) {
       notifyIfLive(ctx, `Failed to list sessions: ${getErrorMessage(error)}`, "error", overlayGeneration);
       return;
@@ -2077,7 +2079,14 @@ Usage:
 
     const selectedSession = await ctx.ui.custom<SessionInfo | undefined>(
       (_tui, theme, keybindings, done) => new SessionListOverlay(theme, keybindings, currentSession, sessions, done),
-      { overlay: true }
+      {
+        overlay: true,
+        overlayOptions: {
+          anchor: "bottom-center",
+          width: "100%",
+          margin: { left: 0, right: 0, bottom: 1, top: 0 },
+        },
+      }
     ).catch(() => undefined);
 
     if (!selectedSession || !getLiveContext(ctx, overlayGeneration)) return;
@@ -2094,7 +2103,14 @@ Usage:
 
     const result = await ctx.ui.custom<ComposeResult>(
       (tui, theme, keybindings, done) => new ComposeOverlay(tui, theme, keybindings, selectedSession, targetLabel, overlayClient, done),
-      { overlay: true }
+      {
+        overlay: true,
+        overlayOptions: {
+          anchor: "bottom-center",
+          width: "100%",
+          margin: { left: 0, right: 0, bottom: 1, top: 0 },
+        },
+      }
     ).catch(() => undefined);
 
     if (result?.sent && result.messageId && result.text && getLiveContext(ctx, overlayGeneration)) {

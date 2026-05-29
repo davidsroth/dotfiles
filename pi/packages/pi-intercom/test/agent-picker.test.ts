@@ -7,7 +7,7 @@ import {
   sessionActivityRank,
   sortSessionsForPicker,
 } from "../ui/agent-picker-util.ts";
-import { cwdLabel } from "../ui/agent-picker.ts";
+import { cwdLabel } from "../ui/text.ts";
 import { middleTruncate } from "../ui/text.ts";
 import type { SessionInfo } from "../types.ts";
 

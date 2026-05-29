@@ -1,34 +1,13 @@
 import type { KeybindingsManager, Theme } from "@mariozechner/pi-coding-agent";
 import type { Component, TUI } from "@mariozechner/pi-tui";
-import { Key, matchesKey, truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
+import { Key, matchesKey } from "@mariozechner/pi-tui";
 import type { SessionInfo } from "../types.js";
 import { activityState, formatAge } from "./agent-picker-util.js";
-import { middleTruncate, shortSessionId } from "./text.js";
-
-function padRight(text: string, width: number): string {
-  const textWidth = visibleWidth(text);
-  if (textWidth >= width) return truncateToWidth(text, width, "");
-  return text + " ".repeat(width - textWidth);
-}
-
-function topBorderWithTitle(theme: Theme, title: string, inner: number): string {
-  const accent = (text: string) => theme.fg("borderAccent", text);
-  const maxTitleWidth = Math.max(0, inner - 4);
-  let padded = ` ${title} `;
-  if (visibleWidth(padded) > maxTitleWidth) {
-    padded = ` ${truncateToWidth(title, Math.max(1, maxTitleWidth - 2), "…")} `;
-  }
-  const tail = Math.max(1, inner - 1 - visibleWidth(padded));
-  return `${accent("╭─")}${padded}${accent("─".repeat(tail))}${accent("╮")}`;
-}
+import { activityMarker, framedOverlay, hintLine, innerWidth } from "./frame.js";
+import { cwdLabel, middleTruncate, shortSessionId } from "./text.js";
 
 function sessionName(session: SessionInfo): string {
   return session.name || "Unnamed session";
-}
-
-export function cwdLabel(cwd: string): string {
-  const trimmed = cwd.replace(/\/$/, "");
-  return trimmed.split("/").filter(Boolean).pop() || cwd || "?";
 }
 
 export class AgentPickerOverlay implements Component {
@@ -141,7 +120,7 @@ export class AgentPickerOverlay implements Component {
     const stateKind = activityState(session);
     const statusText = session.status || "idle";
     const pointer = isSelected ? this.theme.fg("accent", "▸") : " ";
-    const marker = stateKind === "active" ? this.theme.fg("accent", "●") : this.theme.fg("dim", stateKind === "stale" ? "○" : "◐");
+    const marker = activityMarker(this.theme, stateKind);
     const state = stateKind === "active"
       ? this.theme.fg("accent", statusText)
       : this.theme.fg("muted", stateKind === "stale" ? `stale ${statusText}` : "idle");
@@ -160,9 +139,9 @@ export class AgentPickerOverlay implements Component {
   }
 
   render(width: number): string[] {
-    const inner = Math.max(20, width - 2);
+    const inner = innerWidth(width);
     const bodyLines: string[] = [
-      this.theme.fg("dim", "enter: switch · tab/j/down: next · shift-tab/k/up: previous · q/esc: close"),
+      hintLine(this.theme, ["enter: switch", "j/k: move", "g/G: ends", "q/esc: close"]),
     ];
 
     if (this.sessions.length === 0) {
@@ -186,11 +165,6 @@ export class AgentPickerOverlay implements Component {
       }
     }
 
-    const paddedBody = bodyLines.map((line) => padRight(truncateToWidth(line, inner, "…"), inner));
-    return [
-      topBorderWithTitle(this.theme, this.formatSummary(), inner),
-      ...paddedBody.map((line) => this.theme.fg("borderAccent", "│") + line + this.theme.fg("borderAccent", "│")),
-      this.theme.fg("borderAccent", `╰${"─".repeat(inner)}╯`),
-    ].map((line) => truncateToWidth(line, width, ""));
+    return framedOverlay(this.theme, this.formatSummary(), bodyLines, width);
   }
 }

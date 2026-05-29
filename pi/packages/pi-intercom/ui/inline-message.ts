@@ -1,8 +1,16 @@
 import type { Component } from "@mariozechner/pi-tui";
-import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@mariozechner/pi-tui";
+import { truncateToWidth, wrapTextWithAnsi } from "@mariozechner/pi-tui";
 import type { Theme } from "@mariozechner/pi-coding-agent";
 import type { SessionInfo, Message } from "../types.js";
+import { framedOverlay, innerWidth } from "./frame.js";
+import { cwdLabel, shortSessionId } from "./text.js";
 
+/**
+ * Inline card rendered in the timeline when a message arrives. Shares the
+ * intercom frame chrome (subtle `borderAccent` rounded box, title baked into
+ * the top edge) with the agent/recipient pickers so incoming messages read as
+ * part of the same family.
+ */
 export class InlineMessageComponent implements Component {
   private from: SessionInfo;
   private message: Message;
@@ -21,56 +29,39 @@ export class InlineMessageComponent implements Component {
   invalidate(): void {}
 
   render(width: number): string[] {
-    const lines: string[] = [];
-    const borderChar = "─";
+    const senderName = this.from.name || shortSessionId(this.from.id);
     if (width < 3) {
-      return [truncateToWidth(`From ${this.from.name || this.from.id.slice(0, 8)}`, width)];
+      return [truncateToWidth(`From ${senderName}`, width)];
     }
-    const bodyWidth = Math.max(1, width - 2);
 
-    const senderName = this.from.name || this.from.id.slice(0, 8);
-    const header = ` 📨 From: ${senderName} (${this.from.cwd}) `;
-    const headerText = truncateToWidth(header, bodyWidth, "");
-    const headerPadding = Math.max(0, bodyWidth - visibleWidth(headerText));
-    lines.push(this.theme.fg("accent", `╭${headerText}${borderChar.repeat(headerPadding)}╮`));
+    const inner = innerWidth(width);
+    const textWidth = Math.max(1, inner - 1);
+    const title = `${this.theme.fg("accent", "📨")} ${this.theme.fg("text", `${senderName} (${shortSessionId(this.from.id)})`)} ${this.theme.fg("dim", "·")} ${this.theme.fg("muted", cwdLabel(this.from.cwd))}`;
 
-    const contentLines = wrapTextWithAnsi(this.bodyText || this.message.content.text, bodyWidth);
-    for (const line of contentLines) {
-      const text = truncateToWidth(line, bodyWidth, "");
-      const padding = Math.max(0, bodyWidth - visibleWidth(text));
-      lines.push(this.theme.fg("accent", `│${text}${" ".repeat(padding)}│`));
+    const bodyLines: string[] = [];
+    for (const line of wrapTextWithAnsi(this.bodyText || this.message.content.text, textWidth)) {
+      bodyLines.push(` ${line}`);
     }
 
     if (this.replyCommand) {
-      lines.push(this.theme.fg("accent", `│${" ".repeat(bodyWidth)}│`));
-      const replyLines = wrapTextWithAnsi(this.theme.fg("dim", ` ↩ To reply: ${this.replyCommand}`), bodyWidth);
-      for (const line of replyLines) {
-        const text = truncateToWidth(line, bodyWidth, "");
-        const padding = Math.max(0, bodyWidth - visibleWidth(text));
-        lines.push(this.theme.fg("accent", `│${text}${" ".repeat(padding)}│`));
+      bodyLines.push("");
+      for (const line of wrapTextWithAnsi(this.theme.fg("dim", `↩ reply: ${this.replyCommand}`), textWidth)) {
+        bodyLines.push(` ${line}`);
       }
     }
 
     if (this.message.content.attachments?.length) {
-      lines.push(this.theme.fg("accent", `│${" ".repeat(bodyWidth)}│`));
+      bodyLines.push("");
       for (const att of this.message.content.attachments) {
-        const label = this.theme.fg("dim", ` 📎 ${att.name}`);
-        const text = truncateToWidth(label, bodyWidth, "");
-        const padding = Math.max(0, bodyWidth - visibleWidth(text));
-        lines.push(this.theme.fg("accent", `│${text}${" ".repeat(padding)}│`));
+        bodyLines.push(` ${this.theme.fg("dim", `📎 ${att.name}`)}`);
       }
     }
 
     if (this.message.replyTo && !this.message.expectsReply) {
-      lines.push(this.theme.fg("accent", `│${" ".repeat(bodyWidth)}│`));
-      const reply = this.theme.fg("dim", ` ↳ Reply to ${this.message.replyTo.slice(0, 8)}`);
-      const text = truncateToWidth(reply, bodyWidth, "");
-      const padding = Math.max(0, bodyWidth - visibleWidth(text));
-      lines.push(this.theme.fg("accent", `│${text}${" ".repeat(padding)}│`));
+      bodyLines.push("");
+      bodyLines.push(` ${this.theme.fg("dim", `↳ reply to ${shortSessionId(this.message.replyTo)}`)}`);
     }
 
-    lines.push(this.theme.fg("accent", `╰${borderChar.repeat(bodyWidth)}╯`));
-
-    return lines;
+    return framedOverlay(this.theme, title, bodyLines, width);
   }
 }

@@ -66,11 +66,11 @@ If a session is unnamed, pi-intercom now exposes a runtime-only fallback alias l
 
 ### From the Keyboard
 
-Press **Alt+M** or type `/intercom` to open the session list overlay:
+Press **Alt+M** or type `/intercom` to open the recipient picker, which shares the PR-picker / agent-picker look (subtle bordered card, activity markers, vim navigation):
 
-1. **Select a session** — Use arrow keys to pick a target session
-2. **Compose message** — Write your message in the compose overlay
-3. **Send** — Press Enter to send, Escape to cancel
+1. **Select a session** — A single activity-sorted list of connected sessions (your own tagged `self`, with `same cwd` tags). Navigate with `j`/`k` or the arrow keys (`Tab`/`Shift+Tab` also work), jump to the ends with `g`/`G`.
+2. **Compose message** — Press `Enter` to open the compose overlay and type your message (`Esc` cancels).
+3. **Send** — Press `Enter` to send, `Esc` to cancel.
 
 Press **Ctrl+Alt+A** or type `/agents-picker` to open a PR-picker-style session switcher. Selecting a session jumps to its tmux pane when it has one; headless/background sessions remain listed but show a warning if there is no pane to switch to. The picker marks recent non-idle statuses (`thinking` / `tool:<name>`) as active; old non-idle statuses are shown as stale instead of active. The list live-updates while the overlay is open as sessions join, leave, or change status, preserving your current selection across the re-sort. Navigate with `j`/`k` or the arrow keys (`Tab`/`Shift+Tab` also work), jump to the ends with `g`/`G`, confirm with `Enter`, and close with `q` / `Esc` / `Ctrl+Alt+A`. Your own session is shown for context (tagged `self`) but isn't a switch target.
 

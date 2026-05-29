@@ -1,8 +1,9 @@
 import type { Component, TUI } from "@mariozechner/pi-tui";
-import { truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
 import type { KeybindingsManager, Theme } from "@mariozechner/pi-coding-agent";
 import type { IntercomClient } from "../broker/client.js";
 import type { SessionInfo } from "../types.js";
+import { framedOverlay, hintLine } from "./frame.js";
+import { cwdLabel } from "./text.js";
 
 export interface ComposeResult {
   sent: boolean;
@@ -103,37 +104,23 @@ export class ComposeOverlay implements Component {
   }
 
   render(width: number): string[] {
-    const innerWidth = Math.max(24, Math.min(width - 2, 72));
-    const contentWidth = Math.max(1, innerWidth - 2);
-    const footer = `${this.keybindings.getKeys("tui.select.confirm").join("/")}: Send • ${this.keybindings.getKeys("tui.select.cancel").join("/")}: Close`;
-    const border = (text: string) => this.theme.fg("accent", text);
-    const row = (text = "") => {
-      const clipped = truncateToWidth(text, contentWidth, "", true);
-      return `${border("│")}${clipped}${" ".repeat(Math.max(0, contentWidth - visibleWidth(clipped)))}${border("│")}`;
-    };
-
-    const lines: string[] = [];
-    lines.push(border(`╭${"─".repeat(contentWidth)}╮`));
-    lines.push(row(this.theme.bold(` Send to: ${this.targetLabel}`)));
-    lines.push(row(this.theme.fg("dim", ` ${this.target.cwd} • ${this.target.model}`)));
-    lines.push(border(`├${"─".repeat(contentWidth)}┤`));
-    lines.push(row());
+    const title = `${this.theme.fg("dim", "Send to:")} ${this.theme.fg("text", this.targetLabel)} ${this.theme.fg("dim", "·")} ${this.theme.fg("muted", `${cwdLabel(this.target.cwd)} · ${this.target.model}`)}`;
+    const bodyLines: string[] = [
+      hintLine(this.theme, ["enter: send", "esc: cancel"]),
+      "",
+    ];
 
     if (this.sending) {
-      lines.push(row(this.theme.fg("dim", " Sending...")));
-    } else if (this.error) {
-      lines.push(row(this.theme.fg("error", ` Error: ${this.error}`)));
-      lines.push(row());
-      lines.push(row(` > ${this.inputBuffer}█`));
+      bodyLines.push(this.theme.fg("dim", " Sending…"));
     } else {
-      lines.push(row(` > ${this.inputBuffer}█`));
+      if (this.error) {
+        bodyLines.push(this.theme.fg("error", ` ⚠ ${this.error}`));
+        bodyLines.push("");
+      }
+      bodyLines.push(` ${this.theme.fg("accent", "›")} ${this.inputBuffer}█`);
     }
 
-    lines.push(row());
-    lines.push(border(`├${"─".repeat(contentWidth)}┤`));
-    lines.push(row(this.theme.fg("dim", ` ${footer}`)));
-    lines.push(border(`╰${"─".repeat(contentWidth)}╯`));
-
-    return lines;
+    bodyLines.push("");
+    return framedOverlay(this.theme, title, bodyLines, width);
   }
 }
