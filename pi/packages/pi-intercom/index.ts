@@ -1223,16 +1223,9 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
         }
 
         const metadata = childOrchestratorMetadata;
-        let sendTo: string;
-        try {
-          sendTo = await resolveSessionTarget(connectedClient, metadata.orchestratorTarget) ?? metadata.orchestratorTarget;
-        } catch (error) {
-          return {
-            content: [{ type: "text", text: `Failed to resolve supervisor target: ${getErrorMessage(error)}` }],
-            isError: true,
-            details: { error: true },
-          };
-        }
+        // No listSessions round-trip: pass the orchestrator target raw and let
+        // the broker resolve id/name/prefix on send.
+        const sendTo = metadata.orchestratorTarget;
         if (signal?.aborted) {
           return {
             content: [{ type: "text", text: "Cancelled" }],
@@ -1240,7 +1233,7 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
             details: { error: true },
           };
         }
-        if (sendTo === connectedClient.sessionId) {
+        if (currentSessionTargetMatches(metadata.orchestratorTarget, undefined, connectedClient)) {
           return {
             content: [{ type: "text", text: "Cannot message the current session" }],
             isError: true,
@@ -1513,8 +1506,10 @@ Usage:
             };
           }
           try {
-            const sendTo = await resolveSessionTarget(connectedClient, to) ?? to;
-            if (sendTo === connectedClient.sessionId) {
+            // Fast local self-check (exact id/name); the broker authoritatively
+            // rejects prefix/edge self-targets. No listSessions round-trip: the
+            // broker resolves id/name/prefix on send.
+            if (currentSessionTargetMatches(to, undefined, connectedClient)) {
               return {
                 content: [{ type: "text", text: "Cannot message the current session" }],
                 isError: true,
@@ -1534,7 +1529,7 @@ Usage:
                 };
               }
             }
-            const result = await connectedClient.send(sendTo, {
+            const result = await connectedClient.send(to, {
               text: message,
               attachments,
               replyTo,
@@ -1598,7 +1593,15 @@ Usage:
           let ownsWaiter = false;
 
           try {
-            const sendTo = await resolveSessionTarget(connectedClient, to) ?? to;
+            // Fast local self-check (exact id/name); the broker authoritatively
+            // rejects prefix/edge self-targets. No listSessions round-trip.
+            if (currentSessionTargetMatches(to, undefined, connectedClient)) {
+              return {
+                content: [{ type: "text", text: "Cannot message the current session" }],
+                isError: true,
+                details: { error: true },
+              };
+            }
             if (_signal?.aborted) {
               return {
                 content: [{ type: "text", text: "Cancelled" }],
@@ -1606,15 +1609,8 @@ Usage:
                 details: { error: true },
               };
             }
-            if (sendTo === connectedClient.sessionId) {
-              return {
-                content: [{ type: "text", text: "Cannot message the current session" }],
-                isError: true,
-                details: { error: true },
-              };
-            }
-            // Re-check after the await above: a parallel ask in the same tool
-            // batch may have claimed the slot between the early guard and now.
+            // Re-check: a parallel ask in the same tool batch may have claimed
+            // the slot between the early guard and now.
             if (replyWaiter) {
               return {
                 content: [{ type: "text", text: "Already waiting for a reply" }],
@@ -1623,9 +1619,12 @@ Usage:
               };
             }
             const questionId = randomUUID();
-            replyPromise = waitForReply(sendTo, questionId, _signal);
+            // Pass the raw target: the broker resolves id/name/prefix, reply
+            // matching handles name-or-id, and recipientId (set from the
+            // delivered ack below) lets session_left fast-cancel the wait.
+            replyPromise = waitForReply(to, questionId, _signal);
             ownsWaiter = true;
-            const sendResult = await connectedClient.send(sendTo, {
+            const sendResult = await connectedClient.send(to, {
               messageId: questionId,
               text: message,
               attachments,

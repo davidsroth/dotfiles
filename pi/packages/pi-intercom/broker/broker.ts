@@ -289,6 +289,17 @@ class IntercomBroker {
         const targets = lookup.targets;
         if (targets.length === 1) {
           const target = targets[0];
+          if (target.info.id === currentId) {
+            // Authoritative self-send guard: clients no longer pre-resolve the
+            // target, so the broker rejects messages a session addresses to
+            // itself (by id, name, or id prefix) here.
+            writeMessage(socket, {
+              type: "delivery_failed",
+              messageId: message.id,
+              reason: "Cannot message the current session",
+            });
+            break;
+          }
           const fromSession = this.sessions.get(currentId);
           if (!fromSession) {
             writeMessage(socket, {

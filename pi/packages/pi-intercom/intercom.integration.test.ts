@@ -311,6 +311,81 @@ test("broker routes messages addressed by unique session ID prefix", { concurren
   }
 });
 
+test("broker rejects a message a session addresses to itself", { concurrency: false }, async () => {
+  const { planner, cleanup } = await setupClients();
+
+  try {
+    // By full id
+    const byId = await planner.send(planner.sessionId!, { messageId: "self-id", text: "hi me" });
+    assert.equal(byId.delivered, false);
+    assert.match(byId.reason ?? "", /Cannot message the current session/);
+
+    // By own name
+    const byName = await planner.send("planner", { messageId: "self-name", text: "hi me" });
+    assert.equal(byName.delivered, false);
+    assert.match(byName.reason ?? "", /Cannot message the current session/);
+
+    // By own id prefix
+    const byPrefix = await planner.send(planner.sessionId!.slice(0, 8), { messageId: "self-prefix", text: "hi me" });
+    assert.equal(byPrefix.delivered, false);
+    assert.match(byPrefix.reason ?? "", /Cannot message the current session/);
+  } finally {
+    await cleanup();
+  }
+});
+
+test("broker returns delivery_failed for an unknown target", { concurrency: false }, async () => {
+  const { planner, cleanup } = await setupClients();
+
+  try {
+    const result = await planner.send("definitely-not-a-session", { messageId: "missing", text: "hello?" });
+    assert.equal(result.delivered, false);
+    assert.match(result.reason ?? "", /Session not found/);
+  } finally {
+    await cleanup();
+  }
+});
+
+test("broker resolves a name target and returns its recipientId", { concurrency: false }, async () => {
+  const { planner, orchestrator, cleanup } = await setupClients();
+
+  try {
+    const messagePromise = once(orchestrator, "message") as Promise<[SessionInfo, Message]>;
+    const result = await planner.send("orchestrator", { messageId: "by-name", text: "hello by name" });
+    assert.equal(result.delivered, true);
+    assert.equal(result.recipientId, orchestrator.sessionId);
+    const [, message] = await messagePromise;
+    assert.equal(message.content.text, "hello by name");
+  } finally {
+    await cleanup();
+  }
+});
+
+test("broker returns delivery_failed for an ambiguous name", { concurrency: false }, async () => {
+  const { planner, cleanup } = await setupClients();
+  const duplicate = new IntercomClient();
+
+  try {
+    // A second session sharing the orchestrator's name makes "orchestrator"
+    // ambiguous; the broker must refuse rather than pick one.
+    await duplicate.connect({
+      name: "orchestrator",
+      cwd: repoDir,
+      model: "test-model",
+      pid: process.pid,
+      startedAt: Date.now(),
+      lastActivity: Date.now(),
+    });
+
+    const result = await planner.send("orchestrator", { messageId: "ambiguous", text: "which one?" });
+    assert.equal(result.delivered, false);
+    assert.match(result.reason ?? "", /Multiple sessions named "orchestrator"/);
+  } finally {
+    await duplicate.disconnect().catch(() => undefined);
+    await cleanup();
+  }
+});
+
 test("register evicts a prior registration with the same originSessionId", { concurrency: false }, async () => {
   const { planner, cleanup } = await setupClients();
 
@@ -770,6 +845,49 @@ test("child supervisor tool resolves target and includes run metadata", { concur
 
       await harness.emitLifecycle("session_shutdown");
     });
+  } finally {
+    await cleanup();
+  }
+});
+
+test("a pending ask is cancelled when the recipient session ends (recipientId match)", { concurrency: false }, async () => {
+  const { default: piIntercomExtension } = await import("./index.ts");
+  const { orchestrator, cleanup } = await setupClients();
+
+  try {
+    const harness = createExtensionHarness("ask-canceller");
+    piIntercomExtension(harness.pi as never);
+    await harness.emitLifecycle("session_start");
+
+    const intercomTool = harness.tools.find((tool) => tool.name === "intercom")!;
+    const askReceived = once(orchestrator, "message") as Promise<[SessionInfo, Message]>;
+    // Address by NAME (not id): waiter.from is the name, so the fast-cancel can
+    // only work via the recipientId carried on the delivered ack.
+    const askResultPromise = intercomTool.execute(
+      "ask-cancel-1",
+      { action: "ask", to: "orchestrator", message: "Are you there?" },
+      new AbortController().signal,
+      undefined,
+      harness.ctx,
+    );
+
+    await askReceived;
+    // Wait until the extension has recorded the sent ask; by then the delivered
+    // ack (with recipientId) has populated the reply waiter.
+    const deadline = Date.now() + 5000;
+    while (Date.now() < deadline && !harness.entries.some((entry) => entry.type === "intercom_sent")) {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    assert.ok(harness.entries.some((entry) => entry.type === "intercom_sent"), "ask should have been sent");
+
+    // Recipient leaves without replying -> broker broadcasts session_left.
+    await orchestrator.disconnect();
+
+    const askResult = await askResultPromise;
+    assert.equal(askResult.isError, true);
+    assert.match(askResult.content[0]?.text ?? "", /Recipient session ended before replying/);
+
+    await harness.emitLifecycle("session_shutdown");
   } finally {
     await cleanup();
   }
