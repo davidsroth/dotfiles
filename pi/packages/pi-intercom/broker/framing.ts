@@ -13,10 +13,12 @@ export const MAX_FRAME_BYTES: number = (() => {
 })();
 
 /**
- * Write a length-prefixed message to a socket.
- * Format: 4-byte big-endian length + JSON payload
+ * Encode a message into a length-prefixed frame buffer.
+ * Format: 4-byte big-endian length + JSON payload.
+ * Encode once and reuse the returned buffer to write to many sockets
+ * (e.g. broadcast) instead of re-serializing per recipient.
  */
-export function writeMessage(socket: Socket, msg: unknown): void {
+export function encodeMessage(msg: unknown): Buffer {
   const json = JSON.stringify(msg);
   const payload = Buffer.from(json, "utf-8");
   if (payload.length > MAX_FRAME_BYTES) {
@@ -26,7 +28,20 @@ export function writeMessage(socket: Socket, msg: unknown): void {
   }
   const header = Buffer.alloc(4);
   header.writeUInt32BE(payload.length, 0);
-  socket.write(Buffer.concat([header, payload]));
+  return Buffer.concat([header, payload]);
+}
+
+/** Write an already-encoded frame buffer to a socket. */
+export function writeFrame(socket: Socket, frame: Buffer): void {
+  socket.write(frame);
+}
+
+/**
+ * Write a length-prefixed message to a socket.
+ * Format: 4-byte big-endian length + JSON payload
+ */
+export function writeMessage(socket: Socket, msg: unknown): void {
+  writeFrame(socket, encodeMessage(msg));
 }
 
 /**

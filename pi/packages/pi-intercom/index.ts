@@ -19,6 +19,14 @@ const SUBAGENT_RESULT_INTERCOM_EVENT = "subagent:result-intercom";
 const SUBAGENT_RESULT_INTERCOM_DELIVERY_EVENT = "subagent:result-intercom-delivery";
 const INBOUND_FLUSH_DELAY_MS = 200;
 const INBOUND_IDLE_RETRY_MS = 500;
+// Trailing debounce for presence status writes. A tool-heavy turn fires
+// tool_execution_start/end (and agent_start/end) rapidly; coalescing these into
+// one trailing write per quiet window collapses the 2M+2-per-turn chatter the
+// broker would otherwise fan out to every peer. Override for tests/tuning.
+const PRESENCE_DEBOUNCE_MS = (() => {
+  const raw = Number(process.env.PI_INTERCOM_PRESENCE_DEBOUNCE_MS);
+  return Number.isInteger(raw) && raw >= 0 ? raw : 150;
+})();
 const SUBAGENT_ORCHESTRATOR_TARGET_ENV = "PI_SUBAGENT_ORCHESTRATOR_TARGET";
 const SUBAGENT_RUN_ID_ENV = "PI_SUBAGENT_RUN_ID";
 const SUBAGENT_CHILD_AGENT_ENV = "PI_SUBAGENT_CHILD_AGENT";
@@ -416,6 +424,10 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
   let reconnectPromise: Promise<IntercomClient> | null = null;
   let reconnectPromiseGeneration: number | null = null;
   let startupConnectTimer: NodeJS.Timeout | null = null;
+  let presenceSyncTimer: NodeJS.Timeout | null = null;
+  // Last status string actually written to the broker; lets us skip redundant
+  // presence writes when the computed status is unchanged.
+  let lastSentStatus: string | null = null;
   let reconnectAttempt = 0;
   let shuttingDown = false;
   let disposed = true;
@@ -503,6 +515,13 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
     clearTimeout(startupConnectTimer);
     startupConnectTimer = null;
   }
+  function clearPresenceSyncTimer(): void {
+    if (!presenceSyncTimer) {
+      return;
+    }
+    clearTimeout(presenceSyncTimer);
+    presenceSyncTimer = null;
+  }
   function clearInboundFlushTimer(): void {
     if (!inboundFlushTimer) {
       return;
@@ -577,15 +596,42 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
     if (!client || !getLiveContext()) {
       return;
     }
-    client.updatePresence({ ...buildPresenceIdentity(pi, sessionId), status: currentStatus() });
+    // Identity changes (connect, name, model) are infrequent and meaningful, so
+    // flush immediately and fold in the current status (cancelling any pending
+    // debounced status write, which this supersedes).
+    clearPresenceSyncTimer();
+    const status = currentStatus();
+    client.updatePresence({ ...buildPresenceIdentity(pi, sessionId), status });
+    lastSentStatus = status;
     notifySelfPresenceChange();
   }
-  function syncPresenceStatus(): void {
+  function flushPresenceStatus(): void {
+    clearPresenceSyncTimer();
     if (!client || !currentSessionId || !getLiveContext()) {
       return;
     }
-    client.updatePresence({ status: currentStatus() });
+    const status = currentStatus();
+    if (status === lastSentStatus) {
+      // No change since the last write; don't spam the broker/peers.
+      return;
+    }
+    client.updatePresence({ status });
+    lastSentStatus = status;
     notifySelfPresenceChange();
+  }
+  function syncPresenceStatus(): void {
+    // Coalesce bursty status transitions into a single trailing write.
+    if (PRESENCE_DEBOUNCE_MS === 0) {
+      flushPresenceStatus();
+      return;
+    }
+    if (presenceSyncTimer) {
+      return;
+    }
+    presenceSyncTimer = setTimeout(() => {
+      presenceSyncTimer = null;
+      flushPresenceStatus();
+    }, PRESENCE_DEBOUNCE_MS);
   }
   function currentSessionTargetMatches(to: string, resolvedTo?: string | null, activeClient?: IntercomClient): boolean {
     const targets = new Set<string>();
@@ -801,6 +847,10 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
         }
         client = nextClient;
         reconnectAttempt = 0;
+        // register() (via buildRegistration) already sent the current status, so
+        // seed the dedupe baseline to avoid a redundant first status write while
+        // still ensuring the next real change is sent.
+        lastSentStatus = currentStatus();
         return nextClient;
       } catch (error) {
         if (client === nextClient) {
@@ -998,6 +1048,8 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
     runtimeGeneration += 1;
     clearStartupConnectTimer();
     clearReconnectTimer();
+    clearPresenceSyncTimer();
+    lastSentStatus = null;
     rejectReplyWaiter(new Error("Session shutting down"));
     replyTracker.reset();
     pendingIdleMessages.length = 0;

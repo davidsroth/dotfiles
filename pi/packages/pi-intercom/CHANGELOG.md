@@ -10,6 +10,8 @@ All notable changes to the `pi-intercom` extension will be documented in this fi
 - The broker now logs to `~/.pi/agent/intercom/broker.log` (previously its stdout/stderr were discarded to `/dev/null`), so session removals, errors, and shutdowns are inspectable. The log is truncated when it grows past 5 MiB. The Windows hidden-launcher path is unchanged.
 
 ### Changed
+- Presence status updates are now debounced (trailing, ~150 ms; override via `PI_INTERCOM_PRESENCE_DEBOUNCE_MS`) and skipped when the computed status string is unchanged. A tool-heavy turn previously emitted a presence write on every `tool_execution_start`/`end` (which the broker fanned out to every peer); bursts are now coalesced into a single trailing write per quiet window. Identity changes (connect/name/model) still flush immediately.
+- The broker now serializes a broadcast payload once and reuses the frame for every recipient, instead of re-running `JSON.stringify` + buffer-encode per peer.
 - The broker now evicts a prior registration from the same pi session on reconnect (keyed on `originSessionId`), so duplicate "zombie" rows no longer accumulate when a stale socket's `close` never fires.
 - The `delivered` ack now carries the broker-resolved `recipientId`, letting a pending ask fast-cancel on the recipient's `session_left` even when the target was addressed by name or id prefix.
 

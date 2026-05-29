@@ -3,7 +3,7 @@ import { writeFileSync, unlinkSync, mkdirSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
 import { randomUUID } from "crypto";
-import { writeMessage, createMessageReader } from "./framing.js";
+import { writeMessage, writeFrame, encodeMessage, createMessageReader } from "./framing.js";
 import { getBrokerSocketPath } from "./paths.js";
 import type { SessionInfo, Message, Attachment, BrokerMessage } from "../types.js";
 
@@ -419,6 +419,16 @@ class IntercomBroker {
   }
 
   private broadcast(msg: BrokerMessage, exclude?: string): void {
+    // Serialize once and reuse the frame for every recipient instead of
+    // re-stringifying + re-encoding per peer (the dominant broadcast cost,
+    // O(N) JSON.stringify otherwise).
+    let frame: Buffer;
+    try {
+      frame = encodeMessage(msg);
+    } catch (error) {
+      console.error("Failed to encode broadcast message:", error);
+      return;
+    }
     // A write can throw synchronously (e.g. ERR_STREAM_WRITE_AFTER_END on a
     // half-closed socket). Isolate each write so one dead peer can't abort the
     // loop and starve the remaining sessions of the broadcast. Reap the dead
@@ -428,7 +438,7 @@ class IntercomBroker {
     for (const [id, session] of this.sessions) {
       if (id === exclude) continue;
       try {
-        writeMessage(session.socket, msg);
+        writeFrame(session.socket, frame);
       } catch {
         dead.push(id);
       }
