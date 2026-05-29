@@ -10,7 +10,7 @@ export const ACTIVE_STATUS_FRESH_MS = 30 * 60 * 1000;
 
 export type ActivityState = "active" | "idle" | "stale";
 
-export function isBusyStatus(status?: string): boolean {
+function isBusyStatus(status?: string): boolean {
   return Boolean(status && !status.includes("idle"));
 }
 
@@ -25,7 +25,7 @@ export function sessionActivityRank(session: SessionInfo, now = Date.now()): num
   return ACTIVITY_RANK[activityState(session, now)];
 }
 
-export function sortPeerSessions(sessions: SessionInfo[]): SessionInfo[] {
+export function sortSessionsForPicker(sessions: SessionInfo[]): SessionInfo[] {
   const now = Date.now();
   return [...sessions].sort((a, b) => {
     const rankDelta = sessionActivityRank(a, now) - sessionActivityRank(b, now);

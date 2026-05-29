@@ -11,12 +11,17 @@
     "config.ts",
     "reply-tracker.ts",
     "presence-name.ts",
-    "broker/**/*.ts",
+    "broker/broker.ts",
+    "broker/client.ts",
+    "broker/framing.ts",
+    "broker/paths.ts",
+    "broker/spawn.ts",
+    "broker/validation.ts",
     "ui/**/*.ts",
     "skills/**/*"
   ],
   "scripts": {
-    "test": "tsx --test broker/paths.test.ts broker/spawn.test.ts reply-tracker.test.ts presence-name.test.ts intercom.integration.test.ts test/inline-message.test.ts test/agent-picker.test.ts test/framing.test.ts"
+    "test": "tsx --test"
   },
   "keywords": [
     "pi-package"

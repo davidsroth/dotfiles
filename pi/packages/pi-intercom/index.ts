@@ -2,10 +2,13 @@ import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-age
 import { randomUUID } from "crypto";
 import { Type } from "typebox";
 import { Text } from "@mariozechner/pi-tui";
+import { readFileSync } from "fs";
 import { IntercomClient } from "./broker/client.ts";
 import { spawnBrokerIfNeeded } from "./broker/spawn.ts";
+import { getBrokerSocketPath, getBrokerLogPath, getBrokerPidPath } from "./broker/paths.ts";
 import { AgentPickerOverlay } from "./ui/agent-picker.ts";
-import { parseTmuxTarget, sortPeerSessions } from "./ui/agent-picker-util.ts";
+import { parseTmuxTarget, sortSessionsForPicker } from "./ui/agent-picker-util.ts";
+import { shortSessionId } from "./ui/text.ts";
 import { SessionListOverlay } from "./ui/session-list.ts";
 import { ComposeOverlay, type ComposeResult } from "./ui/compose.ts";
 import { InlineMessageComponent } from "./ui/inline-message.ts";
@@ -369,9 +372,6 @@ function duplicateSessionNames(sessions: SessionInfo[]): Set<string> {
       .filter((name): name is string => Boolean(name))
       .filter((name, index, names) => names.indexOf(name) !== index)
   );
-}
-function shortSessionId(sessionId: string): string {
-  return sessionId.slice(0, 8);
 }
 function parseSubagentIntercomPayload(payload: unknown): { to: string; message: string; requestId?: string } | null {
   if (typeof payload !== "object" || payload === null) {
@@ -1148,7 +1148,9 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
   });
 
   const childOrchestratorMetadata = readChildOrchestratorMetadata();
-  if (childOrchestratorMetadata) {
+  // When intercom is disabled, skip registering tools/commands/shortcuts so the
+  // tools don't appear in the prompt (and waste tokens) only to fail at call time.
+  if (config.enabled && childOrchestratorMetadata) {
     pi.registerTool({
       name: "contact_supervisor",
       label: "Contact Supervisor",
@@ -1417,7 +1419,7 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
     });
   }
 
-  pi.registerTool({
+  if (config.enabled) pi.registerTool({
     name: "intercom",
     label: "Intercom",
     description: `Send a message to another pi session running on this machine.
@@ -1776,11 +1778,36 @@ Usage:
           try {
             const mySessionId = connectedClient.sessionId;
             const sessions = await connectedClient.listSessions();
+            const pendingAsks = replyTracker.listPending();
+            const lines = [
+              "**Intercom Status:**",
+              "Connected: Yes",
+              `Session ID: ${mySessionId}`,
+              `Active sessions: ${sessions.length}`,
+              `Reconnect attempts: ${reconnectAttempt}`,
+              `Pending outbound: ${connectedClient.pendingSendCount} send(s), ${connectedClient.pendingListCount} list(s)`,
+              `Pending inbound asks: ${pendingAsks.length}`,
+              `Awaiting reply: ${replyWaiter ? `yes (from ${replyWaiter.from})` : "no"}`,
+            ];
+            // Broker process liveness, read from the pid file.
+            try {
+              const pid = Number(readFileSync(getBrokerPidPath(), "utf-8").trim());
+              if (Number.isInteger(pid) && pid > 0) {
+                let alive = true;
+                try {
+                  process.kill(pid, 0);
+                } catch (killError) {
+                  alive = (killError as NodeJS.ErrnoException).code !== "ESRCH";
+                }
+                lines.push(`Broker: pid ${pid} (${alive ? "alive" : "not running"})`);
+              }
+            } catch {
+              // No pid file (broker not started by this user yet); omit the line.
+            }
+            lines.push(`Socket: ${getBrokerSocketPath()}`);
+            lines.push(`Log: ${getBrokerLogPath()}`);
             return {
-              content: [{
-                type: "text",
-                text: `**Intercom Status:**\nConnected: Yes\nSession ID: ${mySessionId}\nActive sessions: ${sessions.length}`,
-              }],
+              content: [{ type: "text", text: lines.join("\n") }],
               isError: false,
             };
           } catch (error) {
@@ -1933,7 +1960,7 @@ Usage:
     // Keep the open picker in sync with broker join/leave/presence events so it
     // reflects live session churn instead of a one-shot snapshot.
     let overlay: AgentPickerOverlay | undefined;
-    const snapshot = () => sortPeerSessions([...sessionMap.values()]);
+    const snapshot = () => sortSessionsForPicker([...sessionMap.values()]);
     const pushSessions = () => overlay?.setSessions(snapshot());
     const onJoined = (session: SessionInfo) => { sessionMap.set(session.id, session); pushSessions(); };
     const onPresence = (session: SessionInfo) => { sessionMap.set(session.id, session); pushSessions(); };
@@ -2060,23 +2087,25 @@ Usage:
     }
   }
 
-  pi.registerCommand("intercom", {
-    description: "Open session intercom overlay",
-    handler: async (_args, ctx) => openIntercomOverlay(ctx),
-  });
+  if (config.enabled) {
+    pi.registerCommand("intercom", {
+      description: "Open session intercom overlay",
+      handler: async (_args, ctx) => openIntercomOverlay(ctx),
+    });
 
-  pi.registerShortcut("alt+m", {
-    description: "Open session intercom",
-    handler: async (ctx) => openIntercomOverlay(ctx),
-  });
+    pi.registerShortcut("alt+m", {
+      description: "Open session intercom",
+      handler: async (ctx) => openIntercomOverlay(ctx),
+    });
 
-  pi.registerCommand("agents-picker", {
-    description: "Open running Pi sessions picker",
-    handler: async (_args, ctx) => openAgentPickerOverlay(ctx),
-  });
+    pi.registerCommand("agents-picker", {
+      description: "Open running Pi sessions picker",
+      handler: async (_args, ctx) => openAgentPickerOverlay(ctx),
+    });
 
-  pi.registerShortcut(AGENT_PICKER_KEY, {
-    description: "Open running Pi sessions picker",
-    handler: async (ctx) => openAgentPickerOverlay(ctx),
-  });
+    pi.registerShortcut(AGENT_PICKER_KEY, {
+      description: "Open running Pi sessions picker",
+      handler: async (ctx) => openAgentPickerOverlay(ctx),
+    });
+  }
 }

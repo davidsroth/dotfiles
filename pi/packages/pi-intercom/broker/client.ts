@@ -3,6 +3,7 @@ import net from "net";
 import { randomUUID } from "crypto";
 import { writeMessage, createMessageReader } from "./framing.js";
 import { getBrokerSocketPath } from "./paths.js";
+import { isMessage, isSessionInfo } from "./validation.js";
 import type { SessionInfo, Message, Attachment } from "../types.js";
 
 const BROKER_SOCKET = getBrokerSocketPath();
@@ -27,89 +28,6 @@ function toError(error: unknown): Error {
   return error instanceof Error ? error : new Error(String(error));
 }
 
-function isAttachment(value: unknown): value is Attachment {
-  if (typeof value !== "object" || value === null) {
-    return false;
-  }
-
-  const attachment = value as Record<string, unknown>;
-
-  if (
-    attachment.type !== "file"
-    && attachment.type !== "snippet"
-    && attachment.type !== "context"
-  ) {
-    return false;
-  }
-
-  if (typeof attachment.name !== "string" || typeof attachment.content !== "string") {
-    return false;
-  }
-
-  return attachment.language === undefined || typeof attachment.language === "string";
-}
-
-function isMessage(value: unknown): value is Message {
-  if (typeof value !== "object" || value === null) {
-    return false;
-  }
-
-  const message = value as Record<string, unknown>;
-
-  if (typeof message.id !== "string" || typeof message.timestamp !== "number") {
-    return false;
-  }
-
-  if (message.replyTo !== undefined && typeof message.replyTo !== "string") {
-    return false;
-  }
-
-  if (message.expectsReply !== undefined && typeof message.expectsReply !== "boolean") {
-    return false;
-  }
-
-  if (typeof message.content !== "object" || message.content === null) {
-    return false;
-  }
-
-  const content = message.content as Record<string, unknown>;
-  if (typeof content.text !== "string") {
-    return false;
-  }
-
-  return content.attachments === undefined
-    || (Array.isArray(content.attachments) && content.attachments.every(isAttachment));
-}
-
-function isSessionInfo(value: unknown): value is SessionInfo {
-  if (typeof value !== "object" || value === null) {
-    return false;
-  }
-
-  const session = value as Record<string, unknown>;
-
-  if (
-    typeof session.id !== "string"
-    || typeof session.cwd !== "string"
-    || typeof session.model !== "string"
-    || typeof session.pid !== "number"
-    || typeof session.startedAt !== "number"
-    || typeof session.lastActivity !== "number"
-  ) {
-    return false;
-  }
-
-  if (session.name !== undefined && typeof session.name !== "string") {
-    return false;
-  }
-
-  if (session.originSessionId !== undefined && typeof session.originSessionId !== "string") {
-    return false;
-  }
-
-  return session.status === undefined || typeof session.status === "string";
-}
-
 export class IntercomClient extends EventEmitter {
   private socket: net.Socket | null = null;
   private _sessionId: string | null = null;
@@ -131,6 +49,16 @@ export class IntercomClient extends EventEmitter {
 
   get sessionId(): string | null {
     return this._sessionId;
+  }
+
+  /** Number of outbound sends awaiting a delivered/delivery_failed ack. */
+  get pendingSendCount(): number {
+    return this.pendingSends.size;
+  }
+
+  /** Number of outbound listSessions requests awaiting a response. */
+  get pendingListCount(): number {
+    return this.pendingLists.size;
   }
 
   isConnected(): boolean {

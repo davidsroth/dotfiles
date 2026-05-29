@@ -72,7 +72,7 @@ Press **Alt+M** or type `/intercom` to open the session list overlay:
 2. **Compose message** — Write your message in the compose overlay
 3. **Send** — Press Enter to send, Escape to cancel
 
-Press **Ctrl+Alt+A** or type `/agents-picker` to open a PR-picker-style session switcher. Selecting a session jumps to its tmux pane when it has one; headless/background sessions remain listed but show a warning if there is no pane to switch to. The picker marks recent non-idle statuses (`thinking` / `tool:<name>`) as active; old non-idle statuses are shown as stale instead of active. The list live-updates while the overlay is open as sessions join, leave, or change status, preserving your current selection across the re-sort.
+Press **Ctrl+Alt+A** or type `/agents-picker` to open a PR-picker-style session switcher. Selecting a session jumps to its tmux pane when it has one; headless/background sessions remain listed but show a warning if there is no pane to switch to. The picker marks recent non-idle statuses (`thinking` / `tool:<name>`) as active; old non-idle statuses are shown as stale instead of active. The list live-updates while the overlay is open as sessions join, leave, or change status, preserving your current selection across the re-sort. Navigate with `j`/`k` or the arrow keys (`Tab`/`Shift+Tab` also work), jump to the ends with `g`/`G`, confirm with `Enter`, and close with `q` / `Esc` / `Ctrl+Alt+A`. Your own session is shown for context (tagged `self`) but isn't a switch target.
 
 ### From the Agent
 
@@ -388,7 +388,18 @@ Create `~/.pi/agent/intercom/config.json`:
 | `replyHint` | true | Include reply instruction in incoming messages |
 | `status` | — | Optional custom status suffix shown after the automatic lifecycle status, for example `thinking · researching` |
 
-Set `PI_INTERCOM_AGENT_PICKER_KEY` to override the running Pi sessions picker shortcut (default: `ctrl+alt+a`).
+### Environment variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PI_INTERCOM_AGENT_PICKER_KEY` | `ctrl+alt+a` | Override the running-sessions picker shortcut |
+| `PI_INTERCOM_PRESENCE_DEBOUNCE_MS` | `150` | Trailing debounce for presence status writes (`0` = send immediately) |
+| `PI_INTERCOM_MAX_FRAME_BYTES` | `16777216` (16 MiB) | Max accepted message frame size; oversized frames are rejected |
+| `PI_INTERCOM_MAX_SOCKET_BUFFER_BYTES` | `8388608` (8 MiB) | Per-peer outbound buffer high-water mark; a peer over this is reaped (backpressure) |
+| `PI_INTERCOM_REAPER_INTERVAL_MS` | `30000` | Interval for the broker's dead-process liveness sweep (`0` disables it) |
+| `PI_SUBAGENT_INTERCOM_SESSION_NAME` | — | Overrides the presence name for a subagent session (set by `pi-subagents`) |
+
+The `PI_SUBAGENT_*` variables above (`ORCHESTRATOR_TARGET`, `RUN_ID`, `CHILD_AGENT`, `CHILD_INDEX`) gate `contact_supervisor` registration.
 
 For example, if you have Bun installed and want it to start the broker directly, use:
 
@@ -467,22 +478,30 @@ Use pi-messenger for multi-agent swarms working on a shared task. Use pi-interco
 ├── index.ts              # Extension entry point
 ├── types.ts              # SessionInfo, Message, protocol types
 ├── config.ts             # Config loading
+├── reply-tracker.ts      # Pending ask/turn-context tracking for replies
+├── presence-name.ts      # Session display-name resolution
 ├── broker/
-│   ├── broker.ts         # Broker process
+│   ├── broker.ts         # Broker process (routing, presence, liveness reaper)
 │   ├── client.ts         # IntercomClient class
-│   ├── framing.ts        # Length-prefixed JSON protocol
-│   ├── paths.ts          # Platform-specific socket/pipe paths
-│   ├── spawn.ts          # Auto-spawn logic with lock file
-│   ├── spawn.test.ts     # Broker spawn tests
-│   └── paths.test.ts     # Path resolution tests
+│   ├── framing.ts        # Length-prefixed JSON protocol (+ size cap)
+│   ├── validation.ts     # Shared runtime validators for inbound payloads
+│   ├── paths.ts          # Platform-specific socket/pipe/log/pid paths
+│   └── spawn.ts          # Auto-spawn logic with lock file + broker.log
 ├── ui/
-│   ├── session-list.ts   # Session selection overlay
-│   ├── compose.ts        # Message composition overlay
-│   └── inline-message.ts # Received message display
+│   ├── session-list.ts     # Session selection overlay (Alt+M)
+│   ├── compose.ts          # Message composition overlay
+│   ├── inline-message.ts   # Received message display
+│   ├── agent-picker.ts     # Running-sessions picker overlay (Ctrl+Alt+A)
+│   ├── agent-picker-util.ts# Pure helpers: activity classification, sorting, tmux target parsing
+│   └── text.ts             # Shared text helpers (middleTruncate, shortSessionId)
+├── test/                 # Unit tests (framing, agent-picker, inline-message)
+├── docs/                 # Design notes (e.g. reaper-plan.md)
 └── skills/
     └── pi-intercom/
         └── SKILL.md      # Bundled skill for common patterns
 ```
+
+(Test files — `broker/*.test.ts`, `*.test.ts`, `test/*` — live alongside the source but are not shipped in the published package.)
 
 ## Limitations
 

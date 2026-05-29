@@ -2,36 +2,7 @@ import type { Component } from "@mariozechner/pi-tui";
 import { truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
 import type { KeybindingsManager, Theme } from "@mariozechner/pi-coding-agent";
 import type { SessionInfo } from "../types.js";
-
-function middleTruncate(text: string, maxWidth: number): string {
-  if (visibleWidth(text) <= maxWidth) {
-    return text;
-  }
-  if (maxWidth <= 3) {
-    return truncateToWidth(text, maxWidth, "");
-  }
-
-  const chars = [...text];
-  const targetSideWidth = Math.max(1, Math.floor((maxWidth - 1) / 2));
-
-  let left = "";
-  for (const char of chars) {
-    if (visibleWidth(left + char) > targetSideWidth) break;
-    left += char;
-  }
-
-  let right = "";
-  for (const char of chars.slice().reverse()) {
-    if (visibleWidth(char + right) > targetSideWidth) break;
-    right = char + right;
-  }
-
-  return truncateToWidth(`${left}…${right}`, maxWidth, "");
-}
-
-function shortSessionId(sessionId: string): string {
-  return sessionId.slice(0, 8);
-}
+import { middleTruncate, shortSessionId } from "./text.js";
 
 function sessionTitle(session: SessionInfo, options?: { self?: boolean; sameCwd?: boolean }): string {
   const name = session.name || "Unnamed session";

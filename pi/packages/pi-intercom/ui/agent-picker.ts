@@ -3,29 +3,7 @@ import type { Component, TUI } from "@mariozechner/pi-tui";
 import { Key, matchesKey, truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
 import type { SessionInfo } from "../types.js";
 import { activityState, formatAge } from "./agent-picker-util.js";
-
-function shortSessionId(sessionId: string): string {
-  return sessionId.slice(0, 8);
-}
-
-export function middleTruncate(text: string, maxWidth: number): string {
-  if (visibleWidth(text) <= maxWidth) return text;
-  if (maxWidth <= 3) return truncateToWidth(text, maxWidth, "");
-
-  const chars = [...text];
-  const side = Math.max(1, Math.floor((maxWidth - 1) / 2));
-  let left = "";
-  for (const char of chars) {
-    if (visibleWidth(left + char) > side) break;
-    left += char;
-  }
-  let right = "";
-  for (const char of chars.slice().reverse()) {
-    if (visibleWidth(char + right) > side) break;
-    right = char + right;
-  }
-  return truncateToWidth(`${left}…${right}`, maxWidth, "");
-}
+import { middleTruncate, shortSessionId } from "./text.js";
 
 function padRight(text: string, width: number): string {
   const textWidth = visibleWidth(text);
@@ -144,7 +122,9 @@ export class AgentPickerOverlay implements Component {
 
     if (this.keybindings.matches(data, "tui.select.confirm") || matchesKey(data, Key.enter)) {
       const session = this.selectedSession();
-      if (session) this.done(session);
+      // The `[self]` row is shown for context but isn't a switch target
+      // (switching to your own pane is a no-op); ignore Enter on it.
+      if (session && session.id !== this.currentSession.id) this.done(session);
     }
   }
 

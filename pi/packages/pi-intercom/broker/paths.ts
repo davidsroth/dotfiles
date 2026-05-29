@@ -22,3 +22,7 @@ export function getBrokerSocketPath(
 export function getBrokerLogPath(homeDir: string = homedir()): string {
   return join(homeDir, ".pi/agent/intercom/broker.log");
 }
+
+export function getBrokerPidPath(homeDir: string = homedir()): string {
+  return join(homeDir, ".pi/agent/intercom/broker.pid");
+}

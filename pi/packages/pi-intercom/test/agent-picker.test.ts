@@ -5,9 +5,10 @@ import {
   formatAge,
   parseTmuxTarget,
   sessionActivityRank,
-  sortPeerSessions,
+  sortSessionsForPicker,
 } from "../ui/agent-picker-util.ts";
-import { cwdLabel, middleTruncate } from "../ui/agent-picker.ts";
+import { cwdLabel } from "../ui/agent-picker.ts";
+import { middleTruncate } from "../ui/text.ts";
 import type { SessionInfo } from "../types.ts";
 
 // Pure helpers behind the agent picker (Ctrl+Alt+A). The overlay's tmux/exec
@@ -15,7 +16,7 @@ import type { SessionInfo } from "../types.ts";
 // that decides what the user sees and which pane we switch to is, and is the
 // part most likely to regress silently.
 
-// Anchored to real time because sortPeerSessions reads Date.now() internally
+// Anchored to real time because sortSessionsForPicker reads Date.now() internally
 // (no injectable clock); fixture offsets are seconds/minutes so ms drift is safe.
 const NOW = Date.now();
 
@@ -71,14 +72,14 @@ test("sessionActivityRank orders active < idle < stale", () => {
   assert.ok(active < idle && idle < stale, `expected ${active} < ${idle} < ${stale}`);
 });
 
-test("sortPeerSessions ranks active first then by recency, without mutating input", () => {
+test("sortSessionsForPicker ranks active first then by recency, without mutating input", () => {
   const stale = makeSession({ id: "stale", status: "thinking", lastActivity: NOW - 60 * 60 * 1000 });
   const idle = makeSession({ id: "idle", status: "idle", lastActivity: NOW - 5_000 });
   const activeOld = makeSession({ id: "active-old", status: "thinking", lastActivity: NOW - 10_000 });
   const activeNew = makeSession({ id: "active-new", status: "tool:bash", lastActivity: NOW - 1_000 });
   const input = [stale, idle, activeOld, activeNew];
 
-  const sorted = sortPeerSessions(input);
+  const sorted = sortSessionsForPicker(input);
 
   assert.deepEqual(sorted.map(s => s.id), ["active-new", "active-old", "idle", "stale"]);
   // input order is preserved (sort operates on a copy)
