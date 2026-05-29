@@ -55,6 +55,11 @@ compute_total_steps() {
   total=$((total + 1))   # setup_dotfiles
   total=$((total + 1))   # post_install_setup
 
+  # Linux-only steps
+  if [[ "${OS_FAMILY:-}" == "linux" ]]; then
+    total=$((total + 1)) # install_fira_code_nerd_font (calls step only on Linux)
+  fi
+
   # macOS defaults step
   if [[ "${OS_FAMILY:-}" == "macos" ]]; then
     total=$((total + 1)) # setup_macos_defaults

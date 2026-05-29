@@ -5,6 +5,10 @@ return {
     "rafamadriz/friendly-snippets",
   },
   build = "make install_jsregexp",
+  -- Disable LuaSnip's default keymaps (handled via blink.cmp / our own maps).
+  keys = function()
+    return {}
+  end,
   config = function()
     local ls = require("luasnip")
     local s = ls.snippet

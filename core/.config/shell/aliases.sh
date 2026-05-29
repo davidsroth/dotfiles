@@ -186,5 +186,5 @@ fi
 # Safety Aliases
 # ============================================================================
 
-# Prevent accidental file overwrites
+# Resume partial downloads by default (-c = continue, not no-clobber)
 alias wget='wget -c'

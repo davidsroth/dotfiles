@@ -385,12 +385,20 @@ fls() {
 # Find latest file in today's temp directory
 flstd() {
     local dir="/tmp/$(today)"
-    if [[ -d "$dir" ]]; then
-        find "$dir" -type f -print0 | xargs -0 ls -t | head -n 1
-    else
-        echo "No temp directory for today"
+    if [[ ! -d "$dir" ]]; then
+        echo "No temp directory for today" >&2
         return 1
     fi
+    # zsh glob qualifiers: (.) regular files, (om) order by mtime newest-first,
+    # (N) null_glob so "no match" isn't an error, [1] take the newest.
+    # Replaces `find | xargs ls -t | head`, which is wrong when the file count
+    # exceeds one xargs batch (ls -t runs per batch, so head -1 isn't global).
+    local latest=("$dir"/**/*(.omN[1]))
+    if (( ${#latest} == 0 )); then
+        echo "No files in today's temp directory" >&2
+        return 1
+    fi
+    print -r -- "${latest[1]}"
 }
 
 # Open latest file in today's directory

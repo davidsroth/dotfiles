@@ -38,9 +38,9 @@ if not vim.g.vscode then
   map("n", "<leader>r", vim.lsp.buf.rename, { desc = "Rename symbol" })
 end
 
--- Map Shift+[J/K] to move five lines up and down
-map("n", "J", "<c-d>", { desc = "Page down" })
-map("n", "K", "<c-u>", { desc = "Page up" })
+-- Map Shift+[J/K] to scroll half a page down/up (<c-d>/<c-u>)
+map("n", "J", "<c-d>", { desc = "Half page down" })
+map("n", "K", "<c-u>", { desc = "Half page up" })
 
 -- Set H and L to move to the beginning and end of the line
 map("n", "H", "^", { desc = "Move to the beginning of the line" })
