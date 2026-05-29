@@ -748,6 +748,11 @@ install_packages_fallback() {
 install_additional_tools() {
   step "Installing additional tools"
 
+  if [[ "$DRY_RUN" == "true" ]]; then
+    info "[DRY RUN] Would install NVM, zsh-defer, pipx tools, tree-sitter-cli, etc."
+    return 0
+  fi
+
   # NVM
   if [[ ! -d "$HOME/.nvm" ]]; then
     info "Installing NVM..."
@@ -865,7 +870,9 @@ setup_dotfiles_repo() {
   else
     success "Dotfiles repository already present"
 
-    if confirm "Pull latest changes from repository?" "y"; then
+    if [[ "$DRY_RUN" == "true" ]]; then
+      info "[DRY RUN] Would offer to pull latest changes from repository."
+    elif confirm "Pull latest changes from repository?" "y"; then
       cd "$DOTFILES_DIR"
       # Get current branch name
       local current_branch
@@ -967,6 +974,11 @@ report_stow_target() {
 # Returns: 0 on success
 post_install_setup() {
   step "Running post-installation setup"
+
+  if [[ "$DRY_RUN" == "true" ]]; then
+    info "[DRY RUN] Would run git lfs install, clone TPM, copy ~/.gitconfig.local, npm install, and chsh to zsh."
+    return 0
+  fi
 
   # Create necessary directories
   mkdir -p ~/.config
