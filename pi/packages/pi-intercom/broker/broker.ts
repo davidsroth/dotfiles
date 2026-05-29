@@ -3,7 +3,7 @@ import { writeFileSync, unlinkSync, mkdirSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
 import { randomUUID } from "crypto";
-import { writeMessage, writeFrame, encodeMessage, createMessageReader } from "./framing.js";
+import { writeMessage, writeFrame, encodeMessage, createMessageReader, MAX_FRAME_BYTES } from "./framing.js";
 import { getBrokerSocketPath } from "./paths.js";
 import { isMessage, isSessionRegistration } from "./validation.js";
 import type { SessionInfo, BrokerMessage } from "../types.js";
@@ -15,9 +15,17 @@ const PID_PATH = join(INTERCOM_DIR, "broker.pid");
 // wedged or SIGKILL'd-but-not-closed socket). Node would otherwise buffer the
 // data in broker memory without bound; treat such a peer as dead and reap it.
 // Override with PI_INTERCOM_MAX_SOCKET_BUFFER_BYTES.
+//
+// The cap is floored at 2x the max frame size: a single legal message can be
+// up to MAX_FRAME_BYTES, and the re-framed forward adds the sender's
+// SessionInfo, so one in-flight message to a momentarily-slow (but healthy)
+// consumer must NOT be mistaken for a wedge and reaped mid-delivery. Headroom
+// for one in-flight + one queued max frame is the smallest safe bound.
+const MAX_SOCKET_BUFFER_FLOOR = MAX_FRAME_BYTES * 2;
 const MAX_SOCKET_BUFFER_BYTES: number = (() => {
   const raw = Number(process.env.PI_INTERCOM_MAX_SOCKET_BUFFER_BYTES);
-  return Number.isInteger(raw) && raw > 0 ? raw : 8 * 1024 * 1024;
+  const configured = Number.isInteger(raw) && raw > 0 ? raw : 8 * 1024 * 1024;
+  return Math.max(configured, MAX_SOCKET_BUFFER_FLOOR);
 })();
 // Period for the liveness sweep that reaps sessions whose owning process is
 // gone. A SIGKILL'd peer's socket `close` may never fire (e.g. its FD was
@@ -297,12 +305,29 @@ class IntercomBroker {
             });
             break;
           }
+          // Encode the forward frame BEFORE writing. The forward adds the
+          // sender's SessionInfo, so a message at/near the cap inbound can
+          // exceed MAX_FRAME_BYTES once re-framed and make encodeMessage throw.
+          // That is the SENDER's fault (oversized payload) — it must not be
+          // mistaken for the recipient's socket dying and evict an innocent,
+          // healthy session.
+          let forwardFrame: Buffer;
           try {
-            writeMessage(target.socket, {
+            forwardFrame = encodeMessage({
               type: "message",
               from: fromSession.info,
               message,
             });
+          } catch {
+            writeMessage(socket, {
+              type: "delivery_failed",
+              messageId: message.id,
+              reason: "Message too large",
+            });
+            break;
+          }
+          try {
+            writeFrame(target.socket, forwardFrame);
           } catch {
             this.removeSession(target.info.id, "Session disconnected");
             writeMessage(socket, {

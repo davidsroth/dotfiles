@@ -1419,6 +1419,77 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
     });
   }
 
+  // Local-only diagnostics for the `pending` / `status` tool actions. Kept as
+  // standalone helpers (not switch cases) so they can run before the tool's
+  // `ensureConnected` gate — see the note in execute().
+  function buildPendingResult() {
+    const pendingAsks = replyTracker.listPending();
+    if (pendingAsks.length === 0) {
+      return {
+        content: [{ type: "text" as const, text: "No unresolved inbound asks." }],
+        isError: false,
+      };
+    }
+    const now = Date.now();
+    const lines = pendingAsks.map(({ from, message, receivedAt }) => {
+      const preview = message.content.text.replace(/\s+/g, " ").slice(0, 80);
+      const elapsedSeconds = Math.max(0, Math.floor((now - receivedAt) / 1000));
+      return `- ${from.name || from.id} · ${message.id} · ${elapsedSeconds}s ago · ${preview}`;
+    });
+    return {
+      content: [{ type: "text" as const, text: `**Pending asks:**\n${lines.join("\n")}` }],
+      isError: false,
+    };
+  }
+
+  async function buildStatusResult() {
+    const activeClient = client;
+    const connected = Boolean(activeClient && activeClient.isConnected());
+    const pendingAsks = replyTracker.listPending();
+    const lines = [
+      "**Intercom Status:**",
+      `Connected: ${connected ? "Yes" : "No"}`,
+    ];
+    if (activeClient?.sessionId) {
+      lines.push(`Session ID: ${activeClient.sessionId}`);
+    }
+    if (connected && activeClient) {
+      // Only the active-session count needs the network. Wrap it alone so a hung
+      // broker degrades this one line instead of blanking the whole report.
+      try {
+        const sessions = await activeClient.listSessions();
+        lines.push(`Active sessions: ${sessions.length}`);
+      } catch {
+        lines.push("Active sessions: unknown (broker not responding)");
+      }
+    }
+    lines.push(`Reconnect attempts: ${reconnectAttempt}`);
+    lines.push(`Pending outbound: ${activeClient?.pendingSendCount ?? 0} send(s), ${activeClient?.pendingListCount ?? 0} list(s)`);
+    lines.push(`Pending inbound asks: ${pendingAsks.length}`);
+    lines.push(`Awaiting reply: ${replyWaiter ? `yes (from ${replyWaiter.from})` : "no"}`);
+    // Broker process liveness, read from the pid file (no network needed).
+    try {
+      const pid = Number(readFileSync(getBrokerPidPath(), "utf-8").trim());
+      if (Number.isInteger(pid) && pid > 0) {
+        let alive = true;
+        try {
+          process.kill(pid, 0);
+        } catch (killError) {
+          alive = (killError as NodeJS.ErrnoException).code !== "ESRCH";
+        }
+        lines.push(`Broker: pid ${pid} (${alive ? "alive" : "not running"})`);
+      }
+    } catch {
+      // No pid file (broker not started by this user yet); omit the line.
+    }
+    lines.push(`Socket: ${getBrokerSocketPath()}`);
+    lines.push(`Log: ${getBrokerLogPath()}`);
+    return {
+      content: [{ type: "text" as const, text: lines.join("\n") }],
+      isError: false,
+    };
+  }
+
   if (config.enabled) pi.registerTool({
     name: "intercom",
     label: "Intercom",
@@ -1457,6 +1528,21 @@ Usage:
     }),
 
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const { action, to, message, attachments, replyTo } = params;
+
+      // `pending` and `status` are local diagnostics: `pending` reads only the
+      // reply tracker, and `status` reads local state + the broker pid file.
+      // They must work even when the broker is DOWN or UNRESPONSIVE — which is
+      // exactly when they're useful — so handle them before `ensureConnected`
+      // (which would otherwise short-circuit with "not connected" and hide the
+      // very diagnostics you ran the command to see).
+      if (action === "pending") {
+        return buildPendingResult();
+      }
+      if (action === "status") {
+        return await buildStatusResult();
+      }
+
       let connectedClient: IntercomClient;
       try {
         connectedClient = await ensureConnected("tool");
@@ -1469,8 +1555,6 @@ Usage:
       }
 
       syncPresenceIdentity(ctx.sessionManager.getSessionId());
-
-      const { action, to, message, attachments, replyTo } = params;
 
       switch (action) {
         case "list": {
@@ -1747,72 +1831,6 @@ Usage:
           } catch (error) {
             return {
               content: [{ type: "text", text: `Failed to reply: ${getErrorMessage(error)}` }],
-              isError: true,
-              details: { error: true },
-            };
-          }
-        }
-
-        case "pending": {
-          const pendingAsks = replyTracker.listPending();
-          if (pendingAsks.length === 0) {
-            return {
-              content: [{ type: "text", text: "No unresolved inbound asks." }],
-              isError: false,
-            };
-          }
-
-          const now = Date.now();
-          const lines = pendingAsks.map(({ from, message, receivedAt }) => {
-            const preview = message.content.text.replace(/\s+/g, " ").slice(0, 80);
-            const elapsedSeconds = Math.max(0, Math.floor((now - receivedAt) / 1000));
-            return `- ${from.name || from.id} · ${message.id} · ${elapsedSeconds}s ago · ${preview}`;
-          });
-          return {
-            content: [{ type: "text", text: `**Pending asks:**\n${lines.join("\n")}` }],
-            isError: false,
-          };
-        }
-
-        case "status": {
-          try {
-            const mySessionId = connectedClient.sessionId;
-            const sessions = await connectedClient.listSessions();
-            const pendingAsks = replyTracker.listPending();
-            const lines = [
-              "**Intercom Status:**",
-              "Connected: Yes",
-              `Session ID: ${mySessionId}`,
-              `Active sessions: ${sessions.length}`,
-              `Reconnect attempts: ${reconnectAttempt}`,
-              `Pending outbound: ${connectedClient.pendingSendCount} send(s), ${connectedClient.pendingListCount} list(s)`,
-              `Pending inbound asks: ${pendingAsks.length}`,
-              `Awaiting reply: ${replyWaiter ? `yes (from ${replyWaiter.from})` : "no"}`,
-            ];
-            // Broker process liveness, read from the pid file.
-            try {
-              const pid = Number(readFileSync(getBrokerPidPath(), "utf-8").trim());
-              if (Number.isInteger(pid) && pid > 0) {
-                let alive = true;
-                try {
-                  process.kill(pid, 0);
-                } catch (killError) {
-                  alive = (killError as NodeJS.ErrnoException).code !== "ESRCH";
-                }
-                lines.push(`Broker: pid ${pid} (${alive ? "alive" : "not running"})`);
-              }
-            } catch {
-              // No pid file (broker not started by this user yet); omit the line.
-            }
-            lines.push(`Socket: ${getBrokerSocketPath()}`);
-            lines.push(`Log: ${getBrokerLogPath()}`);
-            return {
-              content: [{ type: "text", text: lines.join("\n") }],
-              isError: false,
-            };
-          } catch (error) {
-            return {
-              content: [{ type: "text", text: `Failed to get status: ${getErrorMessage(error)}` }],
               isError: true,
               details: { error: true },
             };

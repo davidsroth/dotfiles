@@ -490,6 +490,70 @@ test("register evicts a prior registration with the same originSessionId", { con
   }
 });
 
+test("broker rejects an oversized re-framed message without evicting the recipient", { concurrency: false }, async () => {
+  // A message whose inbound `send` frame fits under the frame cap can still
+  // exceed it once re-framed for delivery, because the forward adds the
+  // sender's SessionInfo. That is the SENDER's fault (oversized payload) and
+  // must NOT be mistaken for the recipient's socket dying: the recipient must
+  // survive, and the sender must get a "Message too large" failure rather than
+  // a misleading "Session disconnected".
+  const FRAME_CAP = 9000;
+  const broker = spawn("npx", ["--no-install", "tsx", path.join(repoDir, "broker", "broker.ts")], {
+    cwd: repoDir,
+    env: { ...process.env, HOME: sharedHomeDir, USERPROFILE: sharedHomeDir, PI_INTERCOM_MAX_FRAME_BYTES: String(FRAME_CAP) },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  const sender = new IntercomClient();
+  const recipient = new IntercomClient();
+
+  try {
+    await waitForBrokerReady(broker);
+    // ~8 KB name: the sender's register frame (~8.2 KB) still fits under the
+    // 9 KB cap, but `{type:"message", from:<this info>, message}` will exceed it.
+    const hugeName = "P".repeat(8000);
+    await sender.connect({
+      name: hugeName,
+      cwd: repoDir,
+      model: "test-model",
+      pid: process.pid,
+      startedAt: Date.now(),
+      lastActivity: Date.now(),
+    });
+    await recipient.connect({
+      name: "recipient",
+      cwd: repoDir,
+      model: "test-model",
+      pid: process.pid,
+      startedAt: Date.now(),
+      lastActivity: Date.now(),
+    });
+
+    let recipientGotMessage = false;
+    recipient.on("message", () => { recipientGotMessage = true; });
+
+    const result = await sender.send(recipient.sessionId!, {
+      messageId: "oversized-forward",
+      text: "x".repeat(2000),
+    });
+
+    assert.equal(result.delivered, false);
+    assert.match(result.reason ?? "", /too large/i);
+    assert.doesNotMatch(result.reason ?? "", /disconnected/i);
+
+    // The innocent recipient must not be evicted: still connected, still listed,
+    // and it never received the rejected (truncated) message.
+    assert.equal(recipient.isConnected(), true, "recipient must not be evicted");
+    assert.equal(recipientGotMessage, false);
+    const sessions = await recipient.listSessions();
+    assert.ok(sessions.some((s) => s.id === recipient.sessionId), "recipient still registered");
+  } finally {
+    await sender.disconnect().catch(() => undefined);
+    await recipient.disconnect().catch(() => undefined);
+    broker.kill("SIGTERM");
+    await once(broker, "exit").catch(() => undefined);
+  }
+});
+
 test("intercom tool renders compact call and result rows", async () => {
   const { default: piIntercomExtension } = await import("./index.ts");
   const harness = createExtensionHarness();
@@ -594,6 +658,53 @@ test("sessions publish automatic lifecycle status", { concurrency: false }, asyn
     await harness.emitLifecycle("session_shutdown");
     await cleanup();
   }
+});
+
+test("intercom status reports diagnostics when connected", { concurrency: false }, async () => {
+  const { default: piIntercomExtension } = await import("./index.ts");
+  const { planner, cleanup } = await setupClients();
+  const harness = createExtensionHarness("status-diag-worker", { hasUI: true });
+
+  try {
+    piIntercomExtension(harness.pi as never);
+    await harness.emitLifecycle("session_start");
+    await waitForSessionStatus(planner, "status-diag-worker", "idle");
+
+    const intercomTool = harness.tools.find((tool) => tool.name === "intercom")!;
+    const result = await intercomTool.execute("status-1", { action: "status" }, new AbortController().signal, undefined, harness.ctx);
+    const text = result.content.map((c) => c.text).join("\n");
+
+    assert.equal(result.isError, false);
+    assert.match(text, /Connected: Yes/);
+    assert.match(text, /Active sessions: \d+/);
+    assert.match(text, /Reconnect attempts: \d+/);
+    assert.match(text, /Broker: pid \d+ \(alive\)/);
+    assert.match(text, /Socket: /);
+    assert.match(text, /Log: /);
+  } finally {
+    await harness.emitLifecycle("session_shutdown");
+    await cleanup();
+  }
+});
+
+test("intercom status degrades gracefully when not connected", async () => {
+  const { default: piIntercomExtension } = await import("./index.ts");
+  const harness = createExtensionHarness("status-offline-worker");
+
+  // No broker spawned and no session_start emitted, so the extension never
+  // connects. status must still return a non-error diagnostic (Connected: No +
+  // local paths/counters) instead of the old "Intercom not connected" error
+  // that hid the very diagnostics you'd run status to see.
+  piIntercomExtension(harness.pi as never);
+  const intercomTool = harness.tools.find((tool) => tool.name === "intercom")!;
+  const result = await intercomTool.execute("status-offline", { action: "status" }, new AbortController().signal, undefined, harness.ctx);
+  const text = result.content.map((c) => c.text).join("\n");
+
+  assert.equal(result.isError, false);
+  assert.match(text, /Connected: No/);
+  assert.match(text, /Reconnect attempts: \d+/);
+  assert.match(text, /Socket: /);
+  assert.match(text, /Log: /);
 });
 
 test("busy interactive sessions idle-gate top-level asks without aborting", { concurrency: false }, async () => {
