@@ -4,6 +4,8 @@ import { Type } from "typebox";
 import { Text } from "@mariozechner/pi-tui";
 import { IntercomClient } from "./broker/client.ts";
 import { spawnBrokerIfNeeded } from "./broker/spawn.ts";
+import { AgentPickerOverlay } from "./ui/agent-picker.ts";
+import { parseTmuxTarget, sortPeerSessions } from "./ui/agent-picker-util.ts";
 import { SessionListOverlay } from "./ui/session-list.ts";
 import { ComposeOverlay, type ComposeResult } from "./ui/compose.ts";
 import { InlineMessageComponent } from "./ui/inline-message.ts";
@@ -22,6 +24,8 @@ const SUBAGENT_RUN_ID_ENV = "PI_SUBAGENT_RUN_ID";
 const SUBAGENT_CHILD_AGENT_ENV = "PI_SUBAGENT_CHILD_AGENT";
 const SUBAGENT_CHILD_INDEX_ENV = "PI_SUBAGENT_CHILD_INDEX";
 const SUBAGENT_INTERCOM_SESSION_NAME_ENV = "PI_SUBAGENT_INTERCOM_SESSION_NAME";
+const AGENT_PICKER_KEY = process.env.PI_INTERCOM_AGENT_PICKER_KEY?.trim() || "ctrl+alt+a";
+const TMUX_COMMAND_TIMEOUT_MS = 3000;
 
 interface ChildOrchestratorMetadata {
   orchestratorTarget: string;
@@ -419,12 +423,20 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
   let runtimeGeneration = 0;
   let agentRunning = false;
   const activeTools = new Map<string, string>();
+  // Set by an open agent picker so it can refresh its own (`[self]`) row from
+  // local status changes. The broker excludes the originator from presence
+  // broadcasts, so the self row would otherwise never live-update.
+  let onSelfPresenceChange: (() => void) | null = null;
   const replyTracker = new ReplyTracker();
   const pendingIdleMessages: InboundMessageEntry[] = [];
   let inboundFlushTimer: NodeJS.Timeout | null = null;
   let replyWaiter: {
     from: string;
     replyTo: string;
+    // Broker-resolved recipient id (set once `send` reports delivery). The
+    // `from` field may be a name when the target couldn't be pre-resolved, so
+    // the authoritative id is needed to match `session_left` and fast-cancel.
+    recipientId?: string;
     resolve: (message: Message) => void;
     reject: (error: Error) => void;
   } | null = null;
@@ -471,6 +483,11 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
   }
   function rejectReplyWaiter(error: Error): void {
     replyWaiter?.reject(error);
+  }
+  function noteReplyRecipient(replyTo: string, recipientId?: string): void {
+    if (recipientId && replyWaiter?.replyTo === replyTo) {
+      replyWaiter.recipientId = recipientId;
+    }
   }
   function clearReconnectTimer(): void {
     if (!reconnectTimer) {
@@ -546,17 +563,29 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
       originSessionId: currentSessionId,
     };
   }
+  function notifySelfPresenceChange(): void {
+    // The hook drives an open agent picker's self row. Isolate it so a throw
+    // (e.g. a stale refreshing a torn-down TUI) can't escape a host lifecycle
+    // event handler like tool_execution_start.
+    try {
+      onSelfPresenceChange?.();
+    } catch {
+      // Best effort UI refresh; never let it break presence syncing.
+    }
+  }
   function syncPresenceIdentity(sessionId: string): void {
     if (!client || !getLiveContext()) {
       return;
     }
     client.updatePresence({ ...buildPresenceIdentity(pi, sessionId), status: currentStatus() });
+    notifySelfPresenceChange();
   }
   function syncPresenceStatus(): void {
     if (!client || !currentSessionId || !getLiveContext()) {
       return;
     }
     client.updatePresence({ status: currentStatus() });
+    notifySelfPresenceChange();
   }
   function currentSessionTargetMatches(to: string, resolvedTo?: string | null, activeClient?: IntercomClient): boolean {
     const targets = new Set<string>();
@@ -701,7 +730,11 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
       if (client !== nextClient || !replyWaiter) {
         return;
       }
-      if (replyWaiter.from.toLowerCase() === sessionId.toLowerCase()) {
+      const lowerLeft = sessionId.toLowerCase();
+      if (
+        replyWaiter.from.toLowerCase() === lowerLeft
+        || replyWaiter.recipientId?.toLowerCase() === lowerLeft
+      ) {
         rejectReplyWaiter(new Error("Recipient session ended before replying"));
       }
     });
@@ -971,9 +1004,19 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
     clearInboundFlushTimer();
     agentRunning = false;
     activeTools.clear();
-    if (client) {
-      await client.disconnect();
-      client = null;
+    // Drop any picker self-refresh hook so a status sync from a *new* session
+    // can't drive a torn-down overlay/TUI, and clear reconnect bookkeeping.
+    onSelfPresenceChange = null;
+    reconnectPromise = null;
+    reconnectPromiseGeneration = null;
+    // Capture-then-null before awaiting: disconnect() yields to the event loop,
+    // and a reload's session_start -> ensureConnected may install a fresh
+    // client during that await. Nulling after the await would clobber it,
+    // orphaning a live broker connection. Null first, then disconnect the old.
+    const dyingClient = client;
+    client = null;
+    if (dyingClient) {
+      await dyingClient.disconnect();
     }
     runtimeContext = null;
     currentSessionId = null;
@@ -1238,6 +1281,7 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
               details: { error: true },
             };
           }
+          noteReplyRecipient(questionId, sendResult.recipientId);
           pi.appendEntry("intercom_sent", {
             to: metadata.orchestratorTarget,
             message: {
@@ -1555,6 +1599,7 @@ Usage:
                 details: { error: true },
               };
             }
+            noteReplyRecipient(questionId, sendResult.recipientId);
             pi.appendEntry("intercom_sent", {
               to,
               message: { text: message, attachments, replyTo },
@@ -1733,6 +1778,161 @@ Usage:
     },
   });
 
+  async function findTmuxTargetForPid(pid: number): Promise<string | undefined> {
+    const [panesResult, psResult] = await Promise.all([
+      pi.exec("tmux", ["list-panes", "-a", "-F", "#{session_name}:#{window_index}.#{pane_index}\t#{pane_pid}"], { timeout: TMUX_COMMAND_TIMEOUT_MS }),
+      pi.exec("ps", ["-ax", "-o", "pid=,ppid="], { timeout: TMUX_COMMAND_TIMEOUT_MS }),
+    ]);
+
+    if (panesResult.code !== 0 || psResult.code !== 0) {
+      return undefined;
+    }
+
+    const paneTargetsByPid = new Map<number, string>();
+    for (const line of panesResult.stdout.split("\n")) {
+      const [target, panePidText] = line.split("\t");
+      const panePid = Number.parseInt(panePidText ?? "", 10);
+      if (target && Number.isFinite(panePid)) {
+        paneTargetsByPid.set(panePid, target);
+      }
+    }
+
+    const parentByPid = new Map<number, number>();
+    for (const line of psResult.stdout.split("\n")) {
+      const parts = line.trim().split(/\s+/);
+      if (parts.length < 2) continue;
+      const childPid = Number.parseInt(parts[0]!, 10);
+      const parentPid = Number.parseInt(parts[1]!, 10);
+      if (Number.isFinite(childPid) && Number.isFinite(parentPid)) {
+        parentByPid.set(childPid, parentPid);
+      }
+    }
+
+    const seen = new Set<number>();
+    let cursor: number | undefined = pid;
+    while (cursor && !seen.has(cursor)) {
+      seen.add(cursor);
+      const target = paneTargetsByPid.get(cursor);
+      if (target) return target;
+      cursor = parentByPid.get(cursor);
+    }
+    return undefined;
+  }
+
+  async function switchToTmuxTarget(target: string): Promise<void> {
+    const parsed = parseTmuxTarget(target);
+    if (!parsed) {
+      throw new Error(`Invalid tmux target: ${target}`);
+    }
+    const switchResult = await pi.exec("tmux", ["switch-client", "-t", parsed.session], { timeout: TMUX_COMMAND_TIMEOUT_MS });
+    if (switchResult.code !== 0) {
+      throw new Error(switchResult.stderr.trim() || `tmux switch-client failed (${switchResult.code})`);
+    }
+    const selectWindowResult = await pi.exec("tmux", ["select-window", "-t", `${parsed.session}:${parsed.window}`], { timeout: TMUX_COMMAND_TIMEOUT_MS });
+    if (selectWindowResult.code !== 0) {
+      throw new Error(selectWindowResult.stderr.trim() || `tmux select-window failed (${selectWindowResult.code})`);
+    }
+    const selectPaneResult = await pi.exec("tmux", ["select-pane", "-t", target], { timeout: TMUX_COMMAND_TIMEOUT_MS });
+    if (selectPaneResult.code !== 0) {
+      throw new Error(selectPaneResult.stderr.trim() || `tmux select-pane failed (${selectPaneResult.code})`);
+    }
+  }
+
+  async function openAgentPickerOverlay(ctx: ExtensionContext): Promise<void> {
+    const overlayGeneration = runtimeGeneration;
+    const liveContext = getLiveContext(ctx, overlayGeneration);
+    if (!liveContext?.hasUI) return;
+
+    let overlayClient: IntercomClient;
+    try {
+      overlayClient = await ensureConnected("agent-picker");
+    } catch (error) {
+      notifyIfLive(ctx, `Intercom unavailable: ${getErrorMessage(error)}`, "error", overlayGeneration);
+      return;
+    }
+    if (!getLiveContext(ctx, overlayGeneration)) return;
+
+    syncPresenceIdentity(ctx.sessionManager.getSessionId());
+
+    const sessionMap = new Map<string, SessionInfo>();
+    let currentSession: SessionInfo;
+    try {
+      const mySessionId = overlayClient.sessionId;
+      const allSessions = await overlayClient.listSessions();
+      if (!getLiveContext(ctx, overlayGeneration)) return;
+      const foundCurrentSession = allSessions.find(s => s.id === mySessionId);
+      if (!foundCurrentSession) {
+        notifyIfLive(ctx, "Current session is missing from intercom session list", "error", overlayGeneration);
+        return;
+      }
+      currentSession = foundCurrentSession;
+      for (const session of allSessions) sessionMap.set(session.id, session);
+    } catch (error) {
+      notifyIfLive(ctx, `Failed to list sessions: ${getErrorMessage(error)}`, "error", overlayGeneration);
+      return;
+    }
+
+    // Keep the open picker in sync with broker join/leave/presence events so it
+    // reflects live session churn instead of a one-shot snapshot.
+    let overlay: AgentPickerOverlay | undefined;
+    const snapshot = () => sortPeerSessions([...sessionMap.values()]);
+    const pushSessions = () => overlay?.setSessions(snapshot());
+    const onJoined = (session: SessionInfo) => { sessionMap.set(session.id, session); pushSessions(); };
+    const onPresence = (session: SessionInfo) => { sessionMap.set(session.id, session); pushSessions(); };
+    const onLeft = (sessionId: string) => { if (sessionMap.delete(sessionId)) pushSessions(); };
+    // The broker never echoes our own presence back, so mirror local status
+    // changes into the self row directly.
+    const refreshSelf = () => {
+      const self = sessionMap.get(currentSession.id);
+      if (!self) return;
+      sessionMap.set(currentSession.id, { ...self, status: currentStatus(), lastActivity: Date.now() });
+      pushSessions();
+    };
+    overlayClient.on("session_joined", onJoined);
+    overlayClient.on("presence_update", onPresence);
+    overlayClient.on("session_left", onLeft);
+    onSelfPresenceChange = refreshSelf;
+    refreshSelf();
+
+    let selectedSession: SessionInfo | undefined;
+    try {
+      selectedSession = await ctx.ui.custom<SessionInfo | undefined>(
+        (tui, theme, keybindings, done) => {
+          overlay = new AgentPickerOverlay(tui, theme, keybindings, currentSession, snapshot(), done);
+          return overlay;
+        },
+        {
+          overlay: true,
+          overlayOptions: {
+            anchor: "bottom-center",
+            width: "100%",
+            margin: { left: 0, right: 0, bottom: 1, top: 0 },
+          },
+        }
+      ).catch(() => undefined);
+    } finally {
+      overlayClient.off("session_joined", onJoined);
+      overlayClient.off("presence_update", onPresence);
+      overlayClient.off("session_left", onLeft);
+      if (onSelfPresenceChange === refreshSelf) onSelfPresenceChange = null;
+    }
+
+    if (!selectedSession || !getLiveContext(ctx, overlayGeneration)) return;
+
+    try {
+      const target = await findTmuxTargetForPid(selectedSession.pid);
+      if (target) {
+        await switchToTmuxTarget(target);
+        return;
+      }
+
+      const display = selectedSession.name || shortSessionId(selectedSession.id);
+      notifyIfLive(ctx, `No tmux pane found for ${display}`, "warning", overlayGeneration);
+    } catch (error) {
+      notifyIfLive(ctx, `Failed to switch session: ${getErrorMessage(error)}`, "error", overlayGeneration);
+    }
+  }
+
   async function openIntercomOverlay(ctx: ExtensionContext): Promise<void> {
     const overlayGeneration = runtimeGeneration;
     const liveContext = getLiveContext(ctx, overlayGeneration);
@@ -1810,5 +2010,15 @@ Usage:
   pi.registerShortcut("alt+m", {
     description: "Open session intercom",
     handler: async (ctx) => openIntercomOverlay(ctx),
+  });
+
+  pi.registerCommand("agents-picker", {
+    description: "Open running Pi sessions picker",
+    handler: async (_args, ctx) => openAgentPickerOverlay(ctx),
+  });
+
+  pi.registerShortcut(AGENT_PICKER_KEY, {
+    description: "Open running Pi sessions picker",
+    handler: async (ctx) => openAgentPickerOverlay(ctx),
   });
 }

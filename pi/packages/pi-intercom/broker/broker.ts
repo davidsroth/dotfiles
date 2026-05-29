@@ -121,6 +121,23 @@ class IntercomBroker {
   }
 
   start(): void {
+    // Without an 'error' listener, a listen failure (EADDRINUSE race, EACCES,
+    // permissions on the socket dir) is thrown as an uncaught exception and the
+    // broker dies silently. Surface it deterministically and exit non-zero so
+    // the spawning client reports a real startup failure.
+    this.server.on("error", (error) => {
+      console.error("Intercom broker server error:", error);
+      process.exit(1);
+    });
+    // Defense-in-depth: the shared broker serves every session, so one stray
+    // throw/rejection outside the per-connection framing guard must not take
+    // the whole mesh down. Log and keep serving.
+    process.on("uncaughtException", (error) => {
+      console.error("Intercom broker uncaught exception:", error);
+    });
+    process.on("unhandledRejection", (reason) => {
+      console.error("Intercom broker unhandled rejection:", reason);
+    });
     this.server.listen(SOCKET_PATH, () => {
       writeFileSync(PID_PATH, String(process.pid));
       console.log(`Intercom broker started (pid: ${process.pid})`);
@@ -235,8 +252,12 @@ class IntercomBroker {
 
       case "unregister": {
         this.sessions.delete(currentId);
-        this.broadcast({ type: "session_left", sessionId: currentId }, currentId);
         setId(null);
+        this.broadcast({ type: "session_left", sessionId: currentId }, currentId);
+        // The client always `socket.end()`s right after sending `unregister`
+        // and never reuses this socket, so destroy it now to release the FD
+        // immediately instead of waiting for the end/close roundtrip.
+        socket.destroy();
         this.scheduleShutdownCheck();
         break;
       }
@@ -301,7 +322,7 @@ class IntercomBroker {
             });
             break;
           }
-          writeMessage(socket, { type: "delivered", messageId: message.id });
+          writeMessage(socket, { type: "delivered", messageId: message.id, recipientId: target.info.id });
           break;
         }
 
@@ -398,10 +419,22 @@ class IntercomBroker {
   }
 
   private broadcast(msg: BrokerMessage, exclude?: string): void {
+    // A write can throw synchronously (e.g. ERR_STREAM_WRITE_AFTER_END on a
+    // half-closed socket). Isolate each write so one dead peer can't abort the
+    // loop and starve the remaining sessions of the broadcast. Reap the dead
+    // entry after the loop; removeSession re-broadcasts session_left, but its
+    // own guard (missing entry => no-op) bounds the recursion.
+    const dead: string[] = [];
     for (const [id, session] of this.sessions) {
-      if (id !== exclude) {
+      if (id === exclude) continue;
+      try {
         writeMessage(session.socket, msg);
+      } catch {
+        dead.push(id);
       }
+    }
+    for (const id of dead) {
+      this.removeSession(id, "Broadcast write failed");
     }
   }
 

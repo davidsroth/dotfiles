@@ -300,6 +300,9 @@ test("broker routes messages addressed by unique session ID prefix", { concurren
     });
 
     assert.equal(delivered.delivered, true);
+    // recipientId carries the broker-resolved full id even when addressed by
+    // prefix; the extension uses it to fast-cancel a pending ask on session_left.
+    assert.equal(delivered.recipientId, orchestrator.sessionId);
     const [from, message] = await messagePromise;
     assert.equal(from.id, planner.sessionId);
     assert.equal(message.content.text, "hello by short id");

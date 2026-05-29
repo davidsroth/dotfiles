@@ -1,10 +1,36 @@
 import { spawn } from "child_process";
-import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "fs";
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, statSync, unlinkSync, writeFileSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import { homedir } from "os";
 import net from "net";
-import { getBrokerSocketPath } from "./paths.js";
+import { getBrokerLogPath, getBrokerSocketPath } from "./paths.js";
+
+// Cap the broker log so an append-only file can't grow without bound across
+// long-lived brokers; we truncate on (re)spawn once it exceeds this.
+const BROKER_LOG_MAX_BYTES = 5 * 1024 * 1024;
+
+/**
+ * Open the broker log file for the child's stdout/stderr, returning a writable
+ * fd, or undefined if it can't be opened (in which case we fall back to the
+ * default "ignore" stdio). Truncates the log if it has grown past the cap.
+ */
+function openBrokerLogFd(): number | undefined {
+  try {
+    const logPath = getBrokerLogPath();
+    let mode = "a";
+    try {
+      if (statSync(logPath).size > BROKER_LOG_MAX_BYTES) {
+        mode = "w";
+      }
+    } catch {
+      // No existing log yet; append-create is fine.
+    }
+    return openSync(logPath, mode);
+  } catch {
+    return undefined;
+  }
+}
 
 const INTERCOM_DIR = join(homedir(), ".pi/agent/intercom");
 const EXTENSION_DIR = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -151,7 +177,24 @@ export async function spawnBrokerIfNeeded(brokerCommand: string, brokerArgs: str
     if (launch.kind === "windows-launcher") {
       writeWindowsHiddenLauncher(launch.launcherCommandLine, launch.launcherPath);
     }
-    const child = spawn(launch.command, launch.args, getBrokerSpawnOptions());
+    // Capture broker stdout/stderr to a log file so its diagnostics (session
+    // removals, errors, shutdowns) are inspectable instead of going to
+    // /dev/null. The Windows hidden-launcher path keeps "ignore" to preserve
+    // its window-hiding behavior and fd-inheritance semantics.
+    const spawnOptions = getBrokerSpawnOptions();
+    const logFd = launch.kind === "direct" ? openBrokerLogFd() : undefined;
+    const child = spawn(launch.command, launch.args, {
+      ...spawnOptions,
+      stdio: logFd !== undefined ? ["ignore", logFd, logFd] : spawnOptions.stdio,
+    });
+    if (logFd !== undefined) {
+      // The detached child inherited a dup of the fd; release the parent's copy.
+      try {
+        closeSync(logFd);
+      } catch {
+        // Best effort; not fatal if the fd is already gone.
+      }
+    }
     child.unref();
 
     await new Promise<void>((resolve, reject) => {

@@ -11,6 +11,7 @@ conversation or letting agents coordinate.
 
 ```text
 User flow: press Alt+M or run /intercom to pick a session and send a message
+Agent picker: press Ctrl+Alt+A or run /agents-picker to switch to another running Pi session
 ```
 
 ## Why
@@ -27,7 +28,7 @@ Pi-intercom also integrates well with [pi-subagents](https://github.com/nicobail
 
 ## In One Minute
 
-Each pi session that has `pi-intercom` loaded and enabled connects to a tiny local broker over a local IPC transport. The broker keeps track of connected sessions and routes direct messages to the one you target by name or session ID. The extension gives you both a tool (`intercom`) and a small overlay UI (`/intercom` or `Alt+M`). Incoming messages are rendered inline inside the recipient session, can trigger a turn immediately, and are also stored in Pi session history as extension entries.
+Each pi session that has `pi-intercom` loaded and enabled connects to a tiny local broker over a local IPC transport. The broker keeps track of connected sessions and routes direct messages to the one you target by name or session ID. The extension gives you a tool (`intercom`) and small overlay UIs: `/intercom` / `Alt+M` to message another session, and `/agents-picker` / `Ctrl+Alt+A` to switch to another running Pi session. Incoming messages are rendered inline inside the recipient session, can trigger a turn immediately, and are also stored in Pi session history as extension entries.
 
 ## Install
 
@@ -70,6 +71,8 @@ Press **Alt+M** or type `/intercom` to open the session list overlay:
 1. **Select a session** — Use arrow keys to pick a target session
 2. **Compose message** — Write your message in the compose overlay
 3. **Send** — Press Enter to send, Escape to cancel
+
+Press **Ctrl+Alt+A** or type `/agents-picker` to open a PR-picker-style session switcher. Selecting a session jumps to its tmux pane when it has one; headless/background sessions remain listed but show a warning if there is no pane to switch to. The picker marks recent non-idle statuses (`thinking` / `tool:<name>`) as active; old non-idle statuses are shown as stale instead of active. The list live-updates while the overlay is open as sessions join, leave, or change status, preserving your current selection across the re-sort.
 
 ### From the Agent
 
@@ -355,9 +358,10 @@ Only registered in sessions where `pi-subagents` supplied the required child bri
 
 | Key | Action |
 |-----|--------|
-| Alt+M | Open session list overlay |
+| Alt+M | Open session list overlay for messaging |
+| Ctrl+Alt+A | Open running Pi sessions picker for tmux-pane switching |
 | ↑/↓ | Navigate session list |
-| Enter | Select session / Send message |
+| Enter | Select session / Send message or switch pane |
 | Escape | Cancel / Close overlay |
 
 ## Config
@@ -383,6 +387,8 @@ Create `~/.pi/agent/intercom/config.json`:
 | `enabled` | true | Enable/disable intercom entirely |
 | `replyHint` | true | Include reply instruction in incoming messages |
 | `status` | — | Optional custom status suffix shown after the automatic lifecycle status, for example `thinking · researching` |
+
+Set `PI_INTERCOM_AGENT_PICKER_KEY` to override the running Pi sessions picker shortcut (default: `ctrl+alt+a`).
 
 For example, if you have Bun installed and want it to start the broker directly, use:
 

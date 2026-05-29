@@ -19,6 +19,8 @@ interface SendResult {
   id: string;
   delivered: boolean;
   reason?: string;
+  /** Broker-resolved id of the session the message was delivered to. */
+  recipientId?: string;
 }
 
 function toError(error: unknown): Error {
@@ -325,8 +327,11 @@ export class IntercomClient extends EventEmitter {
       }
 
       case "delivered": {
-        const { messageId } = brokerMessage;
+        const { messageId, recipientId } = brokerMessage;
         if (typeof messageId !== "string") {
+          throw new Error("Invalid delivered message");
+        }
+        if (recipientId !== undefined && typeof recipientId !== "string") {
           throw new Error("Invalid delivered message");
         }
 
@@ -337,7 +342,7 @@ export class IntercomClient extends EventEmitter {
         }
 
         this.pendingSends.delete(messageId);
-        pending.resolve({ id: messageId, delivered: true });
+        pending.resolve({ id: messageId, delivered: true, recipientId });
         break;
       }
 

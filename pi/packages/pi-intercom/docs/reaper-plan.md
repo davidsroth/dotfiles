@@ -1,9 +1,27 @@
 # Intercom broker reaper — design plan
 
-**Status:** Proposal, no code changes yet
-**Owner:** TBD
+**Status:** Partially implemented — see implementation status below
+**Owner:** David Roth
 **Created:** 2026-05-25
 **Trigger:** 70 zombie sessions accumulated in a single broker process over 46 h of normal use; one live pi process on the host.
+
+---
+
+## Implementation status (2026-05-29)
+
+| Item | Plan ref | State |
+|------|----------|-------|
+| Ask-side fast-fail: `send` validates target socket writability before claiming delivery | §3.4 / Phase 1 | **Shipped** (`broker.ts` `send` handler) |
+| Client cancels a pending ask on the recipient's `session_left` | §3.4 / Phase 1 | **Shipped** (`index.ts`), now also matches the broker-resolved `recipientId`, not just the typed target |
+| Socket `error` tears down the registry entry (parity with `close`) | Option B.error / Phase 2 | **Shipped** (`broker.ts` `handleConnection`) |
+| Evict prior registration on reconnect via `originSessionId` | failure modes #5/#10 | **Shipped** (`broker.ts` `register` handler) |
+| `broadcast` isolates per-socket write failures and reaps dead peers | (new, beyond original plan) | **Shipped** (`broker.ts` `broadcast`) |
+| `unregister` destroys the socket immediately to release the FD | §1.1 hygiene | **Shipped** (`broker.ts` `unregister` handler) |
+| PID-based liveness sweep | Option C / Phase 3 | **Deferred** — scoped and judged low incremental value once eviction + fast-fail + error-teardown landed; the original zombie symptom is addressed by reconnect eviction |
+| `intercom reap` admin command | §5.1 / Phase 4 | Not started |
+| Diagnostic logging / size warnings | §5.3–5.4 / Phase 5 | Not started |
+
+The sections below are the original design proposal, retained for context.
 
 ---
 

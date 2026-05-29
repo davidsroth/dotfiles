@@ -50,5 +50,5 @@ export type BrokerMessage =
   | { type: "session_joined"; session: SessionInfo }
   | { type: "session_left"; sessionId: string }
   | { type: "error"; error: string }
-  | { type: "delivered"; messageId: string }
+  | { type: "delivered"; messageId: string; recipientId?: string }
   | { type: "delivery_failed"; messageId: string; reason: string };

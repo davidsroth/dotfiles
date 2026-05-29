@@ -4,6 +4,22 @@ All notable changes to the `pi-intercom` extension will be documented in this fi
 
 ## [Unreleased]
 
+### Added
+- Agent picker overlay (`/agents-picker`, `Ctrl+Alt+A`, override via `PI_INTERCOM_AGENT_PICKER_KEY`) to list running pi sessions and switch to a peer's tmux pane. The list live-updates from broker join/leave/presence events while open, preserving the current selection across re-sorts. The `[self]` row also updates from local status changes (the broker never echoes a session's own presence back to it).
+- Unit tests for the agent picker's pure helpers (`test/agent-picker.test.ts`) and the length-prefix framing reader/writer (`test/framing.test.ts`).
+- The broker now logs to `~/.pi/agent/intercom/broker.log` (previously its stdout/stderr were discarded to `/dev/null`), so session removals, errors, and shutdowns are inspectable. The log is truncated when it grows past 5 MiB. The Windows hidden-launcher path is unchanged.
+
+### Changed
+- The broker now evicts a prior registration from the same pi session on reconnect (keyed on `originSessionId`), so duplicate "zombie" rows no longer accumulate when a stale socket's `close` never fires.
+- The `delivered` ack now carries the broker-resolved `recipientId`, letting a pending ask fast-cancel on the recipient's `session_left` even when the target was addressed by name or id prefix.
+
+### Fixed
+- `broadcast` now isolates per-socket write failures (e.g. `ERR_STREAM_WRITE_AFTER_END` on a half-closed socket) and reaps the dead peer, instead of letting one bad socket abort delivery to the remaining sessions.
+- `unregister` now destroys the socket immediately to release the file descriptor instead of waiting for the end/close roundtrip.
+- The framing layer now caps frame size (16 MiB default, override via `PI_INTERCOM_MAX_FRAME_BYTES`). An oversized declared length is rejected as soon as the header is read — before the payload is buffered — preventing a single peer from driving unbounded memory growth or an event-loop stall in the shared broker. `writeMessage` also refuses to send an over-cap payload.
+- The broker now attaches a `net.Server` `'error'` listener so a `listen` failure (e.g. `EADDRINUSE` race, `EACCES`) is logged and exits non-zero instead of throwing uncaught and dying silently. Added top-level `uncaughtException`/`unhandledRejection` guards so a stray throw outside the per-connection framing guard can't take down IPC for every session.
+- `session_shutdown` now nulls the module client *before* awaiting `disconnect()` (capture-then-null), closing a reload race where a freshly-created client could be clobbered and orphaned. It also clears the reconnect promise and the agent-picker self-refresh hook, and the hook invocation is wrapped so a throw can't escape a host lifecycle event handler.
+
 ## [0.6.0] - 2026-05-03
 
 ### Added
