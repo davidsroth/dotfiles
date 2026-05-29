@@ -7,6 +7,7 @@ import { writeMessage, writeFrame, encodeMessage, createMessageReader, MAX_FRAME
 import { getBrokerSocketPath } from "./paths.js";
 import { isMessage, isSessionRegistration } from "./validation.js";
 import type { SessionInfo, BrokerMessage } from "../types.js";
+import { PROTOCOL_VERSION } from "../types.js";
 
 const INTERCOM_DIR = join(homedir(), ".pi/agent/intercom");
 const SOCKET_PATH = getBrokerSocketPath();
@@ -223,7 +224,7 @@ class IntercomBroker {
           this.shutdownTimer = null;
         }
 
-        writeMessage(socket, { type: "registered", sessionId: id });
+        writeMessage(socket, { type: "registered", sessionId: id, version: PROTOCOL_VERSION });
         this.broadcast({ type: "session_joined", session: info }, id);
         break;
       }
@@ -388,7 +389,16 @@ class IntercomBroker {
       }
 
       default:
-        throw new Error(`Unknown client message type: ${clientMessage.type}`);
+        // Forward compatibility: a newer client may send a request type this
+        // (older, long-lived) broker doesn't know. Ignore it rather than
+        // throwing — throwing reaches the reader's onError and destroys the
+        // socket, disconnecting a newer client the moment it uses a new request
+        // type. The newer client's request simply goes unanswered (and times
+        // out client-side) instead of taking down the whole connection.
+        // Known-but-malformed messages are still rejected in their own cases,
+        // and a pre-registration unknown type is still rejected above.
+        console.log(`Ignoring unknown client message type: ${clientMessage.type}`);
+        break;
     }
   }
 

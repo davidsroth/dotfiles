@@ -1,3 +1,15 @@
+/**
+ * Wire protocol version. The broker is a long-lived daemon shared across
+ * sessions and survives in-place package upgrades, so a newer session can talk
+ * to an older broker (or vice-versa). Bump this when adding/changing message
+ * shapes. The handshake is forward/backward compatible: the field rides on
+ * `register`/`registered` as an optional sibling (old peers omit it, new peers
+ * tolerate its absence), and unknown message *types* are ignored rather than
+ * fatal (see the client/broker message dispatch defaults), so a newer peer can
+ * introduce a new event type without disconnecting older peers.
+ */
+export const PROTOCOL_VERSION = 1;
+
 export interface SessionInfo {
   id: string;
   name?: string;
@@ -36,14 +48,14 @@ export interface Attachment {
 }
 
 export type ClientMessage =
-  | { type: "register"; session: Omit<SessionInfo, "id"> }
+  | { type: "register"; session: Omit<SessionInfo, "id">; version?: number }
   | { type: "unregister" }
   | { type: "list"; requestId: string }
   | { type: "send"; to: string; message: Message }
   | { type: "presence"; name?: string; status?: string; model?: string };
 
 export type BrokerMessage =
-  | { type: "registered"; sessionId: string }
+  | { type: "registered"; sessionId: string; version?: number }
   | { type: "sessions"; requestId: string; sessions: SessionInfo[] }
   | { type: "message"; from: SessionInfo; message: Message }
   | { type: "presence_update"; session: SessionInfo }

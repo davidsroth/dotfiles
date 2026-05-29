@@ -5,6 +5,7 @@ import { writeMessage, createMessageReader } from "./framing.js";
 import { getBrokerSocketPath } from "./paths.js";
 import { isMessage, isSessionInfo } from "./validation.js";
 import type { SessionInfo, Message, Attachment } from "../types.js";
+import { PROTOCOL_VERSION } from "../types.js";
 
 const BROKER_SOCKET = getBrokerSocketPath();
 
@@ -31,6 +32,7 @@ function toError(error: unknown): Error {
 export class IntercomClient extends EventEmitter {
   private socket: net.Socket | null = null;
   private _sessionId: string | null = null;
+  private _brokerProtocolVersion: number | null = null;
   private pendingSends = new Map<string, { resolve: (r: SendResult) => void; reject: (e: Error) => void }>();
   private pendingLists = new Map<string, { resolve: (sessions: SessionInfo[]) => void; reject: (e: Error) => void }>();
   private disconnecting = false;
@@ -49,6 +51,11 @@ export class IntercomClient extends EventEmitter {
 
   get sessionId(): string | null {
     return this._sessionId;
+  }
+
+  /** Protocol version reported by the broker in its `registered` reply, if any. */
+  get brokerProtocolVersion(): number | null {
+    return this._brokerProtocolVersion;
   }
 
   /** Number of outbound sends awaiting a delivered/delivery_failed ack. */
@@ -137,6 +144,7 @@ export class IntercomClient extends EventEmitter {
           this.socket = null;
         }
         this._sessionId = null;
+        this._brokerProtocolVersion = null;
         this.disconnectError = null;
         if (connectionEstablished && !wasDisconnecting) {
           this.emit("disconnected", disconnectError);
@@ -188,7 +196,7 @@ export class IntercomClient extends EventEmitter {
       this.once("_registered", onRegistered);
       
       try {
-        writeMessage(socket, { type: "register", session });
+        writeMessage(socket, { type: "register", session, version: PROTOCOL_VERSION });
       } catch (error) {
         cleanupConnectionAttempt();
         cleanupSocketListeners();
@@ -223,6 +231,9 @@ export class IntercomClient extends EventEmitter {
         }
 
         this._sessionId = brokerMessage.sessionId;
+        if (typeof brokerMessage.version === "number") {
+          this._brokerProtocolVersion = brokerMessage.version;
+        }
         this.emit("_registered", { type: "registered", sessionId: brokerMessage.sessionId });
         break;
       }
@@ -328,7 +339,13 @@ export class IntercomClient extends EventEmitter {
       }
 
       default:
-        throw new Error(`Unknown broker message type: ${brokerMessage.type}`);
+        // Forward compatibility: the broker is a long-lived shared daemon, so a
+        // newer broker may broadcast a message type this (older) client does
+        // not know. Ignore it instead of throwing — throwing here would reach
+        // the reader's onError and destroy the socket, disconnecting every
+        // older client the moment a newer broker introduces a new event type.
+        // Known-but-malformed messages are still rejected in their own cases.
+        break;
     }
   }
 

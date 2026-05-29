@@ -1,12 +1,15 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, unlinkSync } from "node:fs";
+import net from "node:net";
 import path from "node:path";
 import { tmpdir } from "node:os";
 import { EventEmitter, once } from "node:events";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { ReplyTracker } from "./reply-tracker.ts";
-import type { Message, SessionInfo } from "./types.ts";
+import { PROTOCOL_VERSION, type Message, type SessionInfo } from "./types.ts";
+import { createMessageReader, writeMessage } from "./broker/framing.ts";
+import { getBrokerSocketPath } from "./broker/paths.ts";
 
 const repoDir = process.cwd();
 const childEnvKeys = [
@@ -551,6 +554,115 @@ test("broker rejects an oversized re-framed message without evicting the recipie
     await recipient.disconnect().catch(() => undefined);
     broker.kill("SIGTERM");
     await once(broker, "exit").catch(() => undefined);
+  }
+});
+
+test("broker echoes its protocol version and ignores an unknown client message type", { concurrency: false }, async () => {
+  // Forward compatibility: a newer client may send a request type this
+  // long-lived broker doesn't know. The broker must ignore it (not destroy the
+  // socket), so the connection stays usable. Also verifies the version
+  // handshake: the broker echoes PROTOCOL_VERSION in its `registered` reply.
+  const { cleanup } = await setupClients();
+  const socket = net.connect(getBrokerSocketPath());
+  const inbox: Array<{ type: string } & Record<string, unknown>> = [];
+  const waiters: Array<(msg: { type: string } & Record<string, unknown>) => void> = [];
+  const reader = createMessageReader((msg) => {
+    const m = msg as { type: string } & Record<string, unknown>;
+    const waiter = waiters.shift();
+    if (waiter) waiter(m);
+    else inbox.push(m);
+  });
+  const nextMessage = () => new Promise<{ type: string } & Record<string, unknown>>((resolve) => {
+    const queued = inbox.shift();
+    if (queued) resolve(queued);
+    else waiters.push(resolve);
+  });
+  socket.on("data", reader);
+  socket.on("error", () => undefined);
+
+  try {
+    await once(socket, "connect");
+    writeMessage(socket, {
+      type: "register",
+      session: {
+        name: "raw-peer",
+        cwd: repoDir,
+        model: "test-model",
+        pid: process.pid,
+        startedAt: Date.now(),
+        lastActivity: Date.now(),
+      },
+    });
+    const registered = await nextMessage();
+    assert.equal(registered.type, "registered");
+    assert.equal(registered.version, PROTOCOL_VERSION);
+
+    // A future/unknown request type must NOT tear the connection down...
+    writeMessage(socket, { type: "subscribe_v2", topics: ["presence"] } as never);
+    // ...the connection is still usable: a known request still gets answered.
+    writeMessage(socket, { type: "list", requestId: "raw-list-1" });
+    const response = await nextMessage();
+    assert.equal(response.type, "sessions");
+    assert.equal(response.requestId, "raw-list-1");
+    assert.equal(socket.destroyed, false);
+  } finally {
+    socket.destroy();
+    await cleanup();
+  }
+});
+
+test("client records the broker version and ignores an unknown broker message type", { concurrency: false }, async () => {
+  // Forward compatibility for the other direction: a newer broker may broadcast
+  // a message type this (older) client doesn't know. The client must ignore it
+  // rather than throw (which would destroy the socket and disconnect every
+  // older client). A stub server stands in for a newer broker.
+  const socketPath = getBrokerSocketPath();
+  try { unlinkSync(socketPath); } catch { /* no stale socket */ }
+  const server = net.createServer((connection) => {
+    const reader = createMessageReader((msg) => {
+      if ((msg as { type: string }).type === "register") {
+        writeMessage(connection, { type: "registered", sessionId: "stub-session", version: PROTOCOL_VERSION });
+        // Unknown (newer-protocol) broadcast — must be ignored, not fatal...
+        writeMessage(connection, { type: "presence_typing_v9", sessionId: "stub-session" } as never);
+        // ...and a following known broadcast must still be delivered.
+        writeMessage(connection, {
+          type: "session_joined",
+          session: {
+            id: "peer-1",
+            name: "peer",
+            cwd: repoDir,
+            model: "test-model",
+            pid: process.pid,
+            startedAt: Date.now(),
+            lastActivity: Date.now(),
+          },
+        });
+      }
+    });
+    connection.on("data", reader);
+    connection.on("error", () => undefined);
+  });
+  await new Promise<void>((resolve) => server.listen(socketPath, () => resolve()));
+
+  const client = new IntercomClient();
+  try {
+    const joinedPromise = once(client, "session_joined") as Promise<[SessionInfo]>;
+    await client.connect({
+      name: "compat-client",
+      cwd: repoDir,
+      model: "test-model",
+      pid: process.pid,
+      startedAt: Date.now(),
+      lastActivity: Date.now(),
+    });
+    assert.equal(client.brokerProtocolVersion, PROTOCOL_VERSION);
+    const [info] = await joinedPromise;
+    assert.equal(info.id, "peer-1");
+    assert.equal(client.isConnected(), true);
+  } finally {
+    await client.disconnect().catch(() => undefined);
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    try { unlinkSync(socketPath); } catch { /* already gone */ }
   }
 });
 

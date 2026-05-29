@@ -1453,6 +1453,9 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
     if (activeClient?.sessionId) {
       lines.push(`Session ID: ${activeClient.sessionId}`);
     }
+    if (connected && activeClient?.brokerProtocolVersion != null) {
+      lines.push(`Broker protocol: v${activeClient.brokerProtocolVersion}`);
+    }
     if (connected && activeClient) {
       // Only the active-session count needs the network. Wrap it alone so a hung
       // broker degrades this one line instead of blanking the whole report.
