@@ -6,7 +6,7 @@
 # everything else.
 
 # Global settings
-command_timeout = 1500       # ms
+command_timeout = 800        # ms (lower is better: large values let slow git_status run longer before cancellation — see starship#6065)
 scan_timeout = 30            # ms for scanning files
 add_newline = true
 palette = "catppuccin_mocha"
@@ -40,11 +40,16 @@ truncation_length = 20
 
 [git_status]
 style = "fg:red"
+# Perf: skip the expensive untracked-file scan and submodule status.
+# Empty `untracked` makes starship pass --untracked-files=no; ignore_submodules
+# passes --ignore-submodules. Together these are the big win in large repos
+# (starship#2625: 156ms -> 1.6ms). Tradeoff: no `?` untracked indicator.
+untracked = ""
+ignore_submodules = true
 conflicted = "="
 ahead = "⇡${count}"
 behind = "⇣${count}"
 diverged = "⇕⇡${ahead_count}⇣${behind_count}"
-untracked = "?"
 stashed = "\\$"
 modified = "!"
 staged = "+"

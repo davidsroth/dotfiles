@@ -96,6 +96,11 @@ export SAVEHIST=100000
 export ZSH_AUTOSUGGEST_USE_ASYNC=1
 export ZSH_AUTOSUGGEST_BUFFER_MAX_SIZE=20
 
+# Avoid git taking/refreshing index locks for read-only status queries.
+# Big win for prompt (starship git_status) responsiveness in large repos and
+# when a file watcher / concurrent git process holds the index lock.
+export GIT_OPTIONAL_LOCKS=0
+
 # Python environment
 export PYENV_VIRTUALENV_DISABLE_PROMPT=1
 
