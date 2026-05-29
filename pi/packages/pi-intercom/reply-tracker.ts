@@ -19,7 +19,13 @@ export class ReplyTracker {
   private readonly pendingTurnContexts: IntercomContext[] = [];
   private currentTurnContext: IntercomContext | null = null;
 
-  constructor(private readonly askTimeoutMs = 10 * 60 * 1000) {}
+  constructor(
+    private readonly askTimeoutMs = 10 * 60 * 1000,
+    // Bound the queue of turn contexts so a long non-idle stretch with steady
+    // inbound messages can't grow it without limit (only beginTurn drains it,
+    // one per turn). Oldest entries are dropped first.
+    private readonly maxPendingTurnContexts = 200,
+  ) {}
 
   recordIncomingMessage(from: SessionInfo, message: Message, receivedAt = Date.now()): IntercomContext {
     const context = { from, message, receivedAt };
@@ -31,6 +37,9 @@ export class ReplyTracker {
 
   queueTurnContext(context: IntercomContext): void {
     this.pendingTurnContexts.push(context);
+    while (this.pendingTurnContexts.length > this.maxPendingTurnContexts) {
+      this.pendingTurnContexts.shift();
+    }
   }
 
   beginTurn(now = Date.now()): void {
@@ -97,6 +106,18 @@ export class ReplyTracker {
       if (now - context.receivedAt > this.askTimeoutMs) {
         this.pendingAsks.delete(messageId);
       }
+    }
+    // Turn contexts are FIFO by receivedAt, so stale entries form a prefix.
+    const cutoff = now - this.askTimeoutMs;
+    let expired = 0;
+    while (
+      expired < this.pendingTurnContexts.length
+      && this.pendingTurnContexts[expired]!.receivedAt <= cutoff
+    ) {
+      expired += 1;
+    }
+    if (expired > 0) {
+      this.pendingTurnContexts.splice(0, expired);
     }
   }
 }

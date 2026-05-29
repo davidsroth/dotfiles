@@ -75,3 +75,33 @@ test("reply removes pending ask after successful reply", () => {
 
   assert.deepEqual(tracker.listPending(1001), []);
 });
+
+test("queueTurnContext drops oldest entries past the cap", () => {
+  const cap = 3;
+  const tracker = new ReplyTracker(10 * 60 * 1000, cap);
+  for (let i = 0; i < cap + 2; i += 1) {
+    const ctx = tracker.recordIncomingMessage(
+      createSession(`s-${i}`, `s-${i}`),
+      createMessage(`ask-${i}`, `m-${i}`, false),
+      1000 + i,
+    );
+    tracker.queueTurnContext(ctx);
+  }
+  // Only the most recent `cap` survive; the two oldest were dropped.
+  tracker.beginTurn(2000);
+  // First surviving turn context should be the 3rd queued (index 2), not index 0.
+  assert.equal((tracker as unknown as { currentTurnContext: { message: Message } }).currentTurnContext.message.id, "ask-2");
+});
+
+test("pruneExpired drops stale queued turn contexts by age", () => {
+  const askTimeoutMs = 1000;
+  const tracker = new ReplyTracker(askTimeoutMs);
+  const stale = tracker.recordIncomingMessage(createSession("old", "old"), createMessage("ask-old", "old", false), 1000);
+  const fresh = tracker.recordIncomingMessage(createSession("new", "new"), createMessage("ask-new", "new", false), 5000);
+  tracker.queueTurnContext(stale);
+  tracker.queueTurnContext(fresh);
+
+  // now=5500: stale (1000) is older than the 1000ms TTL; fresh (5000) survives.
+  tracker.beginTurn(5500);
+  assert.equal((tracker as unknown as { currentTurnContext: { message: Message } }).currentTurnContext.message.id, "ask-new");
+});

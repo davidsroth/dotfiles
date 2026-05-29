@@ -16,9 +16,10 @@
 | Socket `error` tears down the registry entry (parity with `close`) | Option B.error / Phase 2 | **Shipped** (`broker.ts` `handleConnection`) |
 | Evict prior registration on reconnect via `originSessionId` | failure modes #5/#10 | **Shipped** (`broker.ts` `register` handler) |
 | `broadcast` isolates per-socket write failures and reaps dead peers | (new, beyond original plan) | **Shipped** (`broker.ts` `broadcast`) |
+| Backpressure: reap a peer whose outbound buffer exceeds the high-water mark | (new, beyond original plan) | **Shipped** (`broker.ts` `isSocketBackedUp`, `MAX_SOCKET_BUFFER_BYTES`) |
 | `unregister` destroys the socket immediately to release the FD | §1.1 hygiene | **Shipped** (`broker.ts` `unregister` handler) |
-| PID-based liveness sweep | Option C / Phase 3 | **Deferred** — scoped and judged low incremental value once eviction + fast-fail + error-teardown landed; the original zombie symptom is addressed by reconnect eviction |
-| `intercom reap` admin command | §5.1 / Phase 4 | Not started |
+| PID-based liveness sweep | Option C / Phase 3 | **Shipped** — `broker.ts` `reapDeadSessions` on a `setInterval` (`PI_INTERCOM_REAPER_INTERVAL_MS`, default 30 s, `unref`'d). Reaps a session only on `ESRCH` (process definitively gone); EPERM/invalid pids are never reaped. Catches SIGKILL'd peers whose socket `close` never fired and that never reconnect — the residual zombie case eviction couldn't cover. |
+| `intercom reap` admin command | §5.1 / Phase 4 | Not started (the periodic sweep makes a manual command largely unnecessary) |
 | Diagnostic logging / size warnings | §5.3–5.4 / Phase 5 | Not started |
 
 The sections below are the original design proposal, retained for context.

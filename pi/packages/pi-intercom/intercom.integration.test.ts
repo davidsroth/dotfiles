@@ -386,6 +386,61 @@ test("broker returns delivery_failed for an ambiguous name", { concurrency: fals
   }
 });
 
+test("broker reaps a session whose owning process is gone", { concurrency: false }, async () => {
+  const broker = spawn("npx", ["--no-install", "tsx", path.join(repoDir, "broker", "broker.ts")], {
+    cwd: repoDir,
+    env: { ...process.env, HOME: sharedHomeDir, USERPROFILE: sharedHomeDir, PI_INTERCOM_REAPER_INTERVAL_MS: "150" },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  const observer = new IntercomClient();
+  let ghost: InstanceType<typeof IntercomClient> | undefined;
+
+  try {
+    await waitForBrokerReady(broker);
+    await observer.connect({
+      name: "observer",
+      cwd: repoDir,
+      model: "test-model",
+      pid: process.pid,
+      startedAt: Date.now(),
+      lastActivity: Date.now(),
+    });
+
+    // A real pid that is definitely dead: spawn a no-op process and wait for it
+    // to exit, then register a session claiming that (now-dead) pid.
+    const ghostProc = spawn(process.execPath, ["-e", "0"], { stdio: "ignore" });
+    const ghostPid = ghostProc.pid!;
+    await once(ghostProc, "exit");
+
+    const leftPromise = once(observer, "session_left") as Promise<[string]>;
+    ghost = new IntercomClient();
+    await ghost.connect({
+      name: "ghost",
+      cwd: repoDir,
+      model: "test-model",
+      pid: ghostPid,
+      startedAt: Date.now(),
+      lastActivity: Date.now(),
+    });
+    const ghostId = ghost.sessionId;
+
+    // The reaper (150 ms) should detect the dead pid and remove the session.
+    const [leftId] = await Promise.race([
+      leftPromise,
+      new Promise<[string]>((_, reject) => setTimeout(() => reject(new Error("reaper did not fire within 5s")), 5000)),
+    ]);
+    assert.equal(leftId, ghostId);
+
+    const sessions = await observer.listSessions();
+    assert.ok(!sessions.some((session) => session.name === "ghost"), "ghost session should be reaped");
+  } finally {
+    await observer.disconnect().catch(() => undefined);
+    await ghost?.disconnect().catch(() => undefined);
+    broker.kill("SIGTERM");
+    await once(broker, "exit").catch(() => undefined);
+  }
+});
+
 test("register evicts a prior registration with the same originSessionId", { concurrency: false }, async () => {
   const { planner, cleanup } = await setupClients();
 

@@ -27,6 +27,10 @@ const PRESENCE_DEBOUNCE_MS = (() => {
   const raw = Number(process.env.PI_INTERCOM_PRESENCE_DEBOUNCE_MS);
   return Number.isInteger(raw) && raw >= 0 ? raw : 150;
 })();
+// Bound the queue of inbound messages held while the session is non-idle, so a
+// long busy stretch with steady inbound can't grow it without limit. Oldest
+// queued messages are dropped first.
+const MAX_PENDING_IDLE_MESSAGES = 500;
 const SUBAGENT_ORCHESTRATOR_TARGET_ENV = "PI_SUBAGENT_ORCHESTRATOR_TARGET";
 const SUBAGENT_RUN_ID_ENV = "PI_SUBAGENT_RUN_ID";
 const SUBAGENT_CHILD_AGENT_ENV = "PI_SUBAGENT_CHILD_AGENT";
@@ -706,6 +710,9 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
   }
   function queueIdleMessage(entry: InboundMessageEntry): void {
     pendingIdleMessages.push(entry);
+    if (pendingIdleMessages.length > MAX_PENDING_IDLE_MESSAGES) {
+      pendingIdleMessages.splice(0, pendingIdleMessages.length - MAX_PENDING_IDLE_MESSAGES);
+    }
     scheduleInboundFlush();
   }
   function handleIncomingMessage(ctx: ExtensionContext, from: SessionInfo, message: Message): void {

@@ -7,6 +7,7 @@ All notable changes to the `pi-intercom` extension will be documented in this fi
 ### Added
 - Agent picker overlay (`/agents-picker`, `Ctrl+Alt+A`, override via `PI_INTERCOM_AGENT_PICKER_KEY`) to list running pi sessions and switch to a peer's tmux pane. The list live-updates from broker join/leave/presence events while open, preserving the current selection across re-sorts. The `[self]` row also updates from local status changes (the broker never echoes a session's own presence back to it).
 - Unit tests for the agent picker's pure helpers (`test/agent-picker.test.ts`) and the length-prefix framing reader/writer (`test/framing.test.ts`).
+- The broker now runs a periodic liveness sweep (`PI_INTERCOM_REAPER_INTERVAL_MS`, default 30 s; set `0` to disable) that reaps any session whose owning process is gone (`process.kill(pid, 0)` → `ESRCH`). This catches SIGKILL'd peers whose socket `close` never fired and that never reconnect — the residual "zombie session" case the reconnect-eviction couldn't cover. A session is only reaped when its process is definitively gone (EPERM/invalid pids are left alone).
 - The broker now logs to `~/.pi/agent/intercom/broker.log` (previously its stdout/stderr were discarded to `/dev/null`), so session removals, errors, and shutdowns are inspectable. The log is truncated when it grows past 5 MiB. The Windows hidden-launcher path is unchanged.
 
 ### Changed
@@ -18,6 +19,8 @@ All notable changes to the `pi-intercom` extension will be documented in this fi
 - The `delivered` ack now carries the broker-resolved `recipientId`, letting a pending ask fast-cancel on the recipient's `session_left` even when the target was addressed by name or id prefix.
 
 ### Fixed
+- The broker now honors write backpressure: a peer whose outbound buffer grows past a high-water mark (`PI_INTERCOM_MAX_SOCKET_BUFFER_BYTES`, default 8 MiB) is treated as dead and reaped, instead of letting Node buffer outbound data in broker memory without bound. `send` to such a peer returns a `delivery_failed` ("Recipient is not reading messages") rather than a false `delivered`.
+- The reply tracker now bounds its queue of pending turn contexts (drops oldest past a cap, age-prunes stale entries), and the extension caps the queue of inbound messages held while non-idle (drops oldest past 500). Prevents unbounded memory growth during a long busy/non-idle stretch with steady inbound traffic.
 - `broadcast` now isolates per-socket write failures (e.g. `ERR_STREAM_WRITE_AFTER_END` on a half-closed socket) and reaps the dead peer, instead of letting one bad socket abort delivery to the remaining sessions.
 - `unregister` now destroys the socket immediately to release the file descriptor instead of waiting for the end/close roundtrip.
 - The framing layer now caps frame size (16 MiB default, override via `PI_INTERCOM_MAX_FRAME_BYTES`). An oversized declared length is rejected as soon as the header is read — before the payload is buffered — preventing a single peer from driving unbounded memory growth or an event-loop stall in the shared broker. `writeMessage` also refuses to send an over-cap payload.

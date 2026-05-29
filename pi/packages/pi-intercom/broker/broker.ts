@@ -10,6 +10,39 @@ import type { SessionInfo, Message, Attachment, BrokerMessage } from "../types.j
 const INTERCOM_DIR = join(homedir(), ".pi/agent/intercom");
 const SOCKET_PATH = getBrokerSocketPath();
 const PID_PATH = join(INTERCOM_DIR, "broker.pid");
+// If a peer's outbound buffer grows past this, the consumer isn't reading (a
+// wedged or SIGKILL'd-but-not-closed socket). Node would otherwise buffer the
+// data in broker memory without bound; treat such a peer as dead and reap it.
+// Override with PI_INTERCOM_MAX_SOCKET_BUFFER_BYTES.
+const MAX_SOCKET_BUFFER_BYTES: number = (() => {
+  const raw = Number(process.env.PI_INTERCOM_MAX_SOCKET_BUFFER_BYTES);
+  return Number.isInteger(raw) && raw > 0 ? raw : 8 * 1024 * 1024;
+})();
+// Period for the liveness sweep that reaps sessions whose owning process is
+// gone. A SIGKILL'd peer's socket `close` may never fire (e.g. its FD was
+// inherited by an ancestor terminal), so event-driven teardown alone leaves
+// zombies. Override with PI_INTERCOM_REAPER_INTERVAL_MS; 0 disables the sweep.
+const REAPER_INTERVAL_MS: number = (() => {
+  const raw = Number(process.env.PI_INTERCOM_REAPER_INTERVAL_MS);
+  return Number.isInteger(raw) && raw >= 0 ? raw : 30_000;
+})();
+
+/**
+ * Whether a pid is definitively gone. Returns true only on ESRCH (no such
+ * process); EPERM (exists, not ours), invalid pids, and live processes all
+ * return false so we never reap a session we can't prove is dead.
+ */
+function isProcessLikelyDead(pid: number): boolean {
+  if (!Number.isInteger(pid) || pid <= 0) {
+    return false;
+  }
+  try {
+    process.kill(pid, 0);
+    return false;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "ESRCH";
+  }
+}
 
 interface ConnectedSession {
   socket: net.Socket;
@@ -107,6 +140,7 @@ class IntercomBroker {
   private sessions = new Map<string, ConnectedSession>();
   private server: net.Server;
   private shutdownTimer: NodeJS.Timeout | null = null;
+  private reapTimer: NodeJS.Timeout | null = null;
 
   constructor() {
     mkdirSync(INTERCOM_DIR, { recursive: true });
@@ -142,8 +176,25 @@ class IntercomBroker {
       writeFileSync(PID_PATH, String(process.pid));
       console.log(`Intercom broker started (pid: ${process.pid})`);
     });
+    if (REAPER_INTERVAL_MS > 0) {
+      this.reapTimer = setInterval(() => this.reapDeadSessions(), REAPER_INTERVAL_MS);
+      // Don't keep the process alive solely for the sweep.
+      this.reapTimer.unref();
+    }
     process.on("SIGTERM", () => this.shutdown());
     process.on("SIGINT", () => this.shutdown());
+  }
+
+  private reapDeadSessions(): void {
+    const dead: Array<{ id: string; pid: number }> = [];
+    for (const [id, session] of this.sessions) {
+      if (isProcessLikelyDead(session.info.pid)) {
+        dead.push({ id, pid: session.info.pid });
+      }
+    }
+    for (const { id, pid } of dead) {
+      this.removeSession(id, `Owning process ${pid} no longer running`);
+    }
   }
 
   private handleConnection(socket: net.Socket): void {
@@ -318,6 +369,15 @@ class IntercomBroker {
             });
             break;
           }
+          if (this.isSocketBackedUp(target.socket)) {
+            this.removeSession(target.info.id, "Backpressure: outbound buffer exceeded");
+            writeMessage(socket, {
+              type: "delivery_failed",
+              messageId: message.id,
+              reason: "Recipient is not reading messages",
+            });
+            break;
+          }
           try {
             writeMessage(target.socket, {
               type: "message",
@@ -417,6 +477,15 @@ class IntercomBroker {
     return !socket.destroyed && !socket.writableEnded && socket.writable;
   }
 
+  /**
+   * True when a peer's outbound buffer has grown past the high-water mark,
+   * indicating the consumer isn't draining it (slow, wedged, or half-open).
+   * Such a peer must be reaped rather than written to, to bound broker memory.
+   */
+  private isSocketBackedUp(socket: net.Socket): boolean {
+    return socket.writableLength > MAX_SOCKET_BUFFER_BYTES;
+  }
+
   private removeSession(sessionId: string, reason: string): void {
     const session = this.sessions.get(sessionId);
     if (!session) {
@@ -448,6 +517,11 @@ class IntercomBroker {
     const dead: string[] = [];
     for (const [id, session] of this.sessions) {
       if (id === exclude) continue;
+      // Don't pile more onto a peer that isn't draining; reap it instead.
+      if (this.isSocketBackedUp(session.socket)) {
+        dead.push(id);
+        continue;
+      }
       try {
         writeFrame(session.socket, frame);
       } catch {
@@ -455,7 +529,7 @@ class IntercomBroker {
       }
     }
     for (const id of dead) {
-      this.removeSession(id, "Broadcast write failed");
+      this.removeSession(id, "Broadcast write failed or backpressured peer");
     }
   }
 
@@ -477,6 +551,10 @@ class IntercomBroker {
       unlinkSync(PID_PATH);
     } catch {
       // The PID file may already be gone if startup never completed.
+    }
+    if (this.reapTimer) {
+      clearInterval(this.reapTimer);
+      this.reapTimer = null;
     }
     this.server.close();
     process.exit(0);
