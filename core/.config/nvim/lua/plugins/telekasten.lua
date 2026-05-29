@@ -1,4 +1,4 @@
--- Telekasten: Zettelkasten-style notes with Telescope integration
+-- Telekasten: Zettelkasten-style notes (note finding via fzf-lua)
 -- Daily notes configured for ~/notes/daily
 return {
   {
@@ -6,7 +6,6 @@ return {
     cond = not vim.g.vscode,
     cmd = "Telekasten",
     dependencies = {
-      "nvim-telescope/telescope.nvim",
       "nvim-lua/plenary.nvim",
       -- Optional calendar for monthly view
       { "renerocksai/calendar-vim", lazy = true },
@@ -50,29 +49,29 @@ return {
     end,
     keys = {
       { "<leader>z",  "<cmd>Telekasten panel<cr>",          desc = "Telekasten Panel" },
-      -- Use Telescope directly for finding (much faster than telekasten's wrapper)
+      -- Use fzf-lua directly for finding (much faster than telekasten's wrapper)
       { "<leader>zf", function()
-          require("telescope.builtin").find_files({
-            prompt_title = "Find Notes",
+          require("fzf-lua").files({
+            prompt = "Find Notes> ",
             cwd = vim.fn.expand("~/notes"),
-            find_command = { "fd", "--type", "f", "--extension", "md" },
+            cmd = "fd --type f --extension md",
           })
         end,
         desc = "Find Notes"
       },
       { "<leader>zg", function()
-          require("telescope.builtin").live_grep({
-            prompt_title = "Search Notes",
+          require("fzf-lua").live_grep({
+            prompt = "Search Notes> ",
             cwd = vim.fn.expand("~/notes"),
           })
         end,
         desc = "Search Notes (Grep)"
       },
       { "<leader>zd", function()
-          require("telescope.builtin").find_files({
-            prompt_title = "Find Daily Notes",
+          require("fzf-lua").files({
+            prompt = "Find Daily Notes> ",
             cwd = vim.fn.expand("~/notes/daily"),
-            find_command = { "fd", "--type", "f", "--extension", "md" },
+            cmd = "fd --type f --extension md",
           })
         end,
         desc = "Find Daily Notes"

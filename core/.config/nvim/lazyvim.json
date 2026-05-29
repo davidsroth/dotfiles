@@ -1,6 +1,6 @@
 {
   "extras": [
-
+    "lazyvim.plugins.extras.editor.fzf"
   ],
   "install_version": 7,
   "news": {
