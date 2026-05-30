@@ -12,13 +12,16 @@ const TOOL_READ_MAX_CHARS = 50_000;
 
 const TARGETS = ["memory", "scratchpad", "daily", "all"] as const;
 const ACTIONS = ["read", "search", "append", "replace", "scratch_done"] as const;
+const SCOPES = ["global", "local"] as const;
 
 type Target = (typeof TARGETS)[number];
 type Action = (typeof ACTIONS)[number];
+type Scope = (typeof SCOPES)[number];
 
 type MemoryParams = {
 	action: Action;
 	target?: Target;
+	scope?: Scope;
 	text?: string;
 	query?: string;
 	oldText?: string;
@@ -31,6 +34,7 @@ type StorePaths = {
 	dir: string;
 	dailyDir: string;
 	memory: string;
+	memoryLocal: string;
 	scratchpad: string;
 	today: string;
 };
@@ -53,6 +57,12 @@ const MemoryParamsSchema = Type.Object({
 				"For target=memory only: the '##' section heading to append a block under (created at EOF if missing), or to read in isolation. Ignored for daily/scratchpad.",
 		}),
 	),
+	scope: Type.Optional(
+		StringEnum(SCOPES, {
+			description:
+				"For target=memory only: 'global' (default) = MEMORY.md, synced across machines; 'local' = MEMORY.local.md, specific to this machine. Ignored for daily/scratchpad.",
+		}),
+	),
 });
 
 const defaultMemoryTemplate = `# Long-term memory
@@ -69,6 +79,17 @@ Stable facts and preferences that should influence future pi sessions.
 - Primary shell: zsh.
 - Primary editor: Neovim.
 - Primary terminal: WezTerm.
+
+## Other
+`;
+
+const defaultMemoryLocalTemplate = `# This-machine memory
+
+Facts and context specific to THIS machine (not synced across machines).
+Use this for machine-bound paths, the role of this machine (e.g. work vs
+personal), and project/operational context that only applies here.
+
+## Machine
 
 ## Other
 `;
@@ -103,10 +124,16 @@ const getStorePaths = (): StorePaths => {
 		dir,
 		dailyDir,
 		memory: join(dir, "MEMORY.md"),
+		memoryLocal: join(dir, "MEMORY.local.md"),
 		scratchpad: join(dir, "SCRATCHPAD.md"),
 		today: join(dailyDir, `${today}.md`),
 	};
 };
+
+// Resolve the MEMORY file for a scope. Global (default) syncs across machines;
+// local stays on this machine.
+const memoryPathForScope = (paths: StorePaths, scope: Scope | undefined): string =>
+	scope === "local" ? paths.memoryLocal : paths.memory;
 
 const writeFileIfMissing = async (path: string, content: string): Promise<void> => {
 	await mkdir(dirname(path), { recursive: true });
@@ -122,6 +149,7 @@ const ensureStore = async (): Promise<StorePaths> => {
 	const paths = getStorePaths();
 	await mkdir(paths.dailyDir, { recursive: true });
 	await writeFileIfMissing(paths.memory, defaultMemoryTemplate);
+	await writeFileIfMissing(paths.memoryLocal, defaultMemoryLocalTemplate);
 	await writeFileIfMissing(paths.scratchpad, defaultScratchpadTemplate);
 	return paths;
 };
@@ -194,10 +222,13 @@ const buildOutline = (content: string): string =>
 		.map((head) => (head.level === 2 ? `- ${head.title}` : `  - ${head.title}`))
 		.join("\n");
 
-const resolveTargetPath = async (target: Target | undefined): Promise<{ paths: StorePaths; path?: string }> => {
+const resolveTargetPath = async (
+	target: Target | undefined,
+	scope?: Scope,
+): Promise<{ paths: StorePaths; path?: string }> => {
 	const paths = await ensureStore();
 	const resolved = target ?? "memory";
-	if (resolved === "memory") return { paths, path: paths.memory };
+	if (resolved === "memory") return { paths, path: memoryPathForScope(paths, scope) };
 	if (resolved === "scratchpad") return { paths, path: paths.scratchpad };
 	if (resolved === "daily") {
 		await ensureDailyFile(paths);
@@ -225,11 +256,11 @@ const formatFileBlock = (storeDir: string, path: string, content: string): strin
 	return `## ${rel}\n\n${content.trimEnd()}`;
 };
 
-const readTarget = async (target: Target | undefined): Promise<{ text: string; files: string[] }> => {
-	const { paths, path } = await resolveTargetPath(target);
+const readTarget = async (target: Target | undefined, scope?: Scope): Promise<{ text: string; files: string[] }> => {
+	const { paths, path } = await resolveTargetPath(target, scope);
 	if ((target ?? "memory") === "all") {
 		await ensureDailyFile(paths);
-		const files = [paths.memory, paths.scratchpad, paths.today];
+		const files = [paths.memory, paths.memoryLocal, paths.scratchpad, paths.today];
 		const blocks = await Promise.all(files.map(async (file) => formatFileBlock(paths.dir, file, await readTextFile(file))));
 		return { text: blocks.join("\n\n---\n\n"), files };
 	}
@@ -237,8 +268,12 @@ const readTarget = async (target: Target | undefined): Promise<{ text: string; f
 	return { text: await readTextFile(path), files: [path] };
 };
 
-const readSection = async (target: Target | undefined, section: string): Promise<{ text: string; files: string[] }> => {
-	const { paths, path } = await resolveTargetPath(target ?? "memory");
+const readSection = async (
+	target: Target | undefined,
+	section: string,
+	scope?: Scope,
+): Promise<{ text: string; files: string[] }> => {
+	const { paths, path } = await resolveTargetPath(target ?? "memory", scope);
 	if (!path) return { text: "Error: section read requires target memory, scratchpad, or daily.", files: [] };
 	if ((target ?? "memory") === "daily") await ensureDailyFile(paths);
 	const content = await readTextFile(path);
@@ -302,7 +337,7 @@ const appendToTarget = async (params: MemoryParams): Promise<{ text: string; fil
 	if (!text) return { text: "Error: text is required for append.", files: [] };
 	if (!target || target === "all") return { text: "Error: target must be memory, scratchpad, or daily for append.", files: [] };
 
-	const { paths, path } = await resolveTargetPath(target);
+	const { paths, path } = await resolveTargetPath(target, params.scope);
 	if (!path) throw new Error("No path resolved for append target");
 	if (target === "daily") await ensureDailyFile(paths);
 
@@ -365,7 +400,7 @@ const replaceInTarget = async (params: MemoryParams): Promise<{ text: string; fi
 	if (!params.oldText) return { text: "Error: oldText is required for replace.", files: [] };
 	if (params.newText === undefined) return { text: "Error: newText is required for replace.", files: [] };
 
-	const { paths, path } = await resolveTargetPath(target);
+	const { paths, path } = await resolveTargetPath(target, params.scope);
 	if (!path) throw new Error("No path resolved for replace target");
 
 	let replacementCount = 0;
@@ -435,10 +470,12 @@ const buildCommandPathMessage = async (target: string | undefined): Promise<stri
 		await ensureDailyFile(paths);
 		return paths.today;
 	}
+	if (normalized === "local" || normalized === "memory.local" || normalized === "memory.local.md") return paths.memoryLocal;
 	if (normalized === "dir" || normalized === "directory") return paths.dir;
 	return [
 		`Memory directory: ${paths.dir}`,
-		`MEMORY.md: ${paths.memory}`,
+		`MEMORY.md (global): ${paths.memory}`,
+		`MEMORY.local.md (this machine): ${paths.memoryLocal}`,
 		`SCRATCHPAD.md: ${paths.scratchpad}`,
 		`Today: ${paths.today}`,
 	].join("\n");
@@ -456,23 +493,44 @@ export default function memoryExtension(pi: ExtensionAPI) {
 
 	pi.on("before_agent_start", async (event) => {
 		const paths = await ensureStore();
-		const memory = (await readTextFile(paths.memory)).trim();
-		if (!memory) return;
 
-		const truncated = truncateText(memory, INJECT_MAX_CHARS);
-		let body = truncated.text;
-		if (truncated.truncated) {
-			body += `\n\n### Memory outline (full section map — call the \`memory\` tool with action=read and \`section\` to load any of these)\n${buildOutline(memory)}`;
-		}
-		const suffix = [
-			"## Long-term user memory",
-			"",
-			"The following content is from `~/.pi/agent/memory/MEMORY.md`. Treat it as persistent user memory unless the user says otherwise.",
-			"",
-			body,
-		].join("\n");
+		// Render one MEMORY file into a labeled prompt section, truncating with an
+		// outline fallback so a large file still exposes its section map.
+		const renderBlock = async (path: string, heading: string, source: string, intro: string): Promise<string | null> => {
+			let raw = "";
+			try {
+				raw = (await readTextFile(path)).trim();
+			} catch {
+				raw = "";
+			}
+			if (!raw) return null;
+			const truncated = truncateText(raw, INJECT_MAX_CHARS);
+			let body = truncated.text;
+			if (truncated.truncated) {
+				body += `\n\n### Memory outline (full section map — call the \`memory\` tool with action=read${source ? `, ${source},` : ""} and \`section\` to load any of these)\n${buildOutline(raw)}`;
+			}
+			return [heading, "", intro, "", body].join("\n");
+		};
 
-		return { systemPrompt: `${event.systemPrompt}\n\n${suffix}` };
+		const blocks = (
+			await Promise.all([
+				renderBlock(
+					paths.memory,
+					"## Long-term user memory (global)",
+					"scope=global",
+					"The following content is from `~/.pi/agent/memory/MEMORY.md` (synced across machines). Treat it as persistent user memory unless the user says otherwise.",
+				),
+				renderBlock(
+					paths.memoryLocal,
+					"## This-machine memory (local)",
+					"scope=local",
+					"The following content is from `~/.pi/agent/memory/MEMORY.local.md` (specific to THIS machine, not synced). Treat it as persistent machine-local context.",
+				),
+			])
+		).filter((block): block is string => block !== null);
+
+		if (blocks.length === 0) return;
+		return { systemPrompt: `${event.systemPrompt}\n\n${blocks.join("\n\n")}` };
 	});
 
 	pi.registerCommand("memory", {
@@ -481,7 +539,7 @@ export default function memoryExtension(pi: ExtensionAPI) {
 			const trimmed = args.trim();
 			let target = trimmed;
 			if (!target && ctx.hasUI) {
-				const choice = await ctx.ui.select("Memory", ["directory", "MEMORY.md", "SCRATCHPAD.md", "today daily"]);
+				const choice = await ctx.ui.select("Memory", ["directory", "MEMORY.md", "MEMORY.local.md", "SCRATCHPAD.md", "today daily"]);
 				if (!choice) return;
 				target = choice;
 			}
@@ -500,6 +558,7 @@ export default function memoryExtension(pi: ExtensionAPI) {
 		promptGuidelines: [
 			"Use memory opportunistically when durable preferences, recurring facts, decisions, discoveries, or follow-up tasks would help future pi sessions.",
 			"Use memory target=memory for stable long-term facts/preferences; target=scratchpad for uncertain reminders or cleanup items; target=daily for timestamped session facts, decisions, and discoveries.",
+			"For target=memory, choose scope: omit/scope=global for portable facts that apply across all machines and contexts (preferences, general tooling/process lessons); scope=local for facts specific to THIS machine (its role e.g. work vs personal, machine-bound paths, machine/project-specific operational context). Global memory is committed and synced; local memory stays on this machine.",
 			"When appending to target=memory, pass a well-formed Markdown block (e.g. a `### Title` heading plus body). Set `section` to an EXISTING `##` heading to insert under it; if the section doesn't exist the append is rejected (with the section list) rather than fragmenting the file. To create a new section, append a block whose first line is `## Title` and omit `section`. Don't append bare bullets or `- ##` headers.",
 			"To inspect part of a large MEMORY.md, call read with `section=\"<## heading>\"` rather than reading the whole file; a read that truncates appends an outline of available sections.",
 			"Use memory search/read before adding long-term memory when duplication or conflict is likely.",
@@ -512,12 +571,12 @@ export default function memoryExtension(pi: ExtensionAPI) {
 			switch (params.action) {
 				case "read": {
 					if (params.section?.trim() && (params.target ?? "memory") !== "all") {
-						const result = await readSection(params.target, params.section.trim());
+						const result = await readSection(params.target, params.section.trim(), params.scope);
 						const truncated = truncateText(result.text, TOOL_READ_MAX_CHARS);
 						output = { text: truncated.text, files: result.files };
 						break;
 					}
-					const result = await readTarget(params.target);
+					const result = await readTarget(params.target, params.scope);
 					const truncated = truncateText(result.text, TOOL_READ_MAX_CHARS);
 					const text =
 						truncated.truncated && (params.target ?? "memory") === "memory"
@@ -547,6 +606,7 @@ export default function memoryExtension(pi: ExtensionAPI) {
 				details: {
 					action: params.action,
 					target: params.target,
+					scope: params.scope,
 					files: output.files,
 					count: output.count,
 				},

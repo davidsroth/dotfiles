@@ -33,6 +33,27 @@ pi-settings:
 
 alias pis := pi-settings
 
+# Link the tracked global memory file (~/.pi/agent/memory/MEMORY.md → repo).
+# Per-machine memory (MEMORY.local.md, SCRATCHPAD.md, daily/) stays local.
+pi-memory:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  SRC="{{justfile_directory()}}/pi/.pi/agent/memory/MEMORY.md"
+  DIR="$HOME/.pi/agent/memory"
+  DEST="$DIR/MEMORY.md"
+  mkdir -p "$DIR/daily"
+  if [[ -L "$DEST" ]]; then
+    echo "Already linked: $DEST → $(readlink "$DEST")"
+  else
+    if [[ -e "$DEST" ]]; then
+      BACKUP="$DEST.pre-link-backup-$(date +%Y%m%d-%H%M%S)"
+      echo "Backing up existing $DEST → $BACKUP"
+      mv "$DEST" "$BACKUP"
+    fi
+    ln -s "../../../dotfiles/pi/.pi/agent/memory/MEMORY.md" "$DEST"
+    echo "Linked global memory: $DEST"
+  fi
+
 # Update repo and restow changes.
 update:
   git pull --rebase --autostash || true

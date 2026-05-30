@@ -1006,6 +1006,32 @@ setup_pi_settings() {
   fi
 }
 
+# Symlink the tracked global memory file into ~/.pi/agent/memory/ without
+# disturbing the per-machine local files (MEMORY.local.md, SCRATCHPAD.md,
+# daily/). Memory is excluded from stow (.stow-local-ignore) so this owns the
+# link. Non-clobbering: a pre-existing real MEMORY.md is backed up, not deleted.
+setup_pi_memory() {
+  local src="${DOTFILES_DIR}/pi/.pi/agent/memory/MEMORY.md"
+  local dir="$HOME/.pi/agent/memory"
+  local dest="$dir/MEMORY.md"
+
+  [[ -f "$src" ]] || return 0
+  mkdir -p "$dir/daily"
+
+  if [[ -L "$dest" ]]; then
+    : # already a symlink; leave it
+  elif [[ -e "$dest" ]]; then
+    local backup="$dest.pre-link-backup-$(date +%Y%m%d-%H%M%S)"
+    warning "Existing $dest is a real file; backing up to $backup before linking"
+    mv "$dest" "$backup"
+  fi
+
+  if [[ ! -L "$dest" ]]; then
+    ln -s "../../../dotfiles/pi/.pi/agent/memory/MEMORY.md" "$dest"
+  fi
+  success "Global memory linked: $dest → tracked MEMORY.md"
+}
+
 # Point git at the tracked .githooks dir so post-merge/post-checkout regenerate
 # pi settings automatically after pulls. Hooks also keep git-lfs working.
 setup_git_hooks() {
@@ -1106,6 +1132,9 @@ post_install_setup() {
 
   # pi settings: merge global base + per-machine local overrides
   setup_pi_settings || true
+
+  # pi memory: link tracked global MEMORY.md (local files stay per-machine)
+  setup_pi_memory || true
 
   # git hooks: auto-regenerate pi settings after pulls (set last so it wins
   # over any hooksPath git-lfs install may have configured above)

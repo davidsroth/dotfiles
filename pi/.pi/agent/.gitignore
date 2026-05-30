@@ -1,2 +1,9 @@
 settings.local.json
 settings.json
+
+# Per-machine memory (only global MEMORY.md is tracked)
+memory/MEMORY.local.md
+memory/SCRATCHPAD.md
+memory/daily/
+memory/MEMORY.*backup*.md
+memory/MEMORY.pre-split-backup-*.md
