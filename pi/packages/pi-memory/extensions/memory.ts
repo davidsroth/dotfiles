@@ -24,6 +24,7 @@ type MemoryParams = {
 	oldText?: string;
 	newText?: string;
 	limit?: number;
+	section?: string;
 };
 
 type StorePaths = {
@@ -46,6 +47,12 @@ const MemoryParamsSchema = Type.Object({
 	oldText: Type.Optional(Type.String({ description: "Exact text to replace." })),
 	newText: Type.Optional(Type.String({ description: "Replacement text." })),
 	limit: Type.Optional(Type.Number({ description: "Maximum search results to return." })),
+	section: Type.Optional(
+		Type.String({
+			description:
+				"For target=memory only: the '##' section heading to append a block under (created at EOF if missing), or to read in isolation. Ignored for daily/scratchpad.",
+		}),
+	),
 });
 
 const defaultMemoryTemplate = `# Long-term memory
@@ -134,6 +141,59 @@ const truncateText = (text: string, maxChars: number): { text: string; truncated
 	};
 };
 
+const headingLevel = (line: string): number => {
+	const match = /^(#{1,6})\s/.exec(line);
+	return match ? (match[1] as string).length : 0;
+};
+
+const headingText = (line: string): string => line.replace(/^#{1,6}\s+/, "").trim();
+
+// Parse ATX headings, skipping lines inside ``` / ~~~ fenced code blocks so a
+// "# comment" in a shell example isn't mistaken for a section heading.
+const parseHeadings = (lines: string[]): { index: number; level: number; title: string }[] => {
+	const out: { index: number; level: number; title: string }[] = [];
+	let fence: string | null = null;
+	for (let i = 0; i < lines.length; i++) {
+		const line = lines[i] ?? "";
+		const fenceMatch = /^\s*(```|~~~)/.exec(line);
+		if (fenceMatch) {
+			const marker = fenceMatch[1] as string;
+			fence = fence === null ? marker : fence === marker ? null : fence;
+			continue;
+		}
+		if (fence !== null) continue;
+		const level = headingLevel(line);
+		if (level > 0) out.push({ index: i, level, title: headingText(line) });
+	}
+	return out;
+};
+
+// Range of a Markdown section: [heading line, next heading of same-or-higher level).
+const findSectionRange = (lines: string[], section: string): { start: number; end: number; level: number } | null => {
+	const heads = parseHeadings(lines);
+	const needle = section.trim().toLowerCase();
+	for (let k = 0; k < heads.length; k++) {
+		const head = heads[k];
+		if (!head || head.title.toLowerCase() !== needle) continue;
+		let end = lines.length;
+		for (let m = k + 1; m < heads.length; m++) {
+			if ((heads[m]?.level ?? 0) <= head.level) {
+				end = heads[m]?.index ?? lines.length;
+				break;
+			}
+		}
+		return { start: head.index, end, level: head.level };
+	}
+	return null;
+};
+
+// Compact outline of the '##' / '###' headings, for orienting in a large file.
+const buildOutline = (content: string): string =>
+	parseHeadings(content.split("\n"))
+		.filter((head) => head.level === 2 || head.level === 3)
+		.map((head) => (head.level === 2 ? `- ${head.title}` : `  - ${head.title}`))
+		.join("\n");
+
 const resolveTargetPath = async (target: Target | undefined): Promise<{ paths: StorePaths; path?: string }> => {
 	const paths = await ensureStore();
 	const resolved = target ?? "memory";
@@ -177,6 +237,22 @@ const readTarget = async (target: Target | undefined): Promise<{ text: string; f
 	return { text: await readTextFile(path), files: [path] };
 };
 
+const readSection = async (target: Target | undefined, section: string): Promise<{ text: string; files: string[] }> => {
+	const { paths, path } = await resolveTargetPath(target ?? "memory");
+	if (!path) return { text: "Error: section read requires target memory, scratchpad, or daily.", files: [] };
+	if ((target ?? "memory") === "daily") await ensureDailyFile(paths);
+	const content = await readTextFile(path);
+	const lines = content.split("\n");
+	const range = findSectionRange(lines, section);
+	if (!range) {
+		return {
+			text: `Error: section "${section}" not found in ${relative(paths.dir, path)}.\n\nAvailable sections:\n${buildOutline(content)}`,
+			files: [path],
+		};
+	}
+	return { text: lines.slice(range.start, range.end).join("\n").trimEnd(), files: [path] };
+};
+
 const searchMemory = async (params: MemoryParams): Promise<{ text: string; files: string[]; count: number }> => {
 	const query = params.query?.trim() || params.text?.trim();
 	if (!query) return { text: "Error: query is required for memory search.", files: [], count: 0 };
@@ -190,10 +266,19 @@ const searchMemory = async (params: MemoryParams): Promise<{ text: string; files
 	for (const file of files) {
 		const rel = relative(paths.dir, file);
 		const lines = (await readTextFile(file)).split("\n");
+		const headByIndex = new Map(parseHeadings(lines).map((head) => [head.index, head]));
+		const stack: { level: number; title: string }[] = [];
 		for (let i = 0; i < lines.length; i++) {
 			const line = lines[i] ?? "";
+			const head = headByIndex.get(i);
+			if (head) {
+				while (stack.length && (stack[stack.length - 1]?.level ?? 0) >= head.level) stack.pop();
+				stack.push({ level: head.level, title: head.title });
+			}
 			if (!line.toLowerCase().includes(needle)) continue;
-			matches.push(`${rel}:${i + 1}: ${line}`);
+			const crumb = stack.map((s) => s.title).join(" \u203a ");
+			const loc = crumb ? `${rel} \u203a ${crumb}:${i + 1}` : `${rel}:${i + 1}`;
+			matches.push(`${loc}: ${line}`);
 			if (matches.length >= limit) {
 				return {
 					text: `${matches.join("\n")}\n\n[Search truncated at ${limit} result(s).]`,
@@ -221,8 +306,7 @@ const appendToTarget = async (params: MemoryParams): Promise<{ text: string; fil
 	if (!path) throw new Error("No path resolved for append target");
 	if (target === "daily") await ensureDailyFile(paths);
 
-	const entry =
-		target === "scratchpad" ? `- [ ] ${text}\n` : target === "daily" ? `- ${timeString()} — ${text}\n` : `- ${text}\n`;
+	let resultText = `Appended to ${relative(paths.dir, path)}.`;
 
 	await withFileMutationQueue(path, async () => {
 		await mkdir(dirname(path), { recursive: true });
@@ -232,11 +316,45 @@ const appendToTarget = async (params: MemoryParams): Promise<{ text: string; fil
 		} catch {
 			current = "";
 		}
+
+		if (target === "memory") {
+			// Memory is structured Markdown. Append a well-formed block (no bullet
+			// wrapper, which would accrete as stray "- ..." / "- ##" lines) and place
+			// it under `section` when given, creating the section at EOF if missing.
+			const block = text.replace(/\s+$/, "");
+			const sectionName = params.section?.trim();
+			if (sectionName) {
+				// `section` targets an EXISTING heading only. On a miss we do NOT
+				// silently create a section (a typo would fragment the file); the
+				// caller creates one by appending a block that starts with `## Title`
+				// and no `section`.
+				const lines = current.split("\n");
+				const range = findSectionRange(lines, sectionName);
+				if (!range) {
+					resultText =
+						`Section "${sectionName}" not found in ${relative(paths.dir, path)} \u2014 nothing written.\n` +
+						`Existing sections:\n${buildOutline(current)}\n` +
+						`To create a new section, append a block whose first line is "## ${sectionName}" and omit \`section\`.`;
+					return;
+				}
+				let insertAt = range.end;
+				while (insertAt > range.start + 1 && (lines[insertAt - 1] ?? "").trim() === "") insertAt--;
+				lines.splice(insertAt, 0, "", block, "");
+				await writeFile(path, lines.join("\n"), "utf8");
+				resultText = `Appended under "${sectionName}" in ${relative(paths.dir, path)}.`;
+			} else {
+				const sep = current.length === 0 || current.endsWith("\n") ? "" : "\n";
+				await writeFile(path, `${current}${sep}\n${block}\n`, "utf8");
+			}
+			return;
+		}
+
+		const entry = target === "scratchpad" ? `- [ ] ${text}\n` : `- ${timeString()} — ${text}\n`;
 		const separator = current.length === 0 || current.endsWith("\n") ? "" : "\n";
 		await writeFile(path, `${current}${separator}${entry}`, "utf8");
 	});
 
-	return { text: `Appended to ${relative(paths.dir, path)}.`, files: [path] };
+	return { text: resultText, files: [path] };
 };
 
 const replaceInTarget = async (params: MemoryParams): Promise<{ text: string; files: string[] }> => {
@@ -342,12 +460,16 @@ export default function memoryExtension(pi: ExtensionAPI) {
 		if (!memory) return;
 
 		const truncated = truncateText(memory, INJECT_MAX_CHARS);
+		let body = truncated.text;
+		if (truncated.truncated) {
+			body += `\n\n### Memory outline (full section map — call the \`memory\` tool with action=read and \`section\` to load any of these)\n${buildOutline(memory)}`;
+		}
 		const suffix = [
 			"## Long-term user memory",
 			"",
 			"The following content is from `~/.pi/agent/memory/MEMORY.md`. Treat it as persistent user memory unless the user says otherwise.",
 			"",
-			truncated.text,
+			body,
 		].join("\n");
 
 		return { systemPrompt: `${event.systemPrompt}\n\n${suffix}` };
@@ -378,6 +500,8 @@ export default function memoryExtension(pi: ExtensionAPI) {
 		promptGuidelines: [
 			"Use memory opportunistically when durable preferences, recurring facts, decisions, discoveries, or follow-up tasks would help future pi sessions.",
 			"Use memory target=memory for stable long-term facts/preferences; target=scratchpad for uncertain reminders or cleanup items; target=daily for timestamped session facts, decisions, and discoveries.",
+			"When appending to target=memory, pass a well-formed Markdown block (e.g. a `### Title` heading plus body). Set `section` to an EXISTING `##` heading to insert under it; if the section doesn't exist the append is rejected (with the section list) rather than fragmenting the file. To create a new section, append a block whose first line is `## Title` and omit `section`. Don't append bare bullets or `- ##` headers.",
+			"To inspect part of a large MEMORY.md, call read with `section=\"<## heading>\"` rather than reading the whole file; a read that truncates appends an outline of available sections.",
 			"Use memory search/read before adding long-term memory when duplication or conflict is likely.",
 			"Do not store secrets, credentials, private tokens, or highly ephemeral implementation details in memory.",
 		],
@@ -387,9 +511,19 @@ export default function memoryExtension(pi: ExtensionAPI) {
 
 			switch (params.action) {
 				case "read": {
+					if (params.section?.trim() && (params.target ?? "memory") !== "all") {
+						const result = await readSection(params.target, params.section.trim());
+						const truncated = truncateText(result.text, TOOL_READ_MAX_CHARS);
+						output = { text: truncated.text, files: result.files };
+						break;
+					}
 					const result = await readTarget(params.target);
 					const truncated = truncateText(result.text, TOOL_READ_MAX_CHARS);
-					output = { text: truncated.text, files: result.files };
+					const text =
+						truncated.truncated && (params.target ?? "memory") === "memory"
+							? `${truncated.text}\n\n## Outline (call read with section="<heading>" to load one section)\n${buildOutline(result.text)}`
+							: truncated.text;
+					output = { text, files: result.files };
 					break;
 				}
 				case "search":
