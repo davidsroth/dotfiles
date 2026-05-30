@@ -1,0 +1,12 @@
+# Standard stow ignores (replaces defaults when this file is present)
+RCS
+CVS
+\.svn
+\.git
+_darcs
+\.hg
+\.#.*
+#.*
+
+# Generated per-machine file — managed by `just pi-settings`, not stowed
+^\.pi/agent/settings\.json$

@@ -588,9 +588,25 @@ install_homebrew() {
     [[ "$VERBOSE" == "true" ]] && success "Homebrew already installed" || true
   fi
 
-  # Update Homebrew
+  # Update Homebrew, waiting up to 60s if another update is already running
   info "Updating Homebrew..."
-  brew update 2>&1
+  local brew_out elapsed=0
+  while true; do
+    brew_out=$(brew update 2>&1) && break
+    if echo "$brew_out" | grep -q "already running"; then
+      if [[ $elapsed -ge 60 ]]; then
+        warning "brew update lock held for >60s — skipping"
+        return 0
+      fi
+      info "Waiting for brew update lock... (${elapsed}s)"
+      sleep 5
+      ((elapsed += 5))
+    else
+      echo "$brew_out" >&2
+      return 1
+    fi
+  done
+  [[ -n "$brew_out" ]] && echo "$brew_out"
 }
 
 # Install base packages on Debian/Ubuntu via apt
@@ -975,6 +991,36 @@ report_stow_target() {
   fi
 }
 
+# Generate ~/.pi/agent/settings.json by merging settings.base.json + settings.local.json.
+# settings.local.json is per-machine (gitignored); copy settings.local.json.example to create it.
+setup_pi_settings() {
+  local base="${DOTFILES_DIR}/pi/.pi/agent/settings.base.json"
+  local local_settings="$HOME/.pi/agent/settings.local.json"
+  local dest="$HOME/.pi/agent/settings.json"
+
+  [[ -f "$base" ]] || return 0
+  mkdir -p "$(dirname "$dest")"
+
+  # Remove stow symlink if it exists (shouldn't with .stow-local-ignore, but safety net)
+  [[ -L "$dest" ]] && rm "$dest"
+
+  if [[ -f "$local_settings" ]]; then
+    if check_command jq; then
+      info "Merging pi settings.base.json + settings.local.json..."
+      jq -s '.[0] * .[1]' "$base" "$local_settings" > "$dest"
+      success "Pi settings generated at $dest"
+    else
+      warning "jq not found; copying base settings only (install jq to enable local merging)"
+      cp "$base" "$dest"
+    fi
+  else
+    info "No settings.local.json found; copying settings.base.json → $dest"
+    info "Copy pi/.pi/agent/settings.local.json.example to $local_settings for per-machine overrides"
+    cp "$base" "$dest"
+    success "Pi settings copied"
+  fi
+}
+
 # Perform post-installation tasks (directories, Git LFS, TPM, shell)
 # Returns: 0 on success
 post_install_setup() {
@@ -1056,6 +1102,45 @@ post_install_setup() {
 
   # Shared agent skills
   setup_agent_skills || true
+
+  # pi extension packages
+  install_pi_package_deps || true
+
+  # pi settings: merge global base + per-machine local overrides
+  setup_pi_settings || true
+}
+
+# Install npm dependencies for pi extension packages under dotfiles/pi/packages.
+# Pi loads these via relative paths from ~/.pi/agent/settings.json; missing
+# node_modules cause extension load failures (e.g. "Cannot find module 'croner'").
+install_pi_package_deps() {
+  local pkg_root="$DOTFILES_DIR/pi/packages"
+  [[ -d "$pkg_root" ]] || return 0
+
+  if ! check_command npm; then
+    warning "npm not found; skipping pi package dependency install"
+    return 0
+  fi
+
+  local pkg name
+  for pkg in "$pkg_root"/*/; do
+    [[ -f "$pkg/package.json" ]] || continue
+    # Skip packages with no runtime dependencies declared
+    jq -e '.dependencies // empty | length > 0' "$pkg/package.json" >/dev/null 2>&1 || continue
+    name="$(basename "$pkg")"
+    if [[ -d "$pkg/node_modules" ]]; then
+      [[ "$VERBOSE" == "true" ]] && success "pi package $name deps already installed" || true
+      continue
+    fi
+    info "Installing deps for pi package: $name"
+    local cmd="install"
+    [[ -f "$pkg/package-lock.json" ]] && cmd="ci"
+    if (cd "$pkg" && npm "$cmd" --silent); then
+      success "pi package $name deps installed"
+    else
+      warning "npm $cmd failed for pi package $name"
+    fi
+  done
 }
 
 # Link shared agent skills to AI coding assistants

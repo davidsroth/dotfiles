@@ -1,9 +1,6 @@
 {
-  "lastChangelogVersion": "0.74.1",
   "defaultThinkingLevel": "high",
   "theme": "catppuccin-mocha",
-  "defaultProvider": "anthropic",
-  "defaultModel": "claude-opus-4-7",
   "terminal": {
     "showTerminalProgress": true
   },
@@ -21,15 +18,6 @@
     "npm:pi-web-access"
   ],
   "hideThinkingBlock": false,
-  "enabledModels": [
-    "anthropic/claude-opus-4-7",
-    "anthropic/claude-sonnet-4-6",
-    "openai/gpt-5.5",
-    "openai/gpt-5.4",
-    "openai/gpt-5.4-mini",
-    "google/gemini-3.1-pro-preview",
-    "azure-foundry/Kimi-K2.6"
-  ],
   "doubleEscapeAction": "tree",
   "treeFilterMode": "all",
   "warnings": {
