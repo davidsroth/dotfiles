@@ -244,7 +244,7 @@ for session in sessions:
     else:
         target = path or name
     marker = pi_marker(path or target)
-    print(f"{icons.get(src, "•")} {marker}{name}\t{target}\t{src}")
+    print(f"{icons.get(src, chr(0x2022))} {marker}{name}\t{target}\t{src}")
 '
 }
 
