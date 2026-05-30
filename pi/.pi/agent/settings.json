@@ -13,6 +13,7 @@
     "../../packages/pi-subagents",
     "../../packages/pi-btw",
     "../../packages/pi-intercom",
+    "../../packages/pi-intercom-tailnet",
     "../../packages/pi-qna",
     "../../packages/pi-plan-review",
     "../../packages/pi-memory",
