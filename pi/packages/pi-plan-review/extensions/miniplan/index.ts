@@ -527,7 +527,7 @@ button.success:hover { background: var(--success-hover); }
 .notice { padding: 14px; text-align: center; font-weight: 600; font-family: inherit; }
 
 /* ── Narrow viewport: stack main + aside vertically, let body scroll ── */
-@media (max-width: 720px) {
+@media (max-width: 960px) {
   html, body { height: auto; overflow: visible; }
   body { flex-direction: column; min-height: 100vh; }
   main { flex: 0 0 auto; padding: 18px 14px 24px; overflow-y: visible; }
@@ -922,7 +922,7 @@ $('general').addEventListener('keydown',e=>{
 </html>`;
 }
 
-function startServer(content: string, options: ReviewPageOptions, colors: Record<string, string>, isLight: boolean): Promise<ReviewResult> {
+function startServer(content: string, options: ReviewPageOptions, colors: Record<string, string>, isLight: boolean, onUrl?: (url: string) => void): Promise<ReviewResult> {
 	return new Promise((resolve, reject) => {
 		let done = false;
 		let timeout: ReturnType<typeof setTimeout> | undefined;
@@ -989,6 +989,7 @@ function startServer(content: string, options: ReviewPageOptions, colors: Record
 					if (!addr || typeof addr === "string") throw new Error("bind failed");
 					returnFocusApp = await getFrontmostAppName();
 					const url = `http://127.0.0.1:${addr.port}`;
+					try { onUrl?.(url); } catch { /* notify is best-effort */ }
 					await openBrowser(url);
 				} catch (err) {
 					if (!done) {
@@ -1019,11 +1020,19 @@ export default function plan(pi: ExtensionAPI): void {
 		pi.appendEntry("plan", { currentPlanPath });
 	}
 
+	const MAX_CONTEXT_LEN = 240;
+
+	function truncate(s: string, max: number): string {
+		if (s.length <= max) return s;
+		return `${s.slice(0, max - 1).trimEnd()}\u2026`;
+	}
+
+	/** Bullet form, used by the `submit_plan` feedback path only. */
 	function formatCommentBullets(comments: PlanComment[] | undefined): string[] {
 		if (!comments || comments.length === 0) return [];
 		return comments.map((c) => {
 			if (c.context && c.context !== c.selectedText) {
-				return `- \u201c${c.selectedText}\u201d (in: \u201c${c.context}\u201d) \u2014 ${c.text}`;
+				return `- \u201c${c.selectedText}\u201d (in: \u201c${truncate(c.context, MAX_CONTEXT_LEN)}\u201d) \u2014 ${c.text}`;
 			}
 			return `- \u201c${c.selectedText}\u201d \u2014 ${c.text}`;
 		});
@@ -1044,25 +1053,54 @@ export default function plan(pi: ExtensionAPI): void {
 		return parts.join("\n");
 	}
 
-	function formatMessageReference(found: AssistantTextResult): string {
-		if (!found.entryId) return "assistant message opened with /markup";
-		const shortId = found.entryId.slice(0, 8);
-		const when = found.timestamp ? `, ${found.timestamp}` : "";
-		return `assistant message ${shortId} (entryId: ${found.entryId}${when})`;
+	/** One inline note rendered as a markdown quote block + paragraph. */
+	function formatCommentBlock(c: PlanComment): string {
+		const sel = c.selectedText.trim();
+		const ctx = c.context?.trim() ?? "";
+		const note = c.text.trim();
+		const lines: string[] = [`> \u201c${sel}\u201d`];
+		if (ctx && ctx !== sel) {
+			lines.push(`> _in: \u201c${truncate(ctx, MAX_CONTEXT_LEN)}\u201d_`);
+		}
+		lines.push("");
+		lines.push(note);
+		return lines.join("\n");
 	}
 
-	function formatLastReply(result: ReviewResult, found: AssistantTextResult): string {
-		const parts: string[] = [];
-		if (result.feedback?.trim()) parts.push(result.feedback.trim());
+	/**
+	 * Format the captured /markup result as a user-message payload.
+	 *
+	 *   - 0 notes \u2192 just the typed reply (or empty, caller handles).
+	 *   - 1 note, no separate reply text \u2192 single compact
+	 *     `Re \u201csel\u201d: note` line, with `(in: \u201c\u2026\u201d)` only
+	 *     when the surrounding block differs from the selection.
+	 *   - otherwise \u2192 reply text (if any) followed by per-note quote
+	 *     blocks, separated by blank lines.
+	 *
+	 * No entryId, short-id, or timestamp \u2014 the agent already has the
+	 * previous assistant turn in context, and the heading was just noise.
+	 */
+	function formatLastReply(result: ReviewResult, _found: AssistantTextResult): string {
+		const feedback = result.feedback?.trim() ?? "";
+		const comments = (result.comments ?? []).filter((c) => c.text.trim().length > 0);
 
-		const commentLines = formatCommentBullets(result.comments);
-		if (commentLines.length > 0) {
-			if (parts.length > 0) parts.push("");
-			parts.push(`## Notes on ${formatMessageReference(found)}`);
-			parts.push("");
-			parts.push(...commentLines);
+		if (comments.length === 0) return feedback;
+
+		if (comments.length === 1 && !feedback) {
+			const c = comments[0];
+			const sel = c.selectedText.trim();
+			const ctx = c.context?.trim() ?? "";
+			const note = c.text.trim();
+			if (!ctx || ctx === sel) {
+				return `Re \u201c${sel}\u201d: ${note}`;
+			}
+			return `Re \u201c${sel}\u201d (in: \u201c${truncate(ctx, MAX_CONTEXT_LEN)}\u201d): ${note}`;
 		}
-		return parts.join("\n");
+
+		const blocks: string[] = [];
+		if (feedback) blocks.push(feedback);
+		for (const c of comments) blocks.push(formatCommentBlock(c));
+		return blocks.join("\n\n");
 	}
 
 	pi.registerCommand("plan-status", {
@@ -1094,9 +1132,10 @@ export default function plan(pi: ExtensionAPI): void {
 		}
 
 		const { colors, isLight } = loadTheme(ctx);
-		try { ctx.ui.notify("Markup: opening last assistant message in browser…", "info"); } catch {}
 
-		void startServer(found.text, LAST_REPLY_OPTIONS, colors, isLight)
+		void startServer(found.text, LAST_REPLY_OPTIONS, colors, isLight, (url) => {
+			try { ctx.ui.notify(`Markup: opening last assistant message in browser: ${url}`, "info"); } catch {}
+		})
 			.then((result) => {
 				const reply = formatLastReply(result, found).trim();
 				if (!reply) {
@@ -1171,11 +1210,11 @@ export default function plan(pi: ExtensionAPI): void {
 
 			const { colors, isLight } = loadTheme(ctx);
 
-			try { ctx.ui.notify("Plan: opening review in browser…", "info"); } catch {}
-
 			let result: ReviewResult;
 			try {
-				result = await startServer(content, { ...PLAN_REVIEW_OPTIONS, sourceLabel: inputPath }, colors, isLight);
+				result = await startServer(content, { ...PLAN_REVIEW_OPTIONS, sourceLabel: inputPath }, colors, isLight, (url) => {
+					try { ctx.ui.notify(`Plan: opening review in browser: ${url}`, "info"); } catch {}
+				});
 			} catch (err) {
 				const msg = err instanceof Error ? err.message : String(err);
 				return { content: [{ type: "text", text: `Browser review failed (${msg}). Proceeding with auto-approve.` }] };
