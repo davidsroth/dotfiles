@@ -6,6 +6,39 @@ export interface IntercomContext {
   receivedAt: number;
 }
 
+/** State of an in-flight outbound `ask`/`aside` awaiting its reply. */
+export interface ReplyWaiterMatch {
+  /** The raw target string passed to `ask` (may be a full id, name, or short/prefix id). */
+  from: string;
+  /** The id of the question message; the reply must carry this as `replyTo`. */
+  replyTo: string;
+  /** Broker-resolved full id of the recipient, captured from the delivery ack. */
+  recipientId?: string;
+}
+
+/**
+ * Decide whether an inbound message resolves a pending outbound ask-waiter.
+ *
+ * The sender match must tolerate prefix/short-id addressing: when `ask` was
+ * addressed by a short id (as `intercom list` prints) or a name, the reply's
+ * `from.id` is the full session id and won't equal the raw `waiter.from`. The
+ * broker-resolved `recipientId` bridges that gap. Without it, prefix-addressed
+ * replies fall through to the idle-message buffer and only surface when the
+ * turn ends (e.g. on cancel) — the ask never resolves on its own.
+ */
+export function replyResolvesWaiter(
+  waiter: ReplyWaiterMatch,
+  from: Pick<SessionInfo, "id" | "name">,
+  message: Pick<Message, "replyTo">,
+): boolean {
+  const senderTarget = from.name || from.id;
+  const fromMatches = senderTarget.toLowerCase() === waiter.from.toLowerCase()
+    || from.id === waiter.from
+    || (waiter.recipientId !== undefined && from.id === waiter.recipientId);
+  const replyMatches = message.replyTo === waiter.replyTo;
+  return fromMatches && replyMatches;
+}
+
 function matchesPendingSender(context: IntercomContext, to: string): boolean {
   if (context.from.id === to) {
     return true;

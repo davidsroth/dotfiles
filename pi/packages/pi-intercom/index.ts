@@ -14,7 +14,7 @@ import { ComposeOverlay, type ComposeResult } from "./ui/compose.ts";
 import { InlineMessageComponent } from "./ui/inline-message.ts";
 import { loadConfig, type IntercomConfig } from "./config.ts";
 import type { SessionInfo, Message, Attachment } from "./types.ts";
-import { ReplyTracker } from "./reply-tracker.ts";
+import { ReplyTracker, replyResolvesWaiter } from "./reply-tracker.ts";
 import { resolveIntercomPresenceName } from "./presence-name.ts";
 import { answerAside } from "./side-session.ts";
 
@@ -763,15 +763,9 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
     if (!liveContext) {
       return;
     }
-    if (replyWaiter) {
-      const senderTarget = from.name || from.id;
-      const fromMatches = senderTarget.toLowerCase() === replyWaiter.from.toLowerCase()
-        || from.id === replyWaiter.from;
-      const replyMatches = message.replyTo === replyWaiter.replyTo;
-      if (fromMatches && replyMatches) {
-        replyWaiter.resolve(message);
-        return;
-      }
+    if (replyWaiter && replyResolvesWaiter(replyWaiter, from, message)) {
+      replyWaiter.resolve(message);
+      return;
     }
     // An inbound aside question is answered out of band and never enters the
     // timeline/history. (Its eventual reply is a normal message that the

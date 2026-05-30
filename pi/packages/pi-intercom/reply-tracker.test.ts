@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { ReplyTracker } from "./reply-tracker.ts";
+import { ReplyTracker, replyResolvesWaiter } from "./reply-tracker.ts";
 import type { Message, SessionInfo } from "./types.ts";
 
 function createSession(id: string, name: string): SessionInfo {
@@ -104,4 +104,51 @@ test("pruneExpired drops stale queued turn contexts by age", () => {
   // now=5500: stale (1000) is older than the 1000ms TTL; fresh (5000) survives.
   tracker.beginTurn(5500);
   assert.equal((tracker as unknown as { currentTurnContext: { message: Message } }).currentTurnContext.message.id, "ask-new");
+});
+
+test("replyResolvesWaiter matches a full-id reply when the ask was addressed by a short/prefix id", () => {
+  // Regression: `intercom list` prints short (prefix) ids, so users address
+  // `ask` by them. The reply's from.id is the full session id; without using
+  // the broker-resolved recipientId the waiter never resolves and the reply is
+  // parked in the idle buffer until the turn ends (e.g. on cancel).
+  const fullId = "2f123799-1a97-4f4f-b1fe-34bb5eeed9aa";
+  const waiter = { from: "2f123799", replyTo: "q1", recipientId: fullId };
+  const from = { id: fullId, name: "pi-intercom takeover survey" };
+
+  assert.equal(replyResolvesWaiter(waiter, from, { replyTo: "q1" }), true);
+});
+
+test("replyResolvesWaiter does NOT match a prefix-addressed ask without recipientId", () => {
+  // Before the fix recipientId was captured but unused: short-id addressing
+  // could not correlate the full-id reply.
+  const fullId = "2f123799-1a97-4f4f-b1fe-34bb5eeed9aa";
+  const waiter = { from: "2f123799", replyTo: "q1" };
+  const from = { id: fullId, name: "pi-intercom takeover survey" };
+
+  assert.equal(replyResolvesWaiter(waiter, from, { replyTo: "q1" }), false);
+});
+
+test("replyResolvesWaiter still matches by full id and by name", () => {
+  const fullId = "2f123799-1a97-4f4f-b1fe-34bb5eeed9aa";
+  assert.equal(
+    replyResolvesWaiter({ from: fullId, replyTo: "q1" }, { id: fullId, name: "X" }, { replyTo: "q1" }),
+    true,
+  );
+  assert.equal(
+    replyResolvesWaiter({ from: "My Session", replyTo: "q1" }, { id: fullId, name: "My Session" }, { replyTo: "q1" }),
+    true,
+  );
+});
+
+test("replyResolvesWaiter requires the reply's replyTo to match the question id", () => {
+  const fullId = "2f123799-1a97-4f4f-b1fe-34bb5eeed9aa";
+  const waiter = { from: "2f123799", replyTo: "q1", recipientId: fullId };
+  // Right sender, wrong correlation id -> not this waiter's reply.
+  assert.equal(replyResolvesWaiter(waiter, { id: fullId, name: "X" }, { replyTo: "q2" }), false);
+});
+
+test("replyResolvesWaiter does not match an unrelated sender", () => {
+  const waiter = { from: "2f123799", replyTo: "q1", recipientId: "2f123799-aaaa" };
+  const other = { id: "9999bbbb-cccc", name: "someone else" };
+  assert.equal(replyResolvesWaiter(waiter, other, { replyTo: "q1" }), false);
 });
