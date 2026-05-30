@@ -169,6 +169,17 @@ function padRight(text: string, width: number): string {
 	return text + " ".repeat(width - textWidth);
 }
 
+function topBorderWithTitle(theme: Theme, title: string, inner: number): string {
+	const accent = (text: string) => theme.fg("borderAccent", text);
+	const maxTitleWidth = Math.max(0, inner - 4);
+	let padded = ` ${title} `;
+	if (visibleWidth(padded) > maxTitleWidth) {
+		padded = ` ${truncateToWidth(title, Math.max(1, maxTitleWidth - 2), "…")} `;
+	}
+	const tail = Math.max(1, inner - 1 - visibleWidth(padded));
+	return `${accent("╭─")}${padded}${accent("─".repeat(tail))}${accent("╮")}`;
+}
+
 function joinLeftRight(left: string, right: string, width: number): string {
 	const leftWidth = visibleWidth(left);
 	const rightWidth = visibleWidth(right);
@@ -645,7 +656,7 @@ export default function dashboardWidget(pi: ExtensionAPI) {
 
 							const currentState = listState();
 							const summary = formatPrSummary(theme, currentState, view);
-							const bodyLines: string[] = [formatViewTabs(), summary];
+							const bodyLines: string[] = [formatViewTabs()];
 
 							if (currentState.prsLoading && prs.length === 0) {
 								bodyLines.push(theme.fg("muted", "  Loading…"));
@@ -673,7 +684,7 @@ export default function dashboardWidget(pi: ExtensionAPI) {
 							const paddedBody = bodyLines.map((line) => padRight(truncateToWidth(line, inner, "…"), inner));
 
 							return [
-								theme.fg("borderAccent", `╭${"─".repeat(inner)}╮`),
+								topBorderWithTitle(theme, summary, inner),
 								...paddedBody.map((line) => theme.fg("borderAccent", "│") + line + theme.fg("borderAccent", "│")),
 								theme.fg("borderAccent", `╰${"─".repeat(inner)}╯`),
 							].map((line) => truncateToWidth(line, width, ""));
@@ -696,15 +707,17 @@ export default function dashboardWidget(pi: ExtensionAPI) {
 								return;
 							}
 							if (matchesKey(data, Key.shift(Key.tab)) || matchesKey(data, Key.up) || data === "k") {
-								if (selected > 0) {
-									selected--;
+								const total = list().length;
+								if (total > 0) {
+									selected = (selected - 1 + total) % total;
 									tui.requestRender();
 								}
 								return;
 							}
 							if (matchesKey(data, Key.tab) || matchesKey(data, Key.down) || data === "j") {
-								if (selected < list().length - 1) {
-									selected++;
+								const total = list().length;
+								if (total > 0) {
+									selected = (selected + 1) % total;
 									tui.requestRender();
 								}
 								return;
