@@ -409,7 +409,7 @@ Create `~/.pi/agent/intercom/config.json`:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `PI_INTERCOM_AGENT_PICKER_KEY` | `ctrl+alt+a` | Override the running-sessions picker shortcut |
+| `PI_INTERCOM_AGENT_PICKER_KEY` | `ctrl+alt+i` | Override the running-sessions picker shortcut |
 | `PI_INTERCOM_PRESENCE_DEBOUNCE_MS` | `150` | Trailing debounce for presence status writes (`0` = send immediately) |
 | `PI_INTERCOM_MAX_FRAME_BYTES` | `16777216` (16 MiB) | Max accepted message frame size; oversized frames are rejected |
 | `PI_INTERCOM_MAX_SOCKET_BUFFER_BYTES` | `8388608` (8 MiB) | Per-peer outbound buffer high-water mark; a peer over this is reaped (backpressure) |

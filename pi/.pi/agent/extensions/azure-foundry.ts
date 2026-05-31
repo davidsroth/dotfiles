@@ -4,7 +4,6 @@ export default function (pi: ExtensionAPI) {
   const baseUrl = process.env.AZURE_INFERENCE_ENDPOINT?.trim() || process.env.AZURE_FOUNDRY_ENDPOINT?.trim() || "";
 
   if (!baseUrl) {
-    console.warn("[azure-foundry] No endpoint configured. Set AZURE_INFERENCE_ENDPOINT or AZURE_FOUNDRY_ENDPOINT to enable.");
     return;
   }
 
