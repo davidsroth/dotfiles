@@ -64,11 +64,17 @@ interface SessionLookup {
   match: "id" | "name" | "idPrefix" | "none";
 }
 
+// How long after startup before the broker will auto-shutdown due to
+// zero sessions. This covers the window between broker spawn and the
+// first client (pi session + relay) connecting.
+const STARTUP_GRACE_MS = 15_000;
+
 class IntercomBroker {
   private sessions = new Map<string, ConnectedSession>();
   private server: net.Server;
   private shutdownTimer: NodeJS.Timeout | null = null;
   private reapTimer: NodeJS.Timeout | null = null;
+  private readonly startedAt = Date.now();
 
   constructor() {
     mkdirSync(INTERCOM_DIR, { recursive: true });
@@ -166,6 +172,13 @@ class IntercomBroker {
     this.shutdownTimer = setTimeout(() => {
       this.shutdownTimer = null;
       if (this.sessions.size === 0) {
+        // Don't shut down during the startup grace window — the pi session
+        // and relay may still be connecting for the first time.
+        const age = Date.now() - this.startedAt;
+        if (age < STARTUP_GRACE_MS) {
+          this.scheduleShutdownCheck();
+          return;
+        }
         console.log("No sessions connected, shutting down");
         this.shutdown();
       }
