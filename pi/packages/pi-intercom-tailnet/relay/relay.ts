@@ -56,6 +56,8 @@ class TailnetRelay {
   /** Display names of virtual sessions currently being registered — prevent race with localSessionJoined. */
   private virtualSessionNames = new Set<string>();
   private shuttingDown = false;
+  /** True once the control link is connected; false while the broker is down. */
+  private brokerHealthy = false;
   /** Features advertised in hello; used for forward-compat. */
   private readonly features = ["session_discovery"];
 
@@ -90,34 +92,9 @@ class TailnetRelay {
       controlName: "__tailnet_relay__",
       pid: process.pid,
     });
-    this.bridge.on("localSessionJoined", (info) => {
-      if (this.virtualSessionIds.has(info.id)) return;
-      if (this.virtualSessionNames.has(info.name ?? "")) return;
-      this.localSessions.set(info.id, info);
-      this.broadcastToPeers({ type: "tailnet_session_joined", session: info });
-    });
-    this.bridge.on("localSessionLeft", (id) => {
-      if (this.virtualSessionIds.has(id)) {
-        this.virtualSessionIds.delete(id);
-        return;
-      }
-      if (!this.localSessions.has(id)) return;
-      this.localSessions.delete(id);
-      this.broadcastToPeers({ type: "tailnet_session_left", sessionId: id });
-    });
-    this.bridge.on("localSessions", (list) => {
-      this.localSessions.clear();
-      for (const s of list) {
-        if (!this.virtualSessionIds.has(s.id)) this.localSessions.set(s.id, s);
-      }
-    });
-    this.bridge.on("controlClosed", () => {
-      if (!this.shuttingDown) {
-        console.error("[tailnet-relay] broker control socket closed; reconnecting in 3s");
-        setTimeout(() => void this.reconnectBroker(), 3000);
-      }
-    });
+    this.wireBridgeHandlers(this.bridge);
     await this.bridge.start();
+    this.brokerHealthy = true;
     // Best-effort initial list so we can populate session caches.
     try {
       const initial = await this.bridge.refreshLocalSessions();
@@ -420,6 +397,7 @@ class TailnetRelay {
       cwd: `tailnet:${peer.host}`,
       model: `tailnet:${peer.host}`,
       onMessage: (from, message) => this.routeOutboundFromLocal(peer, remoteSessionId, from, message),
+      onClose: () => this.handleVirtualSessionClosed(peer, remoteSessionId, displayName),
     });
     handle.sessionId.then((id) => {
       this.virtualSessionIds.add(id);
@@ -500,6 +478,80 @@ class TailnetRelay {
     });
   }
 
+  /**
+   * Attach the control-link handlers to a bridge. Shared by start() and
+   * reconnectBroker() so the two can't drift (they previously duplicated all
+   * four handlers verbatim).
+   */
+  private wireBridgeHandlers(bridge: BrokerBridge): void {
+    bridge.on("localSessionJoined", (info) => {
+      if (this.virtualSessionIds.has(info.id)) return;
+      if (this.virtualSessionNames.has(info.name ?? "")) return;
+      this.localSessions.set(info.id, info);
+      this.broadcastToPeers({ type: "tailnet_session_joined", session: info });
+    });
+    bridge.on("localSessionLeft", (id) => {
+      if (this.virtualSessionIds.has(id)) {
+        this.virtualSessionIds.delete(id);
+        return;
+      }
+      if (!this.localSessions.has(id)) return;
+      this.localSessions.delete(id);
+      this.broadcastToPeers({ type: "tailnet_session_left", sessionId: id });
+    });
+    bridge.on("localSessions", (list) => {
+      this.localSessions.clear();
+      for (const s of list) {
+        if (!this.virtualSessionIds.has(s.id)) this.localSessions.set(s.id, s);
+      }
+    });
+    bridge.on("controlClosed", () => {
+      if (this.shuttingDown) return;
+      this.brokerHealthy = false;
+      console.error("[tailnet-relay] broker control socket closed; reconnecting in 3s");
+      setTimeout(() => void this.reconnectBroker(), 3000);
+    });
+  }
+
+  /**
+   * Re-open every virtual session we host for remote peers. Used after a
+   * broker reconnect: a broker restart drops all connections (control + each
+   * virtual session), but the peer links stay up and won't re-send their
+   * session lists, so without this the cross-host "<name>@<host>" sessions
+   * would remain dead until a peer link recycled.
+   */
+  private rebuildVirtualSessions(): void {
+    // These only track virtual sessions; the old broker ids are now stale.
+    this.virtualSessionIds.clear();
+    this.virtualSessionNames.clear();
+    for (const peer of this.peers.values()) {
+      const wanted = Array.from(peer.virtualByRemoteId.entries()).map(
+        ([remoteId, v]) => ({ remoteId, remoteName: v.remoteName }),
+      );
+      peer.virtualByRemoteId.clear();
+      for (const { remoteId, remoteName } of wanted) {
+        this.ensureVirtualForRemote(peer, remoteId, remoteName);
+      }
+    }
+  }
+
+  /**
+   * A virtual session's broker connection closed unexpectedly (not via our own
+   * handle.close()). If the control link is still healthy this was a single
+   * drop (e.g. broker-side eviction) while the remote session still exists, so
+   * re-open it. If the broker itself is down, do nothing — reconnectBroker()
+   * rebuilds every virtual session once it is back.
+   */
+  private handleVirtualSessionClosed(peer: PeerState, remoteSessionId: string, displayName: string): void {
+    if (this.shuttingDown || !this.brokerHealthy) return;
+    const entry = peer.virtualByRemoteId.get(remoteSessionId);
+    if (!entry || entry.remoteName !== displayName) return;
+    if (entry.localId) this.virtualSessionIds.delete(entry.localId);
+    this.virtualSessionNames.delete(entry.remoteName);
+    peer.virtualByRemoteId.delete(remoteSessionId);
+    this.ensureVirtualForRemote(peer, remoteSessionId, displayName);
+  }
+
   private async reconnectBroker(): Promise<void> {
     if (this.shuttingDown) return;
     console.error("[tailnet-relay] reconnecting to broker...");
@@ -509,32 +561,10 @@ class TailnetRelay {
       controlName: "__tailnet_relay__",
       pid: process.pid,
     });
-    this.bridge.on("localSessionJoined", (info) => {
-      if (this.virtualSessionIds.has(info.id)) return;
-      if (this.virtualSessionNames.has(info.name ?? "")) return;
-      this.localSessions.set(info.id, info);
-      this.broadcastToPeers({ type: "tailnet_session_joined", session: info });
-    });
-    this.bridge.on("localSessionLeft", (id) => {
-      if (this.virtualSessionIds.has(id)) { this.virtualSessionIds.delete(id); return; }
-      if (!this.localSessions.has(id)) return;
-      this.localSessions.delete(id);
-      this.broadcastToPeers({ type: "tailnet_session_left", sessionId: id });
-    });
-    this.bridge.on("localSessions", (list) => {
-      this.localSessions.clear();
-      for (const s of list) {
-        if (!this.virtualSessionIds.has(s.id)) this.localSessions.set(s.id, s);
-      }
-    });
-    this.bridge.on("controlClosed", () => {
-      if (!this.shuttingDown) {
-        console.error("[tailnet-relay] broker control socket closed; reconnecting in 3s");
-        setTimeout(() => void this.reconnectBroker(), 3000);
-      }
-    });
+    this.wireBridgeHandlers(this.bridge);
     try {
       await this.bridge.start();
+      this.brokerHealthy = true;
       const initial = await this.bridge.refreshLocalSessions();
       for (const s of initial) {
         if (!this.virtualSessionIds.has(s.id)) this.localSessions.set(s.id, s);
@@ -542,6 +572,10 @@ class TailnetRelay {
       for (const [id, s] of this.localSessions) {
         if (s.name === "__tailnet_relay__" || s.status === "relay:control") this.localSessions.delete(id);
       }
+      // The broker restart dropped every connection, including the virtual
+      // session connections we host for remote peers. Re-open them from the
+      // peer state we still hold so cross-host targets don't go stale.
+      this.rebuildVirtualSessions();
       // Re-advertise local sessions to all connected peers.
       this.broadcastToPeers({ type: "tailnet_sessions", sessions: this.getLocalSessionsForBroadcast() } as import("../types.js").TailnetFrame);
       console.error("[tailnet-relay] reconnected to broker");

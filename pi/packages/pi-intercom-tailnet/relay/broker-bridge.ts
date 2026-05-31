@@ -25,6 +25,12 @@ export interface VirtualSessionInit {
   model: string;            // e.g. "tailnet:nimbus"
   /** Called when the broker delivers a `message` addressed at this virtual session. */
   onMessage: (from: SessionInfo, message: IntercomMessage) => void;
+  /**
+   * Called when the broker drops this virtual session's connection without the
+   * relay asking (eviction, broker restart). NOT called for a relay-initiated
+   * close() — that path is intentional teardown.
+   */
+  onClose?: () => void;
 }
 
 export interface VirtualSessionHandle {
@@ -196,6 +202,14 @@ export function createBrokerBridge(opts: BrokerBridgeOpts): BrokerBridge {
 
     sock.on("error", (err) => {
       if (!vClosed) rejectId(err);
+    });
+
+    sock.on("close", () => {
+      // Only fires for a broker-initiated drop: a relay-initiated close() sets
+      // vClosed first, so this no-ops there and won't double-report.
+      if (vClosed) return;
+      vClosed = true;
+      init.onClose?.();
     });
 
     sock.on("connect", () => {
