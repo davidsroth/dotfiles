@@ -53,6 +53,8 @@ class TailnetRelay {
   private localSessions = new Map<string, SessionInfo>();
   /** IDs of virtual sessions we created for remote peers — never broadcast these. */
   private virtualSessionIds = new Set<string>();
+  /** Display names of virtual sessions currently being registered — prevent race with localSessionJoined. */
+  private virtualSessionNames = new Set<string>();
   private shuttingDown = false;
   /** Features advertised in hello; used for forward-compat. */
   private readonly features = ["session_discovery"];
@@ -90,6 +92,7 @@ class TailnetRelay {
     });
     this.bridge.on("localSessionJoined", (info) => {
       if (this.virtualSessionIds.has(info.id)) return;
+      if (this.virtualSessionNames.has(info.name ?? "")) return;
       this.localSessions.set(info.id, info);
       this.broadcastToPeers({ type: "tailnet_session_joined", session: info });
     });
@@ -222,6 +225,8 @@ class TailnetRelay {
 
   private async dialPeerSafely(peer: PeerState): Promise<void> {
     if (!peer.ipv4 || !this.selfHost) return;
+    // Attach the ready listener BEFORE awaiting dialPeer, because
+    // dialPeer resolves at the same moment "ready" fires.
     const link = await dialPeer({
       selfHost: this.selfHost,
       peerHost: peer.host,
@@ -230,10 +235,9 @@ class TailnetRelay {
     });
     peer.outbound = link;
     this.wirePeerLink(peer, link, "outbound");
-    // Once link is ready, send our current local session list.
-    link.once("ready", () => {
-      link.send({ type: "tailnet_sessions", sessions: this.getLocalSessionsForBroadcast() });
-    });
+    // dialPeer resolves when the hello handshake completes, so "ready"
+    // has already fired. Send the session list immediately.
+    link.send({ type: "tailnet_sessions", sessions: this.getLocalSessionsForBroadcast() });
   }
 
   private handleInbound(socket: net.Socket): void {
@@ -280,7 +284,8 @@ class TailnetRelay {
       if (!peer.outbound && !peer.inbound) {
         for (const [remoteId, v] of peer.virtualByRemoteId) {
           v.handle.close();
-          this.virtualSessionIds.delete(remoteId);
+          if (v.localId) this.virtualSessionIds.delete(v.localId);
+          this.virtualSessionNames.delete(v.remoteName);
         }
         peer.virtualByRemoteId.clear();
       }
@@ -348,7 +353,8 @@ class TailnetRelay {
     if (existing) {
       existing.handle.close();
       peer.virtualByRemoteId.delete(sessionId);
-      this.virtualSessionIds.delete(sessionId);
+      if (existing.localId) this.virtualSessionIds.delete(existing.localId);
+      this.virtualSessionNames.delete(existing.remoteName);
     }
   }
 
@@ -380,6 +386,7 @@ class TailnetRelay {
     if (existing && existing.remoteName === displayName) return existing.handle;
     if (existing) existing.handle.close();
 
+    this.virtualSessionNames.add(displayName);
     const handle = this.bridge!.openVirtualSession({
       displayName,
       cwd: `tailnet:${peer.host}`,
@@ -388,6 +395,7 @@ class TailnetRelay {
     });
     handle.sessionId.then((id) => {
       this.virtualSessionIds.add(id);
+      this.virtualSessionNames.delete(displayName);
       const entry = peer.virtualByRemoteId.get(remoteSessionId);
       if (entry) entry.localId = id;
     }).catch(() => {});
