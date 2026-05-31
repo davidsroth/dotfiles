@@ -460,6 +460,22 @@ confirm() {
   [[ "$REPLY" =~ ^[Yy]$ ]]
 }
 
+# Prompt for sudo password once upfront to avoid mid-script failures
+# Returns: 0 if sudo is available (with or without password), 1 if no sudo
+validate_sudo() {
+  if ! command -v sudo >/dev/null 2>&1; then
+    return 1
+  fi
+  # Refresh sudo timestamp or prompt for password
+  if ! sudo -v 2>/dev/null; then
+    info "sudo authentication required"
+    sudo -v || {
+      warning "sudo authentication failed; continuing without elevated privileges"
+      return 1
+    }
+  fi
+}
+
 # Check platform compatibility and requirements
 # Returns: 0 on success, exits on failure
 check_platform() {
@@ -507,6 +523,11 @@ check_platform() {
     STOW_PACKAGES+=(linux)
   fi
   export STOW_PACKAGES
+
+  # Pre-authenticate sudo on Linux to avoid password prompts mid-apt
+  if [[ "$OS_FAMILY" == "linux" && "${LINUX_PKG_MGR:-}" == "apt" ]]; then
+    validate_sudo || true
+  fi
 }
 
 # Install Xcode Command Line Tools if not already installed
@@ -991,33 +1012,57 @@ report_stow_target() {
   fi
 }
 
-# Generate ~/.pi/agent/settings.json by merging settings.base.json + settings.local.json.
-# settings.local.json is per-machine (gitignored); copy settings.local.json.example to create it.
+# Generate ~/.pi/agent/settings.json by merging existing runtime keys +
+# settings.base.json (tracked) + settings.local.json (per-machine, gitignored).
+# Delegates to scripts/gen-pi-settings.sh (single source of truth, also used by
+# `just pi-settings` and the git post-merge/post-checkout hooks).
 setup_pi_settings() {
-  local base="${DOTFILES_DIR}/pi/.pi/agent/settings.base.json"
-  local local_settings="$HOME/.pi/agent/settings.local.json"
-  local dest="$HOME/.pi/agent/settings.json"
-
-  [[ -f "$base" ]] || return 0
-  mkdir -p "$(dirname "$dest")"
-
-  # Remove stow symlink if it exists (shouldn't with .stow-local-ignore, but safety net)
-  [[ -L "$dest" ]] && rm "$dest"
-
-  if [[ -f "$local_settings" ]]; then
-    if check_command jq; then
-      info "Merging pi settings.base.json + settings.local.json..."
-      jq -s '.[0] * .[1]' "$base" "$local_settings" > "$dest"
-      success "Pi settings generated at $dest"
-    else
-      warning "jq not found; copying base settings only (install jq to enable local merging)"
-      cp "$base" "$dest"
-    fi
+  local script="${DOTFILES_DIR}/scripts/gen-pi-settings.sh"
+  [[ -f "$script" ]] || return 0
+  info "Generating pi settings (base + local merge)..."
+  if bash "$script"; then
+    success "Pi settings generated at $HOME/.pi/agent/settings.json"
   else
-    info "No settings.local.json found; copying settings.base.json → $dest"
-    info "Copy pi/.pi/agent/settings.local.json.example to $local_settings for per-machine overrides"
-    cp "$base" "$dest"
-    success "Pi settings copied"
+    warning "Pi settings generation failed"
+  fi
+}
+
+# Symlink the tracked global memory file into ~/.pi/agent/memory/ without
+# disturbing the per-machine local files (MEMORY.local.md, SCRATCHPAD.md,
+# daily/). Memory is excluded from stow (.stow-local-ignore) so this owns the
+# link. Non-clobbering: a pre-existing real MEMORY.md is backed up, not deleted.
+setup_pi_memory() {
+  local src="${DOTFILES_DIR}/pi/.pi/agent/memory/MEMORY.md"
+  local dir="$HOME/.pi/agent/memory"
+  local dest="$dir/MEMORY.md"
+
+  [[ -f "$src" ]] || return 0
+  mkdir -p "$dir/daily"
+
+  if [[ -L "$dest" ]]; then
+    : # already a symlink; leave it
+  elif [[ -e "$dest" ]]; then
+    local backup="$dest.pre-link-backup-$(date +%Y%m%d-%H%M%S)"
+    warning "Existing $dest is a real file; backing up to $backup before linking"
+    mv "$dest" "$backup"
+  fi
+
+  if [[ ! -L "$dest" ]]; then
+    ln -s "../../../dotfiles/pi/.pi/agent/memory/MEMORY.md" "$dest"
+  fi
+  success "Global memory linked: $dest → tracked MEMORY.md"
+}
+
+# Point git at the tracked .githooks dir so post-merge/post-checkout regenerate
+# pi settings automatically after pulls. Hooks also keep git-lfs working.
+setup_git_hooks() {
+  local hooks_dir="${DOTFILES_DIR}/.githooks"
+  [[ -d "$hooks_dir" ]] || return 0
+  chmod +x "$hooks_dir"/* 2>/dev/null || true
+  if git -C "$DOTFILES_DIR" config core.hooksPath ".githooks"; then
+    success "git core.hooksPath → .githooks"
+  else
+    warning "Could not set core.hooksPath"
   fi
 }
 
@@ -1108,6 +1153,13 @@ post_install_setup() {
 
   # pi settings: merge global base + per-machine local overrides
   setup_pi_settings || true
+
+  # pi memory: link tracked global MEMORY.md (local files stay per-machine)
+  setup_pi_memory || true
+
+  # git hooks: auto-regenerate pi settings after pulls (set last so it wins
+  # over any hooksPath git-lfs install may have configured above)
+  setup_git_hooks || true
 }
 
 # Install npm dependencies for pi extension packages under dotfiles/pi/packages.
@@ -1157,11 +1209,12 @@ setup_agent_skills() {
   info "Linking shared agent skills..."
 
   # Link skills to various AI tool directories
-  # Note: .claude/skills is handled via internal symlink in dotfiles/.claude/skills -> ../.agent/skills
   local targets=(
     "$HOME/.gemini/skills"
     "$HOME/.cursor/skills"
     "$HOME/.codex/skills"
+    "$HOME/.pi/agent/skills"
+    "$HOME/.claude/skills"
   )
 
   for target in "${targets[@]}"; do
@@ -1176,10 +1229,6 @@ setup_agent_skills() {
     fi
   done
 
-  # Verify .claude/skills internal symlink
-  if [[ -L "$DOTFILES_DIR/.claude/skills" ]]; then
-    [[ "$VERBOSE" == "true" ]] && success "$HOME/.claude/skills (via dotfiles)" || true
-  fi
 }
 
 # Install Fira Code Nerd Font for glyph support in terminals (Kitty/tmux)

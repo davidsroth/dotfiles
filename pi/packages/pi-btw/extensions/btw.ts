@@ -1014,6 +1014,53 @@ function buildTranscriptBadge(
   return theme.bg(background, theme.fg(foreground, theme.bold(` ${label} `)));
 }
 
+type BtwTheme = ExtensionContext["ui"]["theme"];
+
+/** Pad `text` to exactly `width` visible columns (or truncate to fit). */
+function padToWidth(text: string, width: number): string {
+  const textWidth = visibleWidth(text);
+  if (textWidth >= width) return truncateToWidth(text, width, "");
+  return text + " ".repeat(width - textWidth);
+}
+
+/**
+ * Rounded `╭─ title ───╮` top border with the title baked into the edge — the shared
+ * overlay-chrome language used by the agent picker and PR picker. `title` may
+ * already contain ANSI styling; width math is ANSI-aware via visibleWidth.
+ */
+function topBorderWithTitle(theme: BtwTheme, title: string, inner: number): string {
+  const accent = (text: string) => theme.fg("borderAccent", text);
+  const maxTitleWidth = Math.max(0, inner - 4);
+  let padded = ` ${title} `;
+  if (visibleWidth(padded) > maxTitleWidth) {
+    padded = ` ${truncateToWidth(title, Math.max(1, maxTitleWidth - 2), "…")} `;
+  }
+  const tail = Math.max(1, inner - 1 - visibleWidth(padded));
+  return `${accent("╭─")}${padded}${accent("─".repeat(tail))}${accent("╮")}`;
+}
+
+/** Build the overlay header summary baked into the top border. */
+function buildOverlayHeader(
+  theme: BtwTheme,
+  mode: BtwThreadMode,
+  settingsSummary: string | null,
+  exchanges: number,
+  streaming: boolean,
+  scroll: { above: number; below: number },
+): string {
+  const dot = theme.fg("dim", "·");
+  const parts: string[] = [theme.fg("accent", theme.bold(getOverlayTitle(mode)))];
+  if (settingsSummary) {
+    parts.push(theme.fg("muted", settingsSummary));
+  }
+  parts.push(theme.fg("muted", `${exchanges} exchange${exchanges === 1 ? "" : "s"}`));
+  parts.push(streaming ? theme.fg("accent", "streaming") : theme.fg("muted", "idle"));
+  if (scroll.above || scroll.below) {
+    parts.push(theme.fg("dim", `↑${scroll.above} ↓${scroll.below}`));
+  }
+  return parts.join(` ${dot} `);
+}
+
 class BtwOverlayComponent extends Container implements Focusable {
   private readonly input: Input;
   private readonly transcript: Container;
@@ -1024,6 +1071,7 @@ class BtwOverlayComponent extends Container implements Focusable {
   private readonly readTranscriptEntries: () => BtwTranscript;
   private readonly getStatus: () => string | null;
   private readonly getMode: () => BtwThreadMode;
+  private readonly getSettingsSummary: () => string | null;
   private readonly onSubmitCallback: (value: string) => void;
   private readonly onDismissCallback: () => void;
   private readonly onUnfocusCallback: () => void;
@@ -1036,8 +1084,14 @@ class BtwOverlayComponent extends Container implements Focusable {
   private _focused = false;
   private modeTextValue = "";
   private summaryTextValue = "";
+  private settingsSummaryValue: string | null = null;
   private statusTextValue = "";
   private hintsTextValue = "";
+  // Bumped on every refresh() so the wrapped-line cache invalidates exactly when
+  // the transcript content changes, letting intermediate renders (scroll, focus,
+  // status updates) reuse the wrapped output instead of re-wrapping every line.
+  private transcriptVersion = 0;
+  private wrapCache: { width: number; version: number; lines: string[] } | null = null;
 
   get focused(): boolean {
     return this._focused;
@@ -1055,6 +1109,7 @@ class BtwOverlayComponent extends Container implements Focusable {
     readTranscriptEntries: () => BtwTranscript,
     getStatus: () => string | null,
     getMode: () => BtwThreadMode,
+    getSettingsSummary: () => string | null,
     onSubmit: (value: string) => void,
     onDismiss: () => void,
     onUnfocus: () => void,
@@ -1065,6 +1120,7 @@ class BtwOverlayComponent extends Container implements Focusable {
     this.readTranscriptEntries = readTranscriptEntries;
     this.getStatus = getStatus;
     this.getMode = getMode;
+    this.getSettingsSummary = getSettingsSummary;
     this.onSubmitCallback = onSubmit;
     this.onDismissCallback = onDismiss;
     this.onUnfocusCallback = onUnfocus;
@@ -1108,23 +1164,26 @@ class BtwOverlayComponent extends Container implements Focusable {
     this.refresh();
   }
 
+  // Body line flanked by the rounded accent side borders, padded to inner width.
   private frameLine(content: string, innerWidth: number): string {
-    const truncated = truncateToWidth(content, innerWidth, "");
-    const padding = Math.max(0, innerWidth - visibleWidth(truncated));
-    return `${this.theme.fg("borderMuted", "│")}${truncated}${" ".repeat(padding)}${this.theme.fg("borderMuted", "│")}`;
+    const side = this.theme.fg("borderAccent", "│");
+    return `${side}${padToWidth(content, innerWidth)}${side}`;
   }
 
-  private ruleLine(innerWidth: number): string {
-    return this.theme.fg("borderMuted", `├${"─".repeat(innerWidth)}┤`);
+  // Subtle in-frame divider (matches the dashboard widget's section rule).
+  private dividerLine(innerWidth: number): string {
+    const side = this.theme.fg("borderAccent", "│");
+    return `${side}${this.theme.fg("borderMuted", "─".repeat(innerWidth))}${side}`;
   }
 
-  private borderLine(innerWidth: number, edge: "top" | "bottom"): string {
-    const left = edge === "top" ? "┌" : "└";
-    const right = edge === "top" ? "┐" : "┘";
-    return this.theme.fg("borderMuted", `${left}${"─".repeat(innerWidth)}${right}`);
+  private bottomBorder(innerWidth: number): string {
+    return this.theme.fg("borderAccent", `╰${"─".repeat(innerWidth)}╯`);
   }
 
   private wrapTranscript(innerWidth: number): string[] {
+    if (this.wrapCache && this.wrapCache.width === innerWidth && this.wrapCache.version === this.transcriptVersion) {
+      return this.wrapCache.lines;
+    }
     const wrapped: string[] = [];
     for (const line of this.transcriptLines) {
       if (!line) {
@@ -1133,12 +1192,16 @@ class BtwOverlayComponent extends Container implements Focusable {
       }
       wrapped.push(...wrapTextWithAnsi(line, Math.max(1, innerWidth)));
     }
+    this.wrapCache = { width: innerWidth, version: this.transcriptVersion, lines: wrapped };
     return wrapped;
   }
 
   private getDialogHeight(): number {
     const terminalRows = process.stdout.rows ?? 30;
-    return Math.max(18, Math.min(32, Math.floor(terminalRows * 0.78)));
+    const desired = Math.max(18, Math.min(32, Math.floor(terminalRows * 0.78)));
+    // Never exceed the available terminal height (minus the 1-row top/bottom margins),
+    // so the overlay can't overflow and clip its own borders on short screens.
+    return Math.min(desired, Math.max(6, terminalRows - 2));
   }
 
   handleInput(data: string): void {
@@ -1173,7 +1236,8 @@ class BtwOverlayComponent extends Container implements Focusable {
     this.input.focused = false;
     try {
       const inputLine = this.input.render(targetWidth)[0] ?? "";
-      return `${this.theme.fg("borderMuted", "│")}${inputLine}${this.theme.fg("borderMuted", "│")}`;
+      const side = this.theme.fg("borderAccent", "│");
+      return `${side}${inputLine}${side}`;
     } finally {
       this.input.focused = previousFocused;
     }
@@ -1184,8 +1248,9 @@ class BtwOverlayComponent extends Container implements Focusable {
     const innerWidth = Math.max(22, dialogWidth - 2);
     const transcriptLines = this.wrapTranscript(innerWidth);
     const dialogHeight = this.getDialogHeight();
-    const chromeHeight = 8;
-    const transcriptHeight = Math.max(6, dialogHeight - chromeHeight);
+    // Top border + divider + status + input + hints + bottom border = 6 chrome rows.
+    const chromeHeight = 6;
+    const transcriptHeight = Math.max(4, dialogHeight - chromeHeight);
     this.transcriptViewportHeight = transcriptHeight;
 
     const maxScroll = Math.max(0, transcriptLines.length - transcriptHeight);
@@ -1205,16 +1270,16 @@ class BtwOverlayComponent extends Container implements Focusable {
     const transcriptPadCount = Math.max(0, transcriptHeight - visibleTranscript.length);
     const hiddenAbove = this.transcriptScrollOffset;
     const hiddenBelow = Math.max(0, maxScroll - this.transcriptScrollOffset);
-    const summary =
-      hiddenAbove || hiddenBelow
-        ? `${this.summaryTextValue.trim()} · ↑${hiddenAbove} ↓${hiddenBelow}`
-        : this.summaryTextValue.trim();
 
-    const lines = [this.borderLine(innerWidth, "top")];
+    const entries = this.readTranscriptEntries();
+    const exchanges = getCompletedExchangeCount(entries);
+    const streaming = hasStreamingTranscriptEntry(entries);
+    const header = buildOverlayHeader(this.theme, this.getMode(), this.settingsSummaryValue, exchanges, streaming, {
+      above: hiddenAbove,
+      below: hiddenBelow,
+    });
 
-    lines.push(this.frameLine(this.theme.fg("accent", this.theme.bold(this.modeTextValue.trim())), innerWidth));
-    lines.push(this.frameLine(this.theme.fg("dim", summary), innerWidth));
-    lines.push(this.ruleLine(innerWidth));
+    const lines = [topBorderWithTitle(this.theme, header, innerWidth)];
 
     for (const line of visibleTranscript) {
       lines.push(this.frameLine(line, innerWidth));
@@ -1223,11 +1288,11 @@ class BtwOverlayComponent extends Container implements Focusable {
       lines.push(this.frameLine("", innerWidth));
     }
 
-    lines.push(this.ruleLine(innerWidth));
+    lines.push(this.dividerLine(innerWidth));
     lines.push(this.frameLine(this.theme.fg("warning", this.statusTextValue.trim()), innerWidth));
     lines.push(this.inputFrameLine(dialogWidth));
     lines.push(this.frameLine(this.theme.fg("dim", this.hintsTextValue.trim()), innerWidth));
-    lines.push(this.borderLine(innerWidth, "bottom"));
+    lines.push(this.bottomBorder(innerWidth));
 
     return lines;
   }
@@ -1248,6 +1313,7 @@ class BtwOverlayComponent extends Container implements Focusable {
   refresh(): void {
     this.modeTextValue = `${getOverlayTitle(this.getMode())} · hidden thread preserved`;
     this.modeText.setText(this.modeTextValue);
+    this.settingsSummaryValue = this.getSettingsSummary();
     const entries = this.readTranscriptEntries();
     const exchanges = getCompletedExchangeCount(entries);
     const active = hasStreamingTranscriptEntry(entries) ? " · streaming" : " · idle";
@@ -1255,6 +1321,7 @@ class BtwOverlayComponent extends Container implements Focusable {
     this.summaryText.setText(this.summaryTextValue);
 
     this.transcriptLines = buildOverlayTranscript(entries, this.theme);
+    this.transcriptVersion++;
     this.transcript.clear();
     for (const line of this.transcriptLines) {
       this.transcript.addChild(new Text(line, 1, 0));
@@ -1263,7 +1330,7 @@ class BtwOverlayComponent extends Container implements Focusable {
     const status = this.getStatus() ?? "Ready. Enter submits; Escape dismisses without clearing.";
     this.statusTextValue = status;
     this.statusText.setText(this.statusTextValue);
-    this.hintsTextValue = "Enter submit · Alt+/ toggle focus · Escape dismiss · PgUp/PgDn scroll";
+    this.hintsTextValue = "enter submit · alt+/ focus · esc dismiss · pgup/pgdn scroll";
     this.hintsText.setText(this.hintsTextValue);
     this.tui.requestRender();
   }
@@ -1280,6 +1347,19 @@ export default function (pi: ExtensionAPI) {
   let overlayRuntime: OverlayRuntime | null = null;
   let lastUiContext: ExtensionContext | ExtensionCommandContext | null = null;
   let activeBtwSession: BtwSessionRuntime | null = null;
+  // Serializes concurrent session (re)creation so overlapping callers can't both
+  // race past the mode check and orphan a live sub-session (leaked listeners /
+  // background streaming). See ensureBtwSession.
+  let btwSessionInFlight: Promise<BtwSessionRuntime | null> | null = null;
+
+  // Compact model/thinking-override summary shown in the overlay header so the
+  // user always sees when BTW is running on a non-default model/thinking level.
+  function overlaySettingsSummary(): string | null {
+    const parts: string[] = [];
+    if (btwModelOverride) parts.push(btwModelOverride.id);
+    if (btwThinkingOverride) parts.push(`think:${btwThinkingOverride}`);
+    return parts.length > 0 ? parts.join(" · ") : null;
+  }
 
   function syncUi(ctx?: ExtensionContext | ExtensionCommandContext): void {
     const activeCtx = ctx ?? lastUiContext;
@@ -1578,13 +1658,28 @@ export default function (pi: ExtensionAPI) {
       return null;
     }
 
+    // Wait out any in-flight creation/disposal before deciding, so two
+    // overlapping callers (e.g. rapid overlay submit + a mode-switching command)
+    // don't both build a sub-session and leak the first.
+    while (btwSessionInFlight) {
+      await btwSessionInFlight;
+    }
+
     if (activeBtwSession?.mode === mode) {
       return activeBtwSession;
     }
 
-    await disposeBtwSession();
-    activeBtwSession = await createBtwSubSession(ctx, mode);
-    return activeBtwSession;
+    btwSessionInFlight = (async () => {
+      await disposeBtwSession();
+      activeBtwSession = await createBtwSubSession(ctx, mode);
+      return activeBtwSession;
+    })();
+
+    try {
+      return await btwSessionInFlight;
+    } finally {
+      btwSessionInFlight = null;
+    }
   }
 
   async function ensureOverlay(ctx: ExtensionCommandContext | ExtensionContext): Promise<void> {
@@ -1593,9 +1688,15 @@ export default function (pi: ExtensionAPI) {
     }
     lastUiContext = ctx;
 
-    if (overlayRuntime?.handle) {
+    // Guard on the runtime existing at all, not just `handle`: the handle is set
+    // asynchronously via onHandle, so a second ensureOverlay call that arrives
+    // while the first is still opening would otherwise spawn a duplicate overlay
+    // and orphan the first handle.
+    if (overlayRuntime) {
       subscribeOverlayToActiveBtwSession(ctx);
-      focusOverlay();
+      if (overlayRuntime.handle) {
+        focusOverlay();
+      }
       return;
     }
 
@@ -1632,6 +1733,7 @@ export default function (pi: ExtensionAPI) {
             () => transcriptState.entries,
             () => overlayStatus,
             () => pendingMode,
+            () => overlaySettingsSummary(),
             (value) => {
               void submitFromOverlay(ctx, value);
             },
@@ -1881,17 +1983,29 @@ export default function (pi: ExtensionAPI) {
     }
 
     const cmdCtx = ctx as ExtensionCommandContext;
-    const btwCommand = parseOverlayBtwCommand(question);
-    if (btwCommand) {
-      setOverlayDraft("");
-      await dispatchBtwCommand(btwCommand.name, btwCommand.args, cmdCtx);
-      return;
-    }
+    // The overlay invokes this as `void submitFromOverlay(...)`, so any rejection
+    // that escapes (e.g. credential resolution throwing before runBtw's own
+    // try/catch) would surface as an unhandled rejection. Keep a top-level
+    // boundary that maps failures into overlay status + a notification.
+    try {
+      const btwCommand = parseOverlayBtwCommand(question);
+      if (btwCommand) {
+        setOverlayDraft("");
+        await dispatchBtwCommand(btwCommand.name, btwCommand.args, cmdCtx);
+        return;
+      }
 
-    setOverlayDraft("");
-    setOverlayStatus("⏳ streaming...", ctx);
-    syncUi(ctx);
-    await runBtw(cmdCtx, question, false, pendingMode);
+      setOverlayDraft("");
+      setOverlayStatus("⏳ streaming...", ctx);
+      syncUi(ctx);
+      await runBtw(cmdCtx, question, false, pendingMode);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setTranscriptFailure(transcriptState, message);
+      setOverlayStatus("Submit failed. Thread preserved for retry or follow-up.", ctx);
+      notify(ctx, message, "error");
+      syncUi(ctx);
+    }
   }
 
   async function resetThread(

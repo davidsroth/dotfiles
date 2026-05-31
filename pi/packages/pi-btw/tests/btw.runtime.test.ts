@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { visibleWidth } from "@earendil-works/pi-tui";
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext, RegisteredCommand } from "@earendil-works/pi-coding-agent";
 import btwExtension from "../extensions/btw";
 
@@ -1509,10 +1510,10 @@ describe("btw runtime behavior", () => {
 
     const secondRender = overlay.render(80);
 
-    expect(firstRender[0]).toContain("┌");
-    expect(firstRender.at(-1)).toContain("└");
-    expect(secondRender[0]).toContain("┌");
-    expect(secondRender.at(-1)).toContain("└");
+    expect(firstRender[0]).toContain("╭");
+    expect(firstRender.at(-1)).toContain("╰");
+    expect(secondRender[0]).toContain("╭");
+    expect(secondRender.at(-1)).toContain("╰");
     expect(firstRender.length).toBe(secondRender.length);
   });
 
@@ -1542,14 +1543,16 @@ describe("btw runtime behavior", () => {
     const assistantBodyLine = populatedLines.find((line: string) => line.includes("First answer"));
 
     expect(emptyLines.length).toBe(populatedLines.length);
-    expect(emptyLines[0]).toContain("<fg:borderMuted>┌");
-    expect(emptyLines[0]).not.toContain("<fg:accent>┌");
-    expect(emptyLines.at(-1)).toContain("<fg:borderMuted>└");
-    expect(emptyLines.at(-1)).not.toContain("<fg:accent>└");
-    expect(emptyStateLine).toContain("<fg:borderMuted>│</fg:borderMuted><fg:dim>No BTW thread yet.");
-    expect(emptyStateLine).not.toContain("<fg:borderMuted>│</fg:borderMuted> <fg:dim>No BTW thread yet.");
-    expect(assistantBodyLine).toContain("<fg:borderMuted>│</fg:borderMuted>    First answer");
-    expect(inputLine).toContain("<fg:borderMuted>│</fg:borderMuted>> ");
+    // The overlay now uses the shared picker chrome: a rounded `borderAccent`
+    // frame with the summary baked into the top border.
+    expect(emptyLines[0]).toContain("<fg:borderAccent>╭");
+    expect(emptyLines[0]).not.toContain("<fg:borderMuted>┌");
+    expect(emptyLines.at(-1)).toContain("<fg:borderAccent>╰");
+    expect(emptyLines.at(-1)).not.toContain("<fg:borderMuted>└");
+    expect(emptyStateLine).toContain("<fg:borderAccent>│</fg:borderAccent><fg:dim>No BTW thread yet.");
+    expect(emptyStateLine).not.toContain("<fg:borderAccent>│</fg:borderAccent> <fg:dim>No BTW thread yet.");
+    expect(assistantBodyLine).toContain("<fg:borderAccent>│</fg:borderAccent>    First answer");
+    expect(inputLine).toContain("<fg:borderAccent>│</fg:borderAccent>> ");
     expect(inputLine).not.toContain("\x1b_pi:c\x07");
   });
 
@@ -2098,6 +2101,44 @@ describe("btw runtime behavior", () => {
     expect(harness.sentUserMessages).toHaveLength(0);
     expect(getCustomEntries(harness.entries, "btw-thread-entry")).toHaveLength(2);
     expect(harness.overlayHandles.at(-1)?.hideCalls).toBe(1);
+  });
+
+  it("renders the picker-style overlay chrome at a stable width across the whole frame", async () => {
+    // ANSI theme so visibleWidth has real escape sequences to skip over.
+    const C: Record<string, string> = {
+      borderAccent: "\x1b[38;5;39m", borderMuted: "\x1b[38;5;240m", accent: "\x1b[38;5;39m",
+      dim: "\x1b[38;5;244m", muted: "\x1b[38;5;250m", text: "\x1b[0m", warning: "\x1b[38;5;214m",
+      success: "\x1b[38;5;42m", error: "\x1b[38;5;203m", userMessageBg: "\x1b[48;5;24m",
+      toolPendingBg: "\x1b[48;5;94m", customMessageBg: "\x1b[48;5;22m",
+    };
+    const harness = createHarness([], {
+      theme: {
+        fg: (n: string, t: string) => `${C[n] ?? ""}${t}\x1b[0m`,
+        bg: (n: string, t: string) => `${C[n] ?? ""}${t}\x1b[0m`,
+        italic: (t: string) => `\x1b[3m${t}\x1b[0m`,
+        bold: (t: string) => `\x1b[1m${t}\x1b[0m`,
+      },
+    });
+    promptStreamMock.mockImplementationOnce(async function* () {
+      yield { type: "thinking_delta" as const, delta: "Checking the package layout." };
+      yield { type: "tool_execution_start" as const, toolName: "read", args: { path: "package.json" } };
+      yield { type: "tool_execution_end" as const, toolName: "read", result: { content: [{ type: "text", text: "name pi-btw" }] } };
+      yield { type: "text_delta" as const, delta: "This package is pi-btw." };
+      yield { type: "done" as const, message: { ...makeAssistantMessage("This package is pi-btw."), content: buildAssistantContent("Checking the package layout.", "This package is pi-btw.") } };
+    });
+    await harness.runSessionStart();
+    await harness.command("btw", "what is this package?");
+    const overlay = harness.latestOverlayComponent();
+    const lines = overlay.render(80);
+
+    // Rounded accent frame with the summary baked into the top border.
+    expect(lines[0]).toContain("╭─");
+    expect(lines[0]).toContain("BTW");
+    expect(lines.at(-1)).toContain("╰");
+    // FakeInput.render doesn't pad to width (the real Input does), so exclude the
+    // input row; every other chrome/body line must share exactly one width.
+    const widths = new Set(lines.filter((l: string) => !l.includes("> ")).map((l: string) => visibleWidth(l)));
+    expect(widths.size).toBe(1);
   });
 
   it("context filtering excludes BTW notes from main-session context while leaving non-BTW messages intact", async () => {

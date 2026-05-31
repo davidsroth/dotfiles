@@ -496,7 +496,7 @@ window.addEventListener('beforeunload', () => {
 </html>`;
 }
 
-function startServer(text: string, colors: Record<string, string>, isLight: boolean): Promise<DraftResult> {
+function startServer(text: string, colors: Record<string, string>, isLight: boolean, onUrl?: (url: string) => void): Promise<DraftResult> {
 	return new Promise((resolve, reject) => {
 		let done = false;
 		let timeout: ReturnType<typeof setTimeout> | undefined;
@@ -571,6 +571,7 @@ function startServer(text: string, colors: Record<string, string>, isLight: bool
 					if (!addr || typeof addr === "string") throw new Error("bind failed");
 					returnFocusApp = await getFrontmostAppName();
 					const url = `http://127.0.0.1:${addr.port}`;
+					try { onUrl?.(url); } catch { /* notify is best-effort */ }
 					await openBrowser(url);
 				} catch (err) {
 					if (!done) {
@@ -635,11 +636,11 @@ export default function draft(pi: ExtensionAPI): void {
 
 			const { colors, isLight } = loadTheme(ctx);
 
-			try { ctx.ui.notify("Draft: opening review in browser…", "info"); } catch { /* best-effort */ }
-
 			let result: DraftResult;
 			try {
-				result = await startServer(text, colors, isLight);
+				result = await startServer(text, colors, isLight, (url) => {
+					try { ctx.ui.notify(`Draft: opening review in browser: ${url}`, "info"); } catch { /* best-effort */ }
+				});
 			} catch (err) {
 				const msg = err instanceof Error ? err.message : String(err);
 				return { content: [{ type: "text", text: `Draft review failed (${msg}).` }] };

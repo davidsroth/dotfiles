@@ -73,3 +73,21 @@ pi/packages/rpiv-mono/
 core/.config/gh/config.yml
 core/.config/k9s/config.yaml
 core/.config/gh-dash/config.yml
+
+# Neovim lazy-lock should be tracked (managed in stow package)
+!core/.config/nvim/lazy-lock.json
+
+# Symlink to shared .agent/skills (created by install.sh)
+pi/.pi/agent/skills
+
+# Systemd enable symlinks (absolute, machine-specific)
+core/.config/systemd/user/default.target.wants/
+
+# Bitwarden CLI (contains credentials/session data)
+.config/Bitwarden CLI/
+
+# Claude Code project data (track settings only)
+.claude/*
+!.claude/settings.json
+!.claude/commands/
+!.claude/memory/

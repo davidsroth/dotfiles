@@ -2,11 +2,11 @@
   "app.editor.external": ["ctrl+alt+e"],
   "app.model.select": ["ctrl+alt+l"],
   "tui.editor.deleteToLineEnd": ["ctrl+alt+k"],
-  "tui.editor.cursorLineStart": ["home", "ctrl+alt+a"],
+  "tui.editor.cursorLineStart": ["home"],
   "app.message.followUp": ["alt+enter", "ctrl+alt+enter"],
   "app.session.toggleSort": ["ctrl+alt+s"],
   "app.models.save": ["ctrl+alt+m"],
   "app.thinking.cycle": ["shift+tab", "ctrl+alt+t"],
-  "app.tree.filter.all": ["ctrl+alt+a"],
+  "app.tree.filter.all": ["ctrl+a"],
   "app.models.enableAll": ["ctrl+alt+y"]
 }

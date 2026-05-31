@@ -29,20 +29,29 @@ macos-defaults:
 # Copy ~/.pi/agent/settings.local.json.example → ~/.pi/agent/settings.local.json on a new machine,
 # then edit it with per-machine model/provider preferences.
 pi-settings:
+  bash {{justfile_directory()}}/scripts/gen-pi-settings.sh
+
+alias pis := pi-settings
+
+# Link the tracked global memory file (~/.pi/agent/memory/MEMORY.md → repo).
+# Per-machine memory (MEMORY.local.md, SCRATCHPAD.md, daily/) stays local.
+pi-memory:
   #!/usr/bin/env bash
   set -euo pipefail
-  BASE="{{justfile_directory()}}/pi/.pi/agent/settings.base.json"
-  LOCAL="$HOME/.pi/agent/settings.local.json"
-  DEST="$HOME/.pi/agent/settings.json"
-  mkdir -p "$(dirname "$DEST")"
-  [[ -L "$DEST" ]] && rm "$DEST"
-  if [[ -f "$LOCAL" ]]; then
-    echo "Merging settings.base.json + settings.local.json → $DEST"
-    jq -s '.[0] * .[1]' "$BASE" "$LOCAL" > "$DEST"
+  SRC="{{justfile_directory()}}/pi/.pi/agent/memory/MEMORY.md"
+  DIR="$HOME/.pi/agent/memory"
+  DEST="$DIR/MEMORY.md"
+  mkdir -p "$DIR/daily"
+  if [[ -L "$DEST" ]]; then
+    echo "Already linked: $DEST → $(readlink "$DEST")"
   else
-    echo "Copying settings.base.json → $DEST"
-    echo "(Create $LOCAL from settings.local.json.example for per-machine overrides)"
-    cp "$BASE" "$DEST"
+    if [[ -e "$DEST" ]]; then
+      BACKUP="$DEST.pre-link-backup-$(date +%Y%m%d-%H%M%S)"
+      echo "Backing up existing $DEST → $BACKUP"
+      mv "$DEST" "$BACKUP"
+    fi
+    ln -s "../../../dotfiles/pi/.pi/agent/memory/MEMORY.md" "$DEST"
+    echo "Linked global memory: $DEST"
   fi
 
 # Update repo and restow changes.

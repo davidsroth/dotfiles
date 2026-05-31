@@ -1,0 +1,8 @@
+#!/bin/sh
+# Tracked hook (via core.hooksPath=.githooks).
+# 1. Keep git-lfs working (core.hooksPath replaces .git/hooks).
+command -v git-lfs >/dev/null 2>&1 && git lfs post-merge "$@"
+# 2. Regenerate ~/.pi/agent/settings.json so base/local edits take effect after a pull.
+repo="$(git rev-parse --show-toplevel 2>/dev/null)"
+[ -n "$repo" ] && [ -x "$repo/scripts/gen-pi-settings.sh" ] && \
+  "$repo/scripts/gen-pi-settings.sh" --quiet || true

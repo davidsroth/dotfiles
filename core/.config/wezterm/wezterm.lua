@@ -250,6 +250,16 @@ config.keys = {
 		mods = "CMD",
 		action = wezterm.action.SendKey({ key = "]", mods = "ALT" }),
 	},
+
+	-- Force CSI u encoding for Ctrl+Shift+S so tmux can bind it distinctly
+	-- from plain Ctrl+S (which legacy xterm encoding collapses together).
+	-- 115 = ASCII 's', modifier 6 = Shift(1) + Ctrl(4) + 1 per CSI u spec.
+	-- tmux binding lives in core/.config/tmux/keybindings.conf (C-S-s).
+	{
+		key = "s",
+		mods = "CTRL|SHIFT",
+		action = wezterm.action.SendString("\x1b[115;6u"),
+	},
 }
 
 -- ============================================================================

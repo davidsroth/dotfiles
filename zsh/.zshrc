@@ -41,10 +41,12 @@ fi
 [[ ! -d "${XDG_CACHE_HOME:-$HOME/.cache}/zsh" ]] && mkdir -p "${XDG_CACHE_HOME:-$HOME/.cache}/zsh"
 
 # Enable completion system with caching for performance
+setopt extendedglob
 autoload -Uz compinit
+
 # Only regenerate dump once per day
 local zcompdump="${XDG_CACHE_HOME:-$HOME/.cache}/zsh/zcompdump"
-if [[ $zcompdump(#qNmh+24) ]]; then
+if [[ ! -f "$zcompdump" || "$zcompdump"(#qNmh+24) ]]; then
   compinit -d "$zcompdump"
 else
   compinit -C -d "$zcompdump"
@@ -95,7 +97,14 @@ unset _zoxide_cache
 # ============================================================================
 
 # FZF - fuzzy finder integration
-zsh-defer -c '[ -f ~/.fzf.zsh ] && source ~/.fzf.zsh'
+zsh-defer -c '
+    if [[ -f ~/.fzf.zsh ]]; then
+        source ~/.fzf.zsh
+    elif [[ -f /usr/share/doc/fzf/examples/key-bindings.zsh ]]; then
+        source /usr/share/doc/fzf/examples/key-bindings.zsh
+        source /usr/share/doc/fzf/examples/completion.zsh 2>/dev/null
+    fi
+'
 
 # ============================================================================
 # History Configuration
@@ -132,16 +141,22 @@ pyenv() {
     command pyenv "$@"
 }
 
+# npm global prefix - version-independent globals (bw, pm2, gemini, etc.)
+# Separate from NVM so tools persist across node version switches
+export PATH="$HOME/.npm-global/bin:$PATH"
+
 # NVM - Node version management
-# Lazy load using autoload hook for better performance
-autoload -U add-zsh-hook
-load_nvm() {
+# Lazy load: only load when nvm, node, npm or npx is called
+_load_nvm() {
+  export NVM_DIR="$HOME/.nvm"
   [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
   [ -s "$NVM_DIR/bash_completion" ] && . "$NVM_DIR/bash_completion"
-  add-zsh-hook -d preexec load_nvm
-  unfunction load_nvm
 }
-add-zsh-hook preexec load_nvm
+
+nvm() { unfunction nvm node npm npx 2>/dev/null; _load_nvm; nvm "$@" }
+node() { unfunction nvm node npm npx 2>/dev/null; _load_nvm; node "$@" }
+npm() { unfunction nvm node npm npx 2>/dev/null; _load_nvm; npm "$@" }
+npx() { unfunction nvm node npm npx 2>/dev/null; _load_nvm; npx "$@" }
 # ============================================================================
 # Editor Configuration
 # ============================================================================
@@ -177,8 +192,48 @@ unset _starship_cache _starship_config
 # Plugin Loading (Deferred for Performance)
 # ============================================================================
 
-# Zsh autosuggestions - suggests commands as you type (guard brew and defer)
-zsh-defer -c '[[ -n "$HOMEBREW_PREFIX" ]] && source "$HOMEBREW_PREFIX/share/zsh-autosuggestions/zsh-autosuggestions.zsh"'
+# Function to source a plugin from multiple possible locations
+# Usage: _load_plugin <plugin-name> <plugin-file>
+_load_plugin() {
+    local name=$1
+    local file=$2
+    local paths=(
+        "$HOMEBREW_PREFIX/share/$name/$file"
+        "/usr/share/$name/$file"
+        "/usr/local/share/$name/$file"
+        "$HOME/.zsh/plugins/$name/$file"
+    )
+    for p in "${paths[@]}"; do
+        if [[ -f "$p" ]]; then
+            source "$p"
+            return 0
+        fi
+    done
+    return 1
+}
+
+# Zsh autosuggestions
+zsh-defer -c '_load_plugin zsh-autosuggestions zsh-autosuggestions.zsh'
+
+# Zsh syntax highlighting - should be loaded after autosuggestions
+zsh-defer -c '_load_plugin zsh-syntax-highlighting zsh-syntax-highlighting.zsh'
+
+# History Substring Search - must be loaded AFTER syntax highlighting
+zsh-defer -c '
+    if _load_plugin zsh-history-substring-search zsh-history-substring-search.zsh; then
+        # Bind arrow keys for history search
+        bindkey "^[[A" history-substring-search-up
+        bindkey "^[[B" history-substring-search-down
+
+        # Also bind in vi mode
+        bindkey -M vicmd "k" history-substring-search-up
+        bindkey -M vicmd "j" history-substring-search-down
+
+        # Bind for Emacs mode (default)
+        bindkey "^P" history-substring-search-up
+        bindkey "^N" history-substring-search-down
+    fi
+'
 
 # ============================================================================
 # Performance Settings
@@ -186,22 +241,13 @@ zsh-defer -c '[[ -n "$HOMEBREW_PREFIX" ]] && source "$HOMEBREW_PREFIX/share/zsh-
 # Performance environment variables are now in ~/.zshenv
 
 # ============================================================================
-# History Substring Search Configuration
+# Custom Aliases
 # ============================================================================
 
-# Load history substring search immediately so it works in a fresh shell.
-if [[ -n "$HOMEBREW_PREFIX" && -f "$HOMEBREW_PREFIX/share/zsh-history-substring-search/zsh-history-substring-search.zsh" ]]; then
-    source "$HOMEBREW_PREFIX/share/zsh-history-substring-search/zsh-history-substring-search.zsh"
-    bindkey "^[[A" history-substring-search-up
-    bindkey "^[[B" history-substring-search-down
-    bindkey -M vicmd "k" history-substring-search-up
-    bindkey -M vicmd "j" history-substring-search-down
-    bindkey "^P" history-substring-search-up
-    bindkey "^N" history-substring-search-down
+# Local Claude alias if available
+if [ -x "$HOME/.claude/local/claude" ]; then
+  alias claude="$HOME/.claude/local/claude"
 fi
-
-# Zsh syntax highlighting - must be loaded last (guard brew and defer)
-zsh-defer -c '[[ -n "$HOMEBREW_PREFIX" ]] && source "$HOMEBREW_PREFIX/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh"'
 
 # ============================================================================
 # Performance Profiling Output
