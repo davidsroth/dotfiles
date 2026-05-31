@@ -1,5 +1,5 @@
 import net from "net";
-import { writeFileSync, unlinkSync, mkdirSync } from "fs";
+import { writeFileSync, unlinkSync, mkdirSync, chmodSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
 import { randomUUID } from "crypto";
@@ -73,6 +73,16 @@ class IntercomBroker {
   constructor() {
     mkdirSync(INTERCOM_DIR, { recursive: true });
     if (process.platform !== "win32") {
+      // Lock the intercom dir to the owner (0700). The socket lives inside it,
+      // and connecting requires traversing the dir, so this is the primary
+      // access-control boundary: another local user cannot reach the socket.
+      // mkdirSync's mode only applies on creation, so chmod unconditionally to
+      // also tighten a pre-existing, looser-permission dir.
+      try {
+        chmodSync(INTERCOM_DIR, 0o700);
+      } catch {
+        // Best effort; a failure here doesn't make things less safe than before.
+      }
       try {
         unlinkSync(SOCKET_PATH);
       } catch {
@@ -101,6 +111,16 @@ class IntercomBroker {
       console.error("Intercom broker unhandled rejection:", reason);
     });
     this.server.listen(SOCKET_PATH, () => {
+      if (process.platform !== "win32") {
+        // Defense-in-depth alongside the 0700 dir: restrict the socket file
+        // itself to the owner so it is never connectable by other users even
+        // if the dir permissions are somehow relaxed.
+        try {
+          chmodSync(SOCKET_PATH, 0o600);
+        } catch {
+          // The dir 0700 above is the real boundary; this is extra hardening.
+        }
+      }
       writeFileSync(PID_PATH, String(process.pid));
       console.log(`Intercom broker started (pid: ${process.pid})`);
     });
@@ -204,10 +224,22 @@ class IntercomBroker {
         // socket emits `close`, which does not always fire. Keying eviction on
         // the stable originSessionId removes the duplicate immediately, even
         // when the stale socket still looks writable.
+        //
+        // Eviction is gated on the reconnecting registration reporting the SAME
+        // pid as the row it supersedes. A genuine reconnect is the same OS
+        // process (pid is stable across socket drops and reloads within one
+        // process), so the pid always matches. This prevents a different
+        // process from spoofing another session's originSessionId to evict or
+        // hijack it: a mismatched pid leaves the existing row untouched (the
+        // liveness reaper still clears it if that process is actually gone).
         const originSessionId = clientMessage.session.originSessionId;
         if (originSessionId) {
+          const claimedPid = clientMessage.session.pid;
           const superseded = Array.from(this.sessions.values()).filter(
-            existing => existing.info.originSessionId === originSessionId && existing.socket !== socket,
+            existing =>
+              existing.info.originSessionId === originSessionId
+              && existing.socket !== socket
+              && existing.info.pid === claimedPid,
           );
           for (const existing of superseded) {
             this.removeSession(existing.info.id, "superseded by reconnect");
