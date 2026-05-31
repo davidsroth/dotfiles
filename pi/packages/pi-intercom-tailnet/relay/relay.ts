@@ -87,16 +87,20 @@ class TailnetRelay {
       pid: process.pid,
     });
     this.bridge.on("localSessionJoined", (info) => {
+      if (info.status === "tailnet:bridged") return;
       this.localSessions.set(info.id, info);
       this.broadcastToPeers({ type: "tailnet_session_joined", session: info });
     });
     this.bridge.on("localSessionLeft", (id) => {
+      if (!this.localSessions.has(id)) return;
       this.localSessions.delete(id);
       this.broadcastToPeers({ type: "tailnet_session_left", sessionId: id });
     });
     this.bridge.on("localSessions", (list) => {
       this.localSessions.clear();
-      for (const s of list) this.localSessions.set(s.id, s);
+      for (const s of list) {
+        if (s.status !== "tailnet:bridged") this.localSessions.set(s.id, s);
+      }
     });
     this.bridge.on("controlClosed", () => {
       if (!this.shuttingDown) {
@@ -108,7 +112,9 @@ class TailnetRelay {
     // Best-effort initial list so we can populate session caches.
     try {
       const initial = await this.bridge.refreshLocalSessions();
-      for (const s of initial) this.localSessions.set(s.id, s);
+      for (const s of initial) {
+        if (s.status !== "tailnet:bridged") this.localSessions.set(s.id, s);
+      }
     } catch {
       // Non-fatal; the joined/left stream will catch up.
     }
@@ -280,7 +286,7 @@ class TailnetRelay {
 
   private getLocalSessionsForBroadcast(): SessionInfo[] {
     return Array.from(this.localSessions.values()).filter(
-      (s) => s.name !== "__tailnet_relay__" && s.status !== "relay:control"
+      (s) => s.name !== "__tailnet_relay__" && s.status !== "relay:control" && s.status !== "tailnet:bridged"
     );
   }
 
