@@ -113,8 +113,8 @@ class TailnetRelay {
     });
     this.bridge.on("controlClosed", () => {
       if (!this.shuttingDown) {
-        console.error("[tailnet-relay] broker control socket closed; shutting down");
-        this.shutdown();
+        console.error("[tailnet-relay] broker control socket closed; reconnecting in 3s");
+        setTimeout(() => void this.reconnectBroker(), 3000);
       }
     });
     await this.bridge.start();
@@ -470,6 +470,59 @@ class TailnetRelay {
       delivered,
       ...(reason ? { reason } : {}),
     });
+  }
+
+  private async reconnectBroker(): Promise<void> {
+    if (this.shuttingDown) return;
+    console.error("[tailnet-relay] reconnecting to broker...");
+    this.localSessions.clear();
+    this.bridge = createBrokerBridge({
+      socketPath: BROKER_SOCKET,
+      controlName: "__tailnet_relay__",
+      pid: process.pid,
+    });
+    this.bridge.on("localSessionJoined", (info) => {
+      if (this.virtualSessionIds.has(info.id)) return;
+      if (this.virtualSessionNames.has(info.name ?? "")) return;
+      this.localSessions.set(info.id, info);
+      this.broadcastToPeers({ type: "tailnet_session_joined", session: info });
+    });
+    this.bridge.on("localSessionLeft", (id) => {
+      if (this.virtualSessionIds.has(id)) { this.virtualSessionIds.delete(id); return; }
+      if (!this.localSessions.has(id)) return;
+      this.localSessions.delete(id);
+      this.broadcastToPeers({ type: "tailnet_session_left", sessionId: id });
+    });
+    this.bridge.on("localSessions", (list) => {
+      this.localSessions.clear();
+      for (const s of list) {
+        if (!this.virtualSessionIds.has(s.id)) this.localSessions.set(s.id, s);
+      }
+    });
+    this.bridge.on("controlClosed", () => {
+      if (!this.shuttingDown) {
+        console.error("[tailnet-relay] broker control socket closed; reconnecting in 3s");
+        setTimeout(() => void this.reconnectBroker(), 3000);
+      }
+    });
+    try {
+      await this.bridge.start();
+      const initial = await this.bridge.refreshLocalSessions();
+      for (const s of initial) {
+        if (!this.virtualSessionIds.has(s.id)) this.localSessions.set(s.id, s);
+      }
+      for (const [id, s] of this.localSessions) {
+        if (s.name === "__tailnet_relay__" || s.status === "relay:control") this.localSessions.delete(id);
+      }
+      // Re-advertise local sessions to all connected peers.
+      this.broadcastToPeers({ type: "tailnet_sessions", sessions: this.getLocalSessionsForBroadcast() } as import("../types.js").TailnetFrame);
+      console.error("[tailnet-relay] reconnected to broker");
+    } catch (err) {
+      if (!this.shuttingDown) {
+        console.error(`[tailnet-relay] broker reconnect failed: ${(err as Error).message}; retrying in 5s`);
+        setTimeout(() => void this.reconnectBroker(), 5000);
+      }
+    }
   }
 
   private shutdown(): void {
