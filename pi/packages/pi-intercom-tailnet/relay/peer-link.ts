@@ -126,7 +126,8 @@ function wireUp(
         }
         helloReceived = true;
         remoteHost = raw.host;
-        ee.emit("ready", raw.host);
+        // Defer so the caller can attach listeners before the event fires.
+        setImmediate(() => ee.emit("ready", raw.host));
         return;
       }
 
