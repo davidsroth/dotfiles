@@ -270,9 +270,11 @@ class TailnetRelay {
     link.on("closed", () => {
       if (direction === "outbound" && peer.outbound === link) peer.outbound = null;
       if (direction === "inbound" && peer.inbound === link) peer.inbound = null;
-      // Tear down virtual sessions we held on behalf of this peer.
-      for (const v of peer.virtualByRemoteId.values()) v.handle.close();
-      peer.virtualByRemoteId.clear();
+      // Only tear down virtual sessions if BOTH links are dead.
+      if (!peer.outbound && !peer.inbound) {
+        for (const v of peer.virtualByRemoteId.values()) v.handle.close();
+        peer.virtualByRemoteId.clear();
+      }
     });
   }
 
