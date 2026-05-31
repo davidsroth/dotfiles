@@ -67,7 +67,25 @@ export interface TailnetDeliveryAck {
   reason?: string;
 }
 
+export interface TailnetSessionList {
+  type: "tailnet_sessions";
+  sessions: SessionInfo[];
+}
+
+export interface TailnetSessionJoined {
+  type: "tailnet_session_joined";
+  session: SessionInfo;
+}
+
+export interface TailnetSessionLeft {
+  type: "tailnet_session_left";
+  sessionId: string;
+}
+
 export type TailnetFrame =
   | TailnetHello
   | TailnetDM
-  | TailnetDeliveryAck;
+  | TailnetDeliveryAck
+  | TailnetSessionList
+  | TailnetSessionJoined
+  | TailnetSessionLeft;

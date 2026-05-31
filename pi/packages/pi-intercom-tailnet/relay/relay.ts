@@ -27,8 +27,7 @@ import { loadTailnetConfig, isPeerAllowed, type TailnetConfig } from "../config.
 import { getTailnetStatus, type TailnetStatus } from "../tailscale.js";
 import { createBrokerBridge, type BrokerBridge, type VirtualSessionHandle } from "./broker-bridge.js";
 import { dialPeer, acceptPeer, type PeerLink } from "./peer-link.js";
-import type { IntercomMessage, SessionInfo, TailnetDM, TailnetHello } from "../types.js";
-import { randomUUID } from "crypto";
+import type { IntercomMessage, SessionInfo, TailnetDM } from "../types.js";
 
 const INTERCOM_DIR = join(homedir(), ".pi/agent/intercom");
 const RELAY_PID_PATH = join(INTERCOM_DIR, "tailnet-relay.pid");
@@ -53,6 +52,8 @@ class TailnetRelay {
   private discoveryTimer: NodeJS.Timeout | null = null;
   private localSessions = new Map<string, SessionInfo>();
   private shuttingDown = false;
+  /** Features advertised in hello; used for forward-compat. */
+  private readonly features = ["session_discovery"];
 
   constructor(config: TailnetConfig) {
     this.config = config;
@@ -87,9 +88,11 @@ class TailnetRelay {
     });
     this.bridge.on("localSessionJoined", (info) => {
       this.localSessions.set(info.id, info);
+      this.broadcastToPeers({ type: "tailnet_session_joined", session: info });
     });
     this.bridge.on("localSessionLeft", (id) => {
       this.localSessions.delete(id);
+      this.broadcastToPeers({ type: "tailnet_session_left", sessionId: id });
     });
     this.bridge.on("localSessions", (list) => {
       this.localSessions.clear();
@@ -108,6 +111,13 @@ class TailnetRelay {
       for (const s of initial) this.localSessions.set(s.id, s);
     } catch {
       // Non-fatal; the joined/left stream will catch up.
+    }
+    // Exclude our own control socket session from what we advertise.
+    // Filter out control session from future broadcasts (it may be in the initial list).
+    for (const [id, s] of this.localSessions) {
+      if (s.name === "__tailnet_relay__" || s.status === "relay:control") {
+        this.localSessions.delete(id);
+      }
     }
 
     // 3. Listen on the Tailscale IPv4 (if we have one). Falling back to
@@ -208,6 +218,10 @@ class TailnetRelay {
     });
     peer.outbound = link;
     this.wirePeerLink(peer, link, "outbound");
+    // Once link is ready, send our current local session list.
+    link.once("ready", () => {
+      link.send({ type: "tailnet_sessions", sessions: this.getLocalSessionsForBroadcast() });
+    });
   }
 
   private handleInbound(socket: net.Socket): void {
@@ -237,19 +251,86 @@ class TailnetRelay {
       peer.inbound = link;
       this.peers.set(peer.host, peer);
       this.wirePeerLink(peer, link, "inbound");
+      // Send our current local session list to the newly connected peer.
+      link.send({ type: "tailnet_sessions", sessions: this.getLocalSessionsForBroadcast() });
     });
   }
 
   private wirePeerLink(peer: PeerState, link: PeerLink, direction: "inbound" | "outbound"): void {
     link.on("dm", (frame) => this.routeInboundDM(peer, frame));
+    link.on("sessionList", (sessions) => this.handlePeerSessionList(peer, sessions));
+    link.on("sessionJoined", (session) => this.handlePeerSessionJoined(peer, session));
+    link.on("sessionLeft", (sessionId) => this.handlePeerSessionLeft(peer, sessionId));
     link.on("closed", () => {
       if (direction === "outbound" && peer.outbound === link) peer.outbound = null;
       if (direction === "inbound" && peer.inbound === link) peer.inbound = null;
       // Tear down virtual sessions we held on behalf of this peer.
-      // (They'll be recreated next discovery cycle if the peer comes back.)
       for (const v of peer.virtualByRemoteId.values()) v.handle.close();
       peer.virtualByRemoteId.clear();
     });
+  }
+
+  private broadcastToPeers(frame: { type: string } & Record<string, unknown>): void {
+    for (const peer of this.peers.values()) {
+      if (peer.host === this.selfHost) continue;
+      const link = peer.outbound ?? peer.inbound;
+      if (link) link.send(frame as import("../types.js").TailnetFrame);
+    }
+  }
+
+  private getLocalSessionsForBroadcast(): SessionInfo[] {
+    return Array.from(this.localSessions.values()).filter(
+      (s) => s.name !== "__tailnet_relay__" && s.status !== "relay:control"
+    );
+  }
+
+  private handlePeerSessionList(peer: PeerState, sessions: SessionInfo[]): void {
+    // Reconcile: create virtual sessions for any we don't have, close any we have that aren't in the list.
+    const incomingIds = new Set(sessions.map((s) => s.id));
+    // Close stale.
+    for (const [remoteId, v] of peer.virtualByRemoteId) {
+      if (!incomingIds.has(remoteId)) {
+        v.handle.close();
+        peer.virtualByRemoteId.delete(remoteId);
+      }
+    }
+    // Create new / refresh existing.
+    for (const session of sessions) {
+      const displayName = `${session.name ?? session.id}@${peer.host}`;
+      const existing = peer.virtualByRemoteId.get(session.id);
+      if (existing) {
+        // Name may have changed; if so, close and recreate.
+        if (existing.remoteName !== displayName) {
+          existing.handle.close();
+          peer.virtualByRemoteId.delete(session.id);
+          this.ensureVirtualForRemote(peer, session.id, displayName);
+        }
+      } else {
+        this.ensureVirtualForRemote(peer, session.id, displayName);
+      }
+    }
+  }
+
+  private handlePeerSessionJoined(peer: PeerState, session: SessionInfo): void {
+    const displayName = `${session.name ?? session.id}@${peer.host}`;
+    const existing = peer.virtualByRemoteId.get(session.id);
+    if (existing) {
+      if (existing.remoteName !== displayName) {
+        existing.handle.close();
+        peer.virtualByRemoteId.delete(session.id);
+        this.ensureVirtualForRemote(peer, session.id, displayName);
+      }
+    } else {
+      this.ensureVirtualForRemote(peer, session.id, displayName);
+    }
+  }
+
+  private handlePeerSessionLeft(peer: PeerState, sessionId: string): void {
+    const existing = peer.virtualByRemoteId.get(sessionId);
+    if (existing) {
+      existing.handle.close();
+      peer.virtualByRemoteId.delete(sessionId);
+    }
   }
 
   /** A remote relay DM'd us → deliver to a local session via the broker. */
@@ -290,6 +371,32 @@ class TailnetRelay {
     return handle;
   }
 
+  /** Build a toResolver that works both by bare name and by session id. */
+  private resolveTarget(targetNameOrId: string, peer: PeerState): { kind: "name"; name: string } | { kind: "sessionId"; id: string } | null {
+    // If the target is a bare name (no @host suffix), resolve against our virtual sessions for this peer.
+    const atIndex = targetNameOrId.indexOf("@");
+    if (atIndex !== -1) {
+      const hostPart = targetNameOrId.slice(atIndex + 1).toLowerCase();
+      if (hostPart !== peer.host.toLowerCase()) return null;
+      const namePart = targetNameOrId.slice(0, atIndex);
+      // Try to find a virtual session with this display name prefix.
+      for (const [remoteId, v] of peer.virtualByRemoteId) {
+        if (v.remoteName === targetNameOrId || v.remoteName.startsWith(namePart + "@")) {
+          return { kind: "sessionId", id: remoteId };
+        }
+      }
+      return { kind: "name", name: namePart };
+    }
+    // No @host suffix — try matching against virtual session display names.
+    for (const [remoteId, v] of peer.virtualByRemoteId) {
+      const baseName = v.remoteName.replace(/@.*/, "");
+      if (baseName === targetNameOrId) {
+        return { kind: "sessionId", id: remoteId };
+      }
+    }
+    return { kind: "name", name: targetNameOrId };
+  }
+
   /** A local session → virtual session "<name>@<host>" → route to peer. */
   private routeOutboundFromLocal(
     peer: PeerState,
@@ -300,18 +407,23 @@ class TailnetRelay {
     if (!this.selfHost) return;
     const link = peer.outbound ?? peer.inbound;
     if (!link) {
-      // No live link. Phase 0: drop. Phase 1: queue + retry.
       console.error(`[tailnet-relay] drop DM to ${peer.host}: no live link`);
       return;
     }
+    // Try to resolve the remote target by session id; if the remote session
+    // has since changed name, fall back to sending by name.
+    const targetVirtual = peer.virtualByRemoteId.get(remoteSessionId);
+    const toResolver = targetVirtual
+      ? ({ kind: "sessionId" as const, id: remoteSessionId })
+      : ({ kind: "name" as const, name: remoteSessionId });
     const dm: TailnetDM = {
       type: "tailnet_dm",
       fromName: from.name ?? from.id,
       fromHost: this.selfHost,
       fromSessionId: from.id,
-      toName: `peer@${peer.host}`,
+      toName: targetVirtual?.remoteName ?? remoteSessionId,
       toHost: peer.host,
-      toResolver: { kind: "sessionId", id: remoteSessionId },
+      toResolver,
       message,
     };
     link.send(dm);
@@ -356,10 +468,7 @@ if (isMain) {
   });
 }
 
-// Silence unused-import warnings for the writeMessage/randomUUID we
-// kept reserved for upcoming channel + ack flows.
+// Silence unused-import warnings for the writeMessage we kept reserved.
 void writeMessage;
-void randomUUID;
-void ({} as TailnetHello);
 
 export { TailnetRelay };

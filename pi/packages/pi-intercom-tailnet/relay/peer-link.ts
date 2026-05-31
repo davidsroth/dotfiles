@@ -7,7 +7,7 @@
 import net from "net";
 import { EventEmitter } from "events";
 import { writeMessage, createMessageReader } from "../framing.js";
-import type { TailnetFrame, TailnetHello, TailnetDM, TailnetDeliveryAck } from "../types.js";
+import type { TailnetFrame, TailnetHello, TailnetDM, TailnetDeliveryAck, TailnetSessionList, TailnetSessionJoined, TailnetSessionLeft, SessionInfo } from "../types.js";
 
 export interface PeerLinkOpts {
   /** Local host's MagicDNS short name; sent in the hello. */
@@ -33,6 +33,9 @@ interface PeerLinkEvents {
   ready: (remoteHost: string) => void;
   dm: (frame: TailnetDM) => void;
   ack: (frame: TailnetDeliveryAck) => void;
+  sessionList: (sessions: SessionInfo[]) => void;
+  sessionJoined: (session: SessionInfo) => void;
+  sessionLeft: (sessionId: string) => void;
   closed: (err: Error | null) => void;
 }
 
@@ -74,6 +77,27 @@ function isAck(value: unknown): value is TailnetDeliveryAck {
     && typeof v.delivered === "boolean";
 }
 
+function isSessionList(value: unknown): value is TailnetSessionList {
+  if (!value || typeof value !== "object") return false;
+  const v = value as Record<string, unknown>;
+  return v.type === "tailnet_sessions"
+    && Array.isArray(v.sessions);
+}
+
+function isSessionJoined(value: unknown): value is TailnetSessionJoined {
+  if (!value || typeof value !== "object") return false;
+  const v = value as Record<string, unknown>;
+  return v.type === "tailnet_session_joined"
+    && v.session !== undefined;
+}
+
+function isSessionLeft(value: unknown): value is TailnetSessionLeft {
+  if (!value || typeof value !== "object") return false;
+  const v = value as Record<string, unknown>;
+  return v.type === "tailnet_session_left"
+    && typeof v.sessionId === "string";
+}
+
 function wireUp(
   socket: net.Socket,
   opts: PeerLinkOpts,
@@ -108,6 +132,9 @@ function wireUp(
 
       if (isDM(raw)) ee.emit("dm", raw);
       else if (isAck(raw)) ee.emit("ack", raw);
+      else if (isSessionList(raw)) ee.emit("sessionList", raw.sessions);
+      else if (isSessionJoined(raw)) ee.emit("sessionJoined", raw.session as SessionInfo);
+      else if (isSessionLeft(raw)) ee.emit("sessionLeft", raw.sessionId);
       // Unknown frame types ignored (forward-compat).
     },
     (err) => {

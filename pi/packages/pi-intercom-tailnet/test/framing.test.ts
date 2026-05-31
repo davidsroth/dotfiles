@@ -1,46 +1,47 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createMessageReader, writeMessage } from "../framing.ts";
-import { PassThrough } from "node:stream";
 import type { Socket } from "node:net";
 
-// PassThrough is wire-compatible enough for these unit tests; we only
-// exercise `write`. Cast the socket parameter through `unknown` for
-// the type guard.
-function fakeSocket(): { stream: PassThrough; socket: Socket } {
-  const stream = new PassThrough();
-  return { stream, socket: stream as unknown as Socket };
+/** Fake socket that records every write into a buffer array. */
+function fakeSocket(): { socket: Socket; written: Buffer[] } {
+  const written: Buffer[] = [];
+  const socket = {
+    write(chunk: Buffer) {
+      written.push(Buffer.from(chunk));
+      return true;
+    },
+  } as unknown as Socket;
+  return { socket, written };
+}
+
+function frame(msg: unknown): Buffer {
+  const { socket, written } = fakeSocket();
+  writeMessage(socket, msg);
+  return Buffer.concat(written);
 }
 
 test("framing: roundtrip a single message", async () => {
-  const { stream, socket } = fakeSocket();
   const received: unknown[] = [];
   const reader = createMessageReader(
     (msg) => received.push(msg),
     (err) => assert.fail(err),
   );
 
-  writeMessage(socket, { type: "tailnet_hello", protocolVersion: 1, host: "nimbus" });
-  // Drain
-  const chunk = stream.read();
-  reader(chunk as Buffer);
+  reader(frame({ type: "tailnet_hello", protocolVersion: 1, host: "nimbus" }));
 
   assert.deepEqual(received, [{ type: "tailnet_hello", protocolVersion: 1, host: "nimbus" }]);
 });
 
 test("framing: handles partial reads spanning multiple frames", async () => {
-  const { stream, socket } = fakeSocket();
   const received: unknown[] = [];
   const reader = createMessageReader(
     (msg) => received.push(msg),
     (err) => assert.fail(err),
   );
 
-  writeMessage(socket, { id: 1 });
-  writeMessage(socket, { id: 2 });
-  writeMessage(socket, { id: 3 });
+  const combined = Buffer.concat([frame({ id: 1 }), frame({ id: 2 }), frame({ id: 3 })]);
 
-  const combined = stream.read() as Buffer;
   // Feed byte-by-byte to simulate the worst-case partial-read scenario.
   for (const byte of combined) {
     reader(Buffer.from([byte]));
@@ -50,7 +51,6 @@ test("framing: handles partial reads spanning multiple frames", async () => {
 });
 
 test("framing: surfaces JSON parse errors via onError", () => {
-  const { socket } = fakeSocket();
   let captured: Error | null = null;
   const reader = createMessageReader(
     () => assert.fail("should not deliver bad JSON"),
@@ -65,5 +65,4 @@ test("framing: surfaces JSON parse errors via onError", () => {
 
   assert.ok(captured);
   assert.match((captured as unknown as Error).message, /Failed to parse/);
-  void socket;
 });
