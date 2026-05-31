@@ -220,6 +220,38 @@ stale-registration eviction (`a101838`), the PID reaper + backpressure
   treating any of them as a current bug, re-check against the running broker's
   actual code (its start time vs `git log`).
 
+### pi-intercom-tailnet relay: virtual-session loop + broker-restart gap (2026-05-31)
+The tailnet relay exposes each remote peer session locally as a "virtual
+session" (`<name>@<host>`) by registering it on the LOCAL broker. Two
+non-obvious facts learned hardening it:
+
+- **The broker↔broker echo loop is real**, not theoretical. Registering a
+  virtual session makes the broker broadcast `session_joined`, which the
+  relay's own control bridge hears and would re-broadcast to peers → infinite
+  circulation. It is prevented only by filtering the relay's own virtual
+  sessions out of re-broadcast by BOTH broker-assigned id (`virtualSessionIds`)
+  AND display name (`virtualSessionNames`, needed because the echo can arrive
+  before `handle.sessionId` resolves). An audit that reads the post-fix code
+  will wrongly conclude "no loop present" — the filtering is load-bearing.
+- **A local broker restart drops EVERY relay connection** (control link + all
+  per-peer virtual-session sockets), but the cross-host peer links stay up and
+  won't re-send their session lists. So reconnecting only the control link
+  leaves `<name>@<host>` sessions as zombies pointing at dead sockets. The fix
+  (`reconnectBroker` → `rebuildVirtualSessions`) re-opens all virtual sessions
+  from retained peer state; virtual-session sockets also now have an `onClose`
+  that re-opens a singly-evicted session while the control link is healthy and
+  otherwise defers to the reconnect rebuild (gated on a `brokerHealthy` flag to
+  avoid racing reopen attempts against a down broker).
+
+Security posture after the 2026-05-31 P0 pass: broker dir chmod 0700 + socket
+0600; reconnect eviction gated on matching pid (anti-spoof of `originSessionId`);
+relay binds inbound hello host to `tailscale whois` of the connecting IP
+(fail-closed) and caps frame size (16 MiB) like the broker. Three overlapping
+relay respawn watchdogs exist (in-relay bridge reconnect, spawn.ts child-exit
+respawn, index.ts 10s interval) — redundant but each covers a distinct
+parent-liveness case, so not pure duplication.
+
+
 ## pi / runtime / shell internals
 
 ### pi subagents: tool availability + when to fan out
