@@ -23,13 +23,20 @@ export default function piIntercomTailnetExtension(_pi: ExtensionAPI) {
     return;
   }
 
+  // Initial spawn.
   try {
     spawnRelayIfNeeded();
-    if (!isRelayRunning()) {
-      // The relay may still be starting up; this isn't a hard error.
-      console.error("[pi-intercom-tailnet] relay spawn requested; pid file not yet present");
-    }
   } catch (err) {
     console.error("[pi-intercom-tailnet] failed to spawn relay:", err);
   }
+
+  // Watchdog: respawn the relay if it dies (e.g. broker restart killed it).
+  const watchdog = setInterval(() => {
+    try {
+      spawnRelayIfNeeded();
+    } catch (err) {
+      console.error("[pi-intercom-tailnet] watchdog respawn failed:", err);
+    }
+  }, 10_000);
+  watchdog.unref();
 }
