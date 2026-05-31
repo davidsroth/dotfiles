@@ -83,11 +83,9 @@ class IntercomBroker {
       } catch {
         // Best effort; a failure here doesn't make things less safe than before.
       }
-      try {
-        unlinkSync(SOCKET_PATH);
-      } catch {
-        // A clean startup has no stale socket to remove.
-      }
+      // NOTE: the stale-socket unlink is deliberately NOT done here. Unlinking
+      // unconditionally would delete a LIVE broker's socket if a second broker
+      // ever starts; bindSocket() probes first and only unlinks a dead socket.
     }
     this.server = net.createServer(this.handleConnection.bind(this));
   }
@@ -98,6 +96,13 @@ class IntercomBroker {
     // broker dies silently. Surface it deterministically and exit non-zero so
     // the spawning client reports a real startup failure.
     this.server.on("error", (error) => {
+      if ((error as NodeJS.ErrnoException).code === "EADDRINUSE") {
+        // Another broker bound the socket between our probe and listen (a
+        // narrow race the spawn lock normally prevents). It won; exit cleanly
+        // rather than reporting a startup failure.
+        console.log("Intercom broker socket already in use; another broker won the race, exiting");
+        process.exit(0);
+      }
       console.error("Intercom broker server error:", error);
       process.exit(1);
     });
@@ -110,20 +115,7 @@ class IntercomBroker {
     process.on("unhandledRejection", (reason) => {
       console.error("Intercom broker unhandled rejection:", reason);
     });
-    this.server.listen(SOCKET_PATH, () => {
-      if (process.platform !== "win32") {
-        // Defense-in-depth alongside the 0700 dir: restrict the socket file
-        // itself to the owner so it is never connectable by other users even
-        // if the dir permissions are somehow relaxed.
-        try {
-          chmodSync(SOCKET_PATH, 0o600);
-        } catch {
-          // The dir 0700 above is the real boundary; this is extra hardening.
-        }
-      }
-      writeFileSync(PID_PATH, String(process.pid));
-      console.log(`Intercom broker started (pid: ${process.pid})`);
-    });
+    this.bindSocket();
     if (REAPER_INTERVAL_MS > 0) {
       this.reapTimer = setInterval(() => this.reapDeadSessions(), REAPER_INTERVAL_MS);
       // Don't keep the process alive solely for the sweep.
@@ -131,6 +123,61 @@ class IntercomBroker {
     }
     process.on("SIGTERM", () => this.shutdown());
     process.on("SIGINT", () => this.shutdown());
+  }
+
+  /**
+   * Claim the listening socket safely. On POSIX, probe the socket path first:
+   * if a live broker answers, this broker lost the spawn race and exits; only
+   * a non-connectable (stale) socket is unlinked before listening. This avoids
+   * the split-brain where an unconditional unlink deletes a live broker's
+   * socket (old clients keep the orphaned inode, new clients hit this broker).
+   */
+  private bindSocket(): void {
+    const listen = (): void => {
+      this.server.listen(SOCKET_PATH, () => {
+        if (process.platform !== "win32") {
+          // Defense-in-depth alongside the 0700 dir: restrict the socket file
+          // itself to the owner so it is never connectable by other users
+          // even if the dir permissions are somehow relaxed.
+          try {
+            chmodSync(SOCKET_PATH, 0o600);
+          } catch {
+            // The dir 0700 is the real boundary; this is extra hardening.
+          }
+        }
+        writeFileSync(PID_PATH, String(process.pid));
+        console.log(`Intercom broker started (pid: ${process.pid})`);
+      });
+    };
+
+    if (process.platform === "win32") {
+      // Named pipes leave no stale filesystem entry to unlink or probe.
+      listen();
+      return;
+    }
+
+    let settled = false;
+    const probe = net.connect(SOCKET_PATH);
+    const finish = (liveBrokerPresent: boolean): void => {
+      if (settled) return;
+      settled = true;
+      probe.destroy();
+      if (liveBrokerPresent) {
+        console.log("Intercom broker already running; exiting");
+        process.exit(0);
+      }
+      try {
+        unlinkSync(SOCKET_PATH);
+      } catch {
+        // No stale socket to remove.
+      }
+      listen();
+    };
+    probe.once("connect", () => finish(true));
+    probe.once("error", () => finish(false));
+    // Safety net: a probe that neither connects nor errors quickly is treated
+    // as "no live broker" so startup can't hang.
+    probe.setTimeout(1000, () => finish(false));
   }
 
   private reapDeadSessions(): void {
