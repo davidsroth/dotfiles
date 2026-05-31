@@ -460,6 +460,22 @@ confirm() {
   [[ "$REPLY" =~ ^[Yy]$ ]]
 }
 
+# Prompt for sudo password once upfront to avoid mid-script failures
+# Returns: 0 if sudo is available (with or without password), 1 if no sudo
+validate_sudo() {
+  if ! command -v sudo >/dev/null 2>&1; then
+    return 1
+  fi
+  # Refresh sudo timestamp or prompt for password
+  if ! sudo -v 2>/dev/null; then
+    info "sudo authentication required"
+    sudo -v || {
+      warning "sudo authentication failed; continuing without elevated privileges"
+      return 1
+    }
+  fi
+}
+
 # Check platform compatibility and requirements
 # Returns: 0 on success, exits on failure
 check_platform() {
@@ -507,6 +523,11 @@ check_platform() {
     STOW_PACKAGES+=(linux)
   fi
   export STOW_PACKAGES
+
+  # Pre-authenticate sudo on Linux to avoid password prompts mid-apt
+  if [[ "$OS_FAMILY" == "linux" && "${LINUX_PKG_MGR:-}" == "apt" ]]; then
+    validate_sudo || true
+  fi
 }
 
 # Install Xcode Command Line Tools if not already installed
@@ -1188,11 +1209,12 @@ setup_agent_skills() {
   info "Linking shared agent skills..."
 
   # Link skills to various AI tool directories
-  # Note: .claude/skills is handled via internal symlink in dotfiles/.claude/skills -> ../.agent/skills
   local targets=(
     "$HOME/.gemini/skills"
     "$HOME/.cursor/skills"
     "$HOME/.codex/skills"
+    "$HOME/.pi/agent/skills"
+    "$HOME/.claude/skills"
   )
 
   for target in "${targets[@]}"; do
@@ -1207,10 +1229,6 @@ setup_agent_skills() {
     fi
   done
 
-  # Verify .claude/skills internal symlink
-  if [[ -L "$DOTFILES_DIR/.claude/skills" ]]; then
-    [[ "$VERBOSE" == "true" ]] && success "$HOME/.claude/skills (via dotfiles)" || true
-  fi
 }
 
 # Install Fira Code Nerd Font for glyph support in terminals (Kitty/tmux)
