@@ -57,5 +57,15 @@ export function spawnRelayIfNeeded(): void {
     stdio: "ignore",
     env: { ...process.env },
   });
+
+  // Watchdog: if the relay exits unexpectedly, respawn it after a short
+  // backoff. This keeps the broker alive (relay is a registered session)
+  // across pi session reloads and network interruptions.
+  child.once("exit", (code, signal) => {
+    // Clean intentional shutdown (SIGTERM/SIGINT from shutdown()) — don't respawn.
+    if (signal === "SIGTERM" || signal === "SIGINT" || code === 0) return;
+    setTimeout(() => spawnRelayIfNeeded(), 3000);
+  });
+
   child.unref();
 }
