@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseStatusForTest } from "../tailscale.ts";
+import { parseStatusForTest, parseWhoisForTest } from "../tailscale.ts";
 
 // Trimmed fixture of `tailscale status --json` output. The real CLI
 // returns many more fields; we exercise only the ones we parse.
@@ -53,6 +53,27 @@ test("parseStatus: missing Self returns null (refuse to start)", () => {
 
 test("parseStatus: garbage JSON returns null", () => {
   assert.equal(parseStatusForTest("not json"), null);
+});
+
+test("parseWhois: extracts short host from Node.Name", () => {
+  const fixture = JSON.stringify({
+    Node: {
+      Name: "Aurora.tail-abcd.ts.net.",
+      ComputedName: "aurora",
+    },
+    UserProfile: { LoginName: "someone@example.com" },
+  });
+  assert.equal(parseWhoisForTest(fixture), "aurora");
+});
+
+test("parseWhois: falls back to ComputedName when Name lacks a dot", () => {
+  const fixture = JSON.stringify({ Node: { ComputedName: "Storm" } });
+  assert.equal(parseWhoisForTest(fixture), "storm");
+});
+
+test("parseWhois: missing Node / garbage returns null", () => {
+  assert.equal(parseWhoisForTest(JSON.stringify({})), null);
+  assert.equal(parseWhoisForTest("not json"), null);
 });
 
 test("parseStatus: prefers DNSName short name over raw HostName", () => {

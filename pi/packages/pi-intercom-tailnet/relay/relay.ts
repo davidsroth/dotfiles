@@ -24,7 +24,7 @@ import { homedir } from "os";
 import net from "net";
 import { writeMessage } from "../framing.js";
 import { loadTailnetConfig, isPeerAllowed, type TailnetConfig } from "../config.js";
-import { getTailnetStatus, type TailnetStatus } from "../tailscale.js";
+import { getTailnetStatus, whoisHost, type TailnetStatus } from "../tailscale.js";
 import { createBrokerBridge, type BrokerBridge, type VirtualSessionHandle } from "./broker-bridge.js";
 import { dialPeer, acceptPeer, type PeerLink } from "./peer-link.js";
 import type { IntercomMessage, SessionInfo, TailnetDM } from "../types.js";
@@ -245,19 +245,47 @@ class TailnetRelay {
       socket.destroy();
       return;
     }
-    // Tailscale-only listener means the remote address is already a TS
-    // address; the allowlist gate is by host name from the hello.
-    const link = acceptPeer({
-      selfHost: this.selfHost,
-      socket,
-      acceptHello: (hello) => {
-        if (!isPeerAllowed(this.config, hello.host)) {
-          console.error(`[tailnet-relay] reject hello from ${hello.host}: not on allowedHosts`);
-          return false;
-        }
-        return true;
-      },
-    });
+    // Bind the self-asserted hello host to the network identity of the
+    // connecting address. The listener is Tailscale-only, but the allowlist
+    // gate is by the host name the PEER chooses in its hello — without a
+    // whois IP->name check, any tailnet node could claim an allowed host's
+    // name and pass the gate. Resolve whois up front (the freshly-accepted
+    // socket buffers the inbound hello until acceptPeer attaches its reader),
+    // then accept only if the claimed host matches the verified one.
+    const remoteAddress = socket.remoteAddress;
+    void (async () => {
+      const verifiedHost = await whoisHost(remoteAddress ?? "", this.config.tailscaleCli);
+      if (this.shuttingDown || socket.destroyed) {
+        socket.destroy();
+        return;
+      }
+      const link = acceptPeer({
+        selfHost: this.selfHost!,
+        socket,
+        acceptHello: (hello) => {
+          const claimed = hello.host.toLowerCase();
+          if (!isPeerAllowed(this.config, claimed)) {
+            console.error(`[tailnet-relay] reject hello from ${claimed}: not on allowedHosts`);
+            return false;
+          }
+          // Fail closed: if whois couldn't attribute the connecting IP to a
+          // tailnet node, we cannot verify the claimed identity, so reject.
+          if (!verifiedHost) {
+            console.error(`[tailnet-relay] reject hello from ${claimed}: could not whois ${remoteAddress ?? "<unknown>"}`);
+            return false;
+          }
+          if (verifiedHost !== claimed) {
+            console.error(`[tailnet-relay] reject hello: claimed host ${claimed} != whois ${verifiedHost} for ${remoteAddress ?? "<unknown>"}`);
+            return false;
+          }
+          return true;
+        },
+      });
+      this.wireInboundLink(link);
+    })();
+  }
+
+  private wireInboundLink(link: PeerLink): void {
     link.once("ready", (remoteHost) => {
       const peer = this.peers.get(remoteHost.toLowerCase()) ?? this.makePeerState(remoteHost.toLowerCase());
       if (peer.inbound) {

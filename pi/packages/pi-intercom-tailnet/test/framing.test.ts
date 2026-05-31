@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { createMessageReader, writeMessage } from "../framing.ts";
+import { createMessageReader, writeMessage, MAX_FRAME_BYTES } from "../framing.ts";
 import type { Socket } from "node:net";
 
 /** Fake socket that records every write into a buffer array. */
@@ -48,6 +48,31 @@ test("framing: handles partial reads spanning multiple frames", async () => {
   }
 
   assert.deepEqual(received, [{ id: 1 }, { id: 2 }, { id: 3 }]);
+});
+
+test("framing: rejects an oversized declared length before buffering", () => {
+  let captured: Error | null = null;
+  let delivered = false;
+  const reader = createMessageReader(
+    () => { delivered = true; },
+    (err) => { captured = err; },
+  );
+
+  // Declare a frame larger than the cap; send only the 4-byte header. The
+  // reader must reject on the length alone, without waiting for the body.
+  const header = Buffer.alloc(4);
+  header.writeUInt32BE(MAX_FRAME_BYTES + 1, 0);
+  reader(header);
+
+  assert.equal(delivered, false);
+  assert.ok(captured);
+  assert.match((captured as unknown as Error).message, /too large/);
+});
+
+test("framing: writeMessage throws on an oversized payload", () => {
+  const { socket } = fakeSocket();
+  const huge = "x".repeat(MAX_FRAME_BYTES + 1);
+  assert.throws(() => writeMessage(socket, { type: "tailnet_dm", blob: huge }), /Refusing to send/);
 });
 
 test("framing: surfaces JSON parse errors via onError", () => {

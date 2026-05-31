@@ -117,3 +117,54 @@ export function parseStatusForTest(json: string): TailnetStatus | null {
     return null;
   }
 }
+
+interface RawWhois {
+  Node?: {
+    Name?: unknown;        // full MagicDNS name, e.g. "aurora.tail-abcd.ts.net."
+    ComputedName?: unknown; // short MagicDNS name, e.g. "aurora"
+  };
+}
+
+function parseWhois(raw: unknown): string | null {
+  if (typeof raw !== "object" || raw === null) return null;
+  const node = (raw as RawWhois).Node;
+  if (!node || typeof node !== "object") return null;
+  // Prefer the full DNS name (normalized the same way peers/self are), then
+  // fall back to the short ComputedName.
+  return shortHost(node.Name, node.ComputedName);
+}
+
+/**
+ * Resolve the MagicDNS short host name that owns a tailnet IP address, via
+ * `tailscale whois --json <ip>`. Returns the lowercased short name, or `null`
+ * if the CLI is missing/errors or the IP can't be attributed to a node.
+ *
+ * Used to bind a self-asserted peer hello host to the network identity of the
+ * connecting address: without this, any tailnet node can claim an allowed
+ * host's name and pass the allowlist gate.
+ */
+export async function whoisHost(
+  ip: string,
+  cli: string = "tailscale",
+): Promise<string | null> {
+  if (!ip) return null;
+  try {
+    const { stdout } = await execFileAsync(cli, ["whois", "--json", ip], {
+      timeout: 5_000,
+      maxBuffer: 4 * 1024 * 1024,
+    });
+    return parseWhois(JSON.parse(stdout));
+  } catch {
+    // CLI missing, tailscaled stopped, IP not on the tailnet, etc.
+    return null;
+  }
+}
+
+// Exposed for unit tests — feed it a fixture JSON string.
+export function parseWhoisForTest(json: string): string | null {
+  try {
+    return parseWhois(JSON.parse(json));
+  } catch {
+    return null;
+  }
+}
