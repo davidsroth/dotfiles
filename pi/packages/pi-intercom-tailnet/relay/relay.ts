@@ -22,7 +22,6 @@ import { writeFileSync, unlinkSync, mkdirSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
 import net from "net";
-import { writeMessage } from "../framing.js";
 import { loadTailnetConfig, isPeerAllowed, type TailnetConfig } from "../config.js";
 import { getTailnetStatus, whoisHost, type TailnetStatus } from "../tailscale.js";
 import { createBrokerBridge, type BrokerBridge, type VirtualSessionHandle } from "./broker-bridge.js";
@@ -58,8 +57,6 @@ class TailnetRelay {
   private shuttingDown = false;
   /** True once the control link is connected; false while the broker is down. */
   private brokerHealthy = false;
-  /** Features advertised in hello; used for forward-compat. */
-  private readonly features = ["session_discovery"];
 
   constructor(config: TailnetConfig) {
     this.config = config;
@@ -278,7 +275,15 @@ class TailnetRelay {
   }
 
   private wirePeerLink(peer: PeerState, link: PeerLink, direction: "inbound" | "outbound"): void {
-    link.on("dm", (frame) => this.routeInboundDM(peer, frame));
+    link.on("dm", (frame) => void this.routeInboundDM(peer, frame));
+    link.on("ack", (frame) => {
+      // The ack travels remote->origin; nothing on this side is blocking on it
+      // (the local sender's broker already returned), so surface a cross-host
+      // delivery failure in the log instead of letting it vanish silently.
+      if (!frame.delivered) {
+        console.error(`[tailnet-relay] cross-host DM ${frame.messageId} to ${peer.host} not delivered: ${frame.reason ?? "unknown"}`);
+      }
+    });
     link.on("sessionList", (sessions) => this.handlePeerSessionList(peer, sessions));
     link.on("sessionJoined", (session) => this.handlePeerSessionJoined(peer, session));
     link.on("sessionLeft", (sessionId) => this.handlePeerSessionLeft(peer, sessionId));
@@ -364,7 +369,7 @@ class TailnetRelay {
   }
 
   /** A remote relay DM'd us → deliver to a local session via the broker. */
-  private routeInboundDM(peer: PeerState, frame: TailnetDM): void {
+  private async routeInboundDM(peer: PeerState, frame: TailnetDM): Promise<void> {
     if (!this.bridge) return;
     // Hosts must match what the link's hello claimed.
     if (frame.fromHost.toLowerCase() !== peer.host) {
@@ -376,14 +381,13 @@ class TailnetRelay {
     const senderDisplayName = `${frame.fromName.replace(/@.*/, "")}@${peer.host}`;
     const virtual = this.ensureVirtualForRemote(peer, frame.fromSessionId, senderDisplayName);
 
-    let target: string;
-    if (frame.toResolver.kind === "sessionId") {
-      target = frame.toResolver.id;
-    } else {
-      target = frame.toResolver.name;
-    }
-    virtual.send(target, frame.message);
-    this.ackTo(peer, frame.message.id, true);
+    const target = frame.toResolver.kind === "sessionId"
+      ? frame.toResolver.id
+      : frame.toResolver.name;
+    // Ack with the broker's ACTUAL delivery outcome rather than an optimistic
+    // true, so the sending host learns when a cross-host DM is dropped.
+    const result = await virtual.send(target, frame.message);
+    this.ackTo(peer, frame.message.id, result.delivered, result.reason);
   }
 
   private ensureVirtualForRemote(peer: PeerState, remoteSessionId: string, displayName: string): VirtualSessionHandle {
@@ -407,32 +411,6 @@ class TailnetRelay {
     }).catch(() => {});
     peer.virtualByRemoteId.set(remoteSessionId, { handle, remoteName: displayName });
     return handle;
-  }
-
-  /** Build a toResolver that works both by bare name and by session id. */
-  private resolveTarget(targetNameOrId: string, peer: PeerState): { kind: "name"; name: string } | { kind: "sessionId"; id: string } | null {
-    // If the target is a bare name (no @host suffix), resolve against our virtual sessions for this peer.
-    const atIndex = targetNameOrId.indexOf("@");
-    if (atIndex !== -1) {
-      const hostPart = targetNameOrId.slice(atIndex + 1).toLowerCase();
-      if (hostPart !== peer.host.toLowerCase()) return null;
-      const namePart = targetNameOrId.slice(0, atIndex);
-      // Try to find a virtual session with this display name prefix.
-      for (const [remoteId, v] of peer.virtualByRemoteId) {
-        if (v.remoteName === targetNameOrId || v.remoteName.startsWith(namePart + "@")) {
-          return { kind: "sessionId", id: remoteId };
-        }
-      }
-      return { kind: "name", name: namePart };
-    }
-    // No @host suffix — try matching against virtual session display names.
-    for (const [remoteId, v] of peer.virtualByRemoteId) {
-      const baseName = v.remoteName.replace(/@.*/, "");
-      if (baseName === targetNameOrId) {
-        return { kind: "sessionId", id: remoteId };
-      }
-    }
-    return { kind: "name", name: targetNameOrId };
   }
 
   /** A local session → virtual session "<name>@<host>" → route to peer. */
@@ -614,8 +592,5 @@ if (isMain) {
     process.exit(1);
   });
 }
-
-// Silence unused-import warnings for the writeMessage we kept reserved.
-void writeMessage;
 
 export { TailnetRelay };

@@ -7,8 +7,18 @@
 
 import net from "net";
 import { EventEmitter } from "events";
-import { writeMessage, createMessageReader } from "../framing.js";
+import { writeMessage, createMessageReader, isSocketBackedUp } from "../framing.js";
 import type { IntercomMessage, SessionInfo } from "../types.js";
+
+/** Outcome of sending a DM out through a virtual session. */
+export interface SendResult {
+  delivered: boolean;
+  reason?: string;
+}
+
+// How long to wait for the broker's delivered/delivery_failed reply before
+// reporting the send as failed (so a wedged broker can't hang the ack path).
+const SEND_ACK_TIMEOUT_MS = 10_000;
 
 export interface BrokerBridgeOpts {
   socketPath: string;
@@ -36,8 +46,12 @@ export interface VirtualSessionInit {
 export interface VirtualSessionHandle {
   /** Broker-assigned id once registration completes. */
   sessionId: Promise<string>;
-  /** Send a frame from this virtual session into the broker (DM out). */
-  send(to: string, message: IntercomMessage): void;
+  /**
+   * Send a DM from this virtual session into the broker. Resolves with the
+   * broker's actual delivery outcome (delivered / delivery_failed), or a
+   * failure if the broker doesn't reply in time or the socket is backed up.
+   */
+  send(to: string, message: IntercomMessage): Promise<SendResult>;
   close(): void;
 }
 
@@ -178,6 +192,20 @@ export function createBrokerBridge(opts: BrokerBridgeOpts): BrokerBridge {
       resolveId = res;
       rejectId = rej;
     });
+    // Pending DM sends awaiting the broker's delivered/delivery_failed reply,
+    // keyed by message id.
+    const pendingSends = new Map<string, (result: SendResult) => void>();
+    const settlePending = (messageId: string, result: SendResult): void => {
+      const resolver = pendingSends.get(messageId);
+      if (resolver) {
+        pendingSends.delete(messageId);
+        resolver(result);
+      }
+    };
+    const failAllPending = (reason: string): void => {
+      for (const [, resolver] of pendingSends) resolver({ delivered: false, reason });
+      pendingSends.clear();
+    };
 
     const reader = createMessageReader(
       (raw) => {
@@ -194,6 +222,19 @@ export function createBrokerBridge(opts: BrokerBridgeOpts): BrokerBridge {
             }
             break;
           }
+          case "delivered": {
+            if (typeof m.messageId === "string") settlePending(m.messageId, { delivered: true });
+            break;
+          }
+          case "delivery_failed": {
+            if (typeof m.messageId === "string") {
+              settlePending(m.messageId, {
+                delivered: false,
+                reason: typeof m.reason === "string" ? m.reason : "delivery failed",
+              });
+            }
+            break;
+          }
         }
       },
       (err) => sock.destroy(err),
@@ -205,6 +246,7 @@ export function createBrokerBridge(opts: BrokerBridgeOpts): BrokerBridge {
     });
 
     sock.on("close", () => {
+      failAllPending("virtual session connection closed");
       // Only fires for a broker-initiated drop: a relay-initiated close() sets
       // vClosed first, so this no-ops there and won't double-report.
       if (vClosed) return;
@@ -230,13 +272,35 @@ export function createBrokerBridge(opts: BrokerBridgeOpts): BrokerBridge {
 
     return {
       sessionId,
-      send(to: string, message: IntercomMessage): void {
-        if (vClosed) return;
-        writeMessage(sock, { type: "send", to, message });
+      send(to: string, message: IntercomMessage): Promise<SendResult> {
+        if (vClosed) return Promise.resolve({ delivered: false, reason: "virtual session closed" });
+        if (isSocketBackedUp(sock)) {
+          return Promise.resolve({ delivered: false, reason: "local broker not draining" });
+        }
+        const messageId = message.id;
+        return new Promise<SendResult>((resolve) => {
+          const timer = setTimeout(() => {
+            if (pendingSends.delete(messageId)) {
+              resolve({ delivered: false, reason: "broker delivery timeout" });
+            }
+          }, SEND_ACK_TIMEOUT_MS);
+          pendingSends.set(messageId, (result) => {
+            clearTimeout(timer);
+            resolve(result);
+          });
+          try {
+            writeMessage(sock, { type: "send", to, message });
+          } catch (err) {
+            clearTimeout(timer);
+            pendingSends.delete(messageId);
+            resolve({ delivered: false, reason: err instanceof Error ? err.message : String(err) });
+          }
+        });
       },
       close(): void {
         if (vClosed) return;
         vClosed = true;
+        failAllPending("virtual session closed");
         try { writeMessage(sock, { type: "unregister" }); } catch { /* socket already dead */ }
         sock.end();
       },

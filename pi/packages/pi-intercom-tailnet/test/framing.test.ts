@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { createMessageReader, writeMessage, MAX_FRAME_BYTES } from "../framing.ts";
+import { createMessageReader, writeMessage, MAX_FRAME_BYTES, MAX_OUTBOUND_BUFFER_BYTES, isSocketBackedUp } from "../framing.ts";
 import type { Socket } from "node:net";
 
 /** Fake socket that records every write into a buffer array. */
@@ -73,6 +73,15 @@ test("framing: writeMessage throws on an oversized payload", () => {
   const { socket } = fakeSocket();
   const huge = "x".repeat(MAX_FRAME_BYTES + 1);
   assert.throws(() => writeMessage(socket, { type: "tailnet_dm", blob: huge }), /Refusing to send/);
+});
+
+test("framing: isSocketBackedUp tracks writableLength against the high-water mark", () => {
+  const socket = { writableLength: 0 } as unknown as Socket;
+  assert.equal(isSocketBackedUp(socket), false);
+  (socket as { writableLength: number }).writableLength = MAX_OUTBOUND_BUFFER_BYTES;
+  assert.equal(isSocketBackedUp(socket), false, "at the mark is not yet over");
+  (socket as { writableLength: number }).writableLength = MAX_OUTBOUND_BUFFER_BYTES + 1;
+  assert.equal(isSocketBackedUp(socket), true);
 });
 
 test("framing: surfaces JSON parse errors via onError", () => {

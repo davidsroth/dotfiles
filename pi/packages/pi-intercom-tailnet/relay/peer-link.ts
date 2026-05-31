@@ -6,7 +6,7 @@
 
 import net from "net";
 import { EventEmitter } from "events";
-import { writeMessage, createMessageReader } from "../framing.js";
+import { writeMessage, createMessageReader, isSocketBackedUp } from "../framing.js";
 import type { TailnetFrame, TailnetHello, TailnetDM, TailnetDeliveryAck, TailnetSessionList, TailnetSessionJoined, TailnetSessionLeft, SessionInfo } from "../types.js";
 
 export interface PeerLinkOpts {
@@ -153,7 +153,19 @@ function wireUp(
 
   ee.send = (frame: TailnetFrame) => {
     if (closed) return;
-    writeMessage(socket, frame);
+    // Bound memory: if the remote peer isn't draining what we've written, the
+    // link is wedged — tear it down (the close handler cleans up) rather than
+    // buffer without limit. An oversized frame likewise tears down this link
+    // instead of escaping into the reader's error path.
+    if (isSocketBackedUp(socket)) {
+      socket.destroy(new Error("peer outbound buffer exceeded"));
+      return;
+    }
+    try {
+      writeMessage(socket, frame);
+    } catch (err) {
+      socket.destroy(err instanceof Error ? err : new Error(String(err)));
+    }
   };
 
   ee.close = () => {

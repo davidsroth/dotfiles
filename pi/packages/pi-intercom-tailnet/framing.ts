@@ -16,6 +16,23 @@ export const MAX_FRAME_BYTES: number = (() => {
   return Number.isInteger(raw) && raw > 0 ? raw : 16 * 1024 * 1024;
 })();
 
+// High-water mark for a socket's outbound buffer. If a peer/broker isn't
+// draining what we write, Node buffers it in this process's memory without
+// bound. Past this mark we treat the socket as wedged and tear it down rather
+// than keep buffering. Floored at 2x the max frame so one in-flight + one
+// queued legal frame never trips it. Override with
+// PI_INTERCOM_TAILNET_MAX_SOCKET_BUFFER_BYTES.
+export const MAX_OUTBOUND_BUFFER_BYTES: number = (() => {
+  const raw = Number(process.env.PI_INTERCOM_TAILNET_MAX_SOCKET_BUFFER_BYTES);
+  const configured = Number.isInteger(raw) && raw > 0 ? raw : 8 * 1024 * 1024;
+  return Math.max(configured, MAX_FRAME_BYTES * 2);
+})();
+
+/** True when a socket's outbound buffer has grown past the high-water mark. */
+export function isSocketBackedUp(socket: Socket): boolean {
+  return socket.writableLength > MAX_OUTBOUND_BUFFER_BYTES;
+}
+
 export function writeMessage(socket: Socket, msg: unknown): void {
   const json = JSON.stringify(msg);
   const payload = Buffer.from(json, "utf-8");
