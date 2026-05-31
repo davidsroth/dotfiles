@@ -14,7 +14,7 @@ import { ComposeOverlay, type ComposeResult } from "./ui/compose.ts";
 import { InlineMessageComponent } from "./ui/inline-message.ts";
 import { loadConfig, type IntercomConfig } from "./config.ts";
 import type { SessionInfo, Message, Attachment } from "./types.ts";
-import { ReplyTracker, replyResolvesWaiter } from "./reply-tracker.ts";
+import { ReplyTracker, replyResolvesWaiter, type ReplyWaiterMatch } from "./reply-tracker.ts";
 import { resolveIntercomPresenceName } from "./presence-name.ts";
 import { answerAside } from "./side-session.ts";
 
@@ -450,46 +450,42 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
   const replyTracker = new ReplyTracker();
   const pendingIdleMessages: InboundMessageEntry[] = [];
   let inboundFlushTimer: NodeJS.Timeout | null = null;
-  let replyWaiter: {
-    from: string;
-    replyTo: string;
-    // Broker-resolved recipient id (set once `send` reports delivery). The
-    // `from` field may be a name when the target couldn't be pre-resolved, so
-    // the authoritative id is needed to match `session_left` and fast-cancel.
-    recipientId?: string;
+  // Outbound asks awaiting a reply, keyed by the unique questionId (the ask
+  // message id, echoed back as the reply's `replyTo`). Keying on the unique id
+  // — instead of a single global slot matched by sender — lets concurrent
+  // asks/asides/contact_supervisor calls coexist and makes correlation O(1) and
+  // unambiguous. Sender identity is now only a defensive assertion (see
+  // replyResolvesWaiter), not the correlation key.
+  interface ActiveReplyWaiter extends ReplyWaiterMatch {
     resolve: (message: Message) => void;
     reject: (error: Error) => void;
-  } | null = null;
-  function waitForReply(from: string, replyTo: string, signal?: AbortSignal): Promise<Message> {
+  }
+  const replyWaiters = new Map<string, ActiveReplyWaiter>();
+  function waitForReply(target: string, questionId: string, signal?: AbortSignal): Promise<Message> {
     // Throw synchronously rather than returning a rejected promise. A dangling
     // rejected promise (assigned but not yet awaited) trips Node's default
     // unhandled-rejection handler and aborts the process before the caller's
     // try/catch can see it.
-    if (replyWaiter) {
-      throw new Error("Already waiting for a reply");
-    }
     if (signal?.aborted) {
       throw new Error("Cancelled");
     }
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
-        rejectReplyWaiter(new Error(`No reply from "${from}" within 10 minutes`));
+        rejectReplyWaiter(questionId, new Error(`No reply from "${target}" within 10 minutes`));
       }, 10 * 60 * 1000);
       const cleanup = () => {
         clearTimeout(timeout);
         signal?.removeEventListener("abort", onAbort);
-        if (replyWaiter?.replyTo === replyTo) {
-          replyWaiter = null;
-        }
+        replyWaiters.delete(questionId);
       };
       const onAbort = () => {
         cleanup();
         reject(new Error("Cancelled"));
       };
       signal?.addEventListener("abort", onAbort, { once: true });
-      replyWaiter = {
-        from,
-        replyTo,
+      replyWaiters.set(questionId, {
+        questionId,
+        expectedSenderTarget: target,
         resolve: (message) => {
           cleanup();
           resolve(message);
@@ -498,15 +494,23 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
           cleanup();
           reject(error);
         },
-      };
+      });
     });
   }
-  function rejectReplyWaiter(error: Error): void {
-    replyWaiter?.reject(error);
+  function rejectReplyWaiter(questionId: string, error: Error): void {
+    replyWaiters.get(questionId)?.reject(error);
   }
-  function noteReplyRecipient(replyTo: string, recipientId?: string): void {
-    if (recipientId && replyWaiter?.replyTo === replyTo) {
-      replyWaiter.recipientId = recipientId;
+  function rejectAllReplyWaiters(error: Error): void {
+    // Snapshot first: reject() cleans up via the waiter's own cleanup, which
+    // mutates the map.
+    for (const waiter of [...replyWaiters.values()]) {
+      waiter.reject(error);
+    }
+  }
+  function noteReplyRecipient(questionId: string, recipientId?: string): void {
+    if (recipientId) {
+      const waiter = replyWaiters.get(questionId);
+      if (waiter) waiter.expectedSenderId = recipientId;
     }
   }
   function clearReconnectTimer(): void {
@@ -763,13 +767,16 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
     if (!liveContext) {
       return;
     }
-    if (replyWaiter && replyResolvesWaiter(replyWaiter, from, message)) {
-      replyWaiter.resolve(message);
-      return;
+    if (message.replyTo) {
+      const waiter = replyWaiters.get(message.replyTo);
+      if (waiter && replyResolvesWaiter(waiter, from, message)) {
+        waiter.resolve(message);
+        return;
+      }
     }
     // An inbound aside question is answered out of band and never enters the
     // timeline/history. (Its eventual reply is a normal message that the
-    // replyWaiter branch above resolves on the asker's side.)
+    // replyWaiters lookup above resolves on the asker's side.)
     if (message.aside && !message.replyTo) {
       answerAsideQuestion(liveContext, from, message, messageGeneration);
       return;
@@ -823,22 +830,30 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
       handleIncomingMessage(liveContext, from, message);
     });
     nextClient.on("session_left", (sessionId: string) => {
-      if (client !== nextClient || !replyWaiter) {
+      if (client !== nextClient) {
         return;
       }
       const lowerLeft = sessionId.toLowerCase();
-      if (
-        replyWaiter.from.toLowerCase() === lowerLeft
-        || replyWaiter.recipientId?.toLowerCase() === lowerLeft
-      ) {
-        rejectReplyWaiter(new Error("Recipient session ended before replying"));
+      // Fast-cancel every outbound ask addressed to the departed session.
+      if (replyWaiters.size > 0) {
+        for (const waiter of [...replyWaiters.values()]) {
+          if (
+            waiter.expectedSenderTarget.toLowerCase() === lowerLeft
+            || waiter.expectedSenderId?.toLowerCase() === lowerLeft
+          ) {
+            waiter.reject(new Error("Recipient session ended before replying"));
+          }
+        }
       }
+      // Answerer side: a departed sender's pending asks can no longer be
+      // usefully replied to, so drop them from the reply tracker.
+      replyTracker.dropPendingFromSender(sessionId);
     });
     nextClient.on("disconnected", (error: Error) => {
       if (client !== nextClient) {
         return;
       }
-      rejectReplyWaiter(new Error(`Disconnected while waiting for reply: ${error.message}`, { cause: error }));
+      rejectAllReplyWaiters(new Error(`Disconnected while waiting for reply: ${error.message}`, { cause: error }));
       client = null;
       if (!shuttingDown && !disposed) {
         clearReconnectTimer();
@@ -1100,7 +1115,7 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
     clearReconnectTimer();
     clearPresenceSyncTimer();
     lastSentStatus = null;
-    rejectReplyWaiter(new Error("Session shutting down"));
+    rejectAllReplyWaiters(new Error("Session shutting down"));
     for (const controller of activeAsides) controller.abort();
     activeAsides.clear();
     replyTracker.reset();
@@ -1330,21 +1345,13 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
           }
         }
 
-        if (replyWaiter) {
-          return {
-            content: [{ type: "text", text: "Already waiting for a reply" }],
-            isError: true,
-            details: { error: true },
-          };
-        }
-
         let replyPromise: Promise<Message> | null = null;
+        const questionId = randomUUID();
         try {
-          const questionId = randomUUID();
           replyPromise = waitForReply(sendTo, questionId, signal);
           replyPromise.catch(() => undefined);
           if (signal?.aborted) {
-            rejectReplyWaiter(new Error("Cancelled"));
+            rejectReplyWaiter(questionId, new Error("Cancelled"));
             try {
               await replyPromise;
             } catch {
@@ -1366,7 +1373,7 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
           });
           if (!sendResult.delivered) {
             const errorText = sendResult.reason ?? "Session may not exist or has disconnected.";
-            rejectReplyWaiter(new Error(`Message to "${metadata.orchestratorTarget}" was not delivered: ${errorText}`));
+            rejectReplyWaiter(questionId, new Error(`Message to "${metadata.orchestratorTarget}" was not delivered: ${errorText}`));
             if (replyPromise) {
               try {
                 await replyPromise;
@@ -1413,7 +1420,7 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
               : {}),
           };
         } catch (error) {
-          rejectReplyWaiter(toError(error));
+          rejectReplyWaiter(questionId, toError(error));
           if (replyPromise) {
             try {
               await replyPromise;
@@ -1514,7 +1521,7 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
     lines.push(`Reconnect attempts: ${reconnectAttempt}`);
     lines.push(`Pending outbound: ${activeClient?.pendingSendCount ?? 0} send(s), ${activeClient?.pendingListCount ?? 0} list(s)`);
     lines.push(`Pending inbound asks: ${pendingAsks.length}`);
-    lines.push(`Awaiting reply: ${replyWaiter ? `yes (from ${replyWaiter.from})` : "no"}`);
+    lines.push(`Awaiting replies: ${replyWaiters.size}`);
     // Broker process liveness, read from the pid file (no network needed).
     try {
       const pid = Number(readFileSync(getBrokerPidPath(), "utf-8").trim());
@@ -1721,14 +1728,6 @@ Usage:
             };
           }
 
-          if (replyWaiter) {
-            return {
-              content: [{ type: "text", text: "Already waiting for a reply" }],
-              isError: true,
-              details: { error: true },
-            };
-          }
-
           if (_signal?.aborted) {
             return {
               content: [{ type: "text", text: "Cancelled" }],
@@ -1737,7 +1736,7 @@ Usage:
             };
           }
           let replyPromise: Promise<Message> | null = null;
-          let ownsWaiter = false;
+          const questionId = randomUUID();
 
           try {
             // Fast local self-check (exact id/name); the broker authoritatively
@@ -1756,21 +1755,11 @@ Usage:
                 details: { error: true },
               };
             }
-            // Re-check: a parallel ask in the same tool batch may have claimed
-            // the slot between the early guard and now.
-            if (replyWaiter) {
-              return {
-                content: [{ type: "text", text: "Already waiting for a reply" }],
-                isError: true,
-                details: { error: true },
-              };
-            }
-            const questionId = randomUUID();
-            // Pass the raw target: the broker resolves id/name/prefix, reply
-            // matching handles name-or-id, and recipientId (set from the
-            // delivered ack below) lets session_left fast-cancel the wait.
+            // Pass the raw target: the broker resolves id/name/prefix. The
+            // reply is correlated by the unique questionId; the broker-resolved
+            // recipientId (from the delivered ack below) lets session_left
+            // fast-cancel this wait and asserts the reply's sender.
             replyPromise = waitForReply(to, questionId, _signal);
-            ownsWaiter = true;
             const sendResult = await connectedClient.send(to, {
               messageId: questionId,
               text: message,
@@ -1782,14 +1771,12 @@ Usage:
 
             if (!sendResult.delivered) {
               const errorText = sendResult.reason ?? "Session may not exist or has disconnected.";
-              if (ownsWaiter) {
-                rejectReplyWaiter(new Error(`Message to "${to}" was not delivered: ${errorText}`));
-                if (replyPromise) {
-                  try {
-                    await replyPromise;
-                  } catch {
-                    // The waiter was already rejected above. Keep the delivery failure as the only error here.
-                  }
+              rejectReplyWaiter(questionId, new Error(`Message to "${to}" was not delivered: ${errorText}`));
+              if (replyPromise) {
+                try {
+                  await replyPromise;
+                } catch {
+                  // The waiter was already rejected above. Keep the delivery failure as the only error here.
                 }
               }
               return {
@@ -1821,16 +1808,12 @@ Usage:
               isError: false,
             };
           } catch (error) {
-            // Only reject the global waiter if THIS call actually owns it.
-            // Otherwise we'd cancel a sibling concurrent ask's pending wait.
-            if (ownsWaiter) {
-              rejectReplyWaiter(toError(error));
-              if (replyPromise) {
-                try {
-                  await replyPromise;
-                } catch {
-                  // The waiter is cleanup-only on this path. The real failure is the one from the outer catch.
-                }
+            rejectReplyWaiter(questionId, toError(error));
+            if (replyPromise) {
+              try {
+                await replyPromise;
+              } catch {
+                // The waiter is cleanup-only on this path. The real failure is the one from the outer catch.
               }
             }
             return {
@@ -1851,7 +1834,7 @@ Usage:
           }
 
           try {
-            const target = replyTracker.resolveReplyTarget({ to });
+            const target = replyTracker.resolveReplyTarget({ to, replyTo });
             if (target.from.id === connectedClient.sessionId) {
               return {
                 content: [{ type: "text", text: "Cannot message the current session" }],

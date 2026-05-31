@@ -53,6 +53,56 @@ test("reply with to resolves matching pending ask", () => {
   assert.equal(tracker.resolveReplyTarget({ to: "planner-id" }, 1002).message.id, "ask-1");
 });
 
+test("reply with replyTo disambiguates two pending asks from the SAME sender", () => {
+  const tracker = new ReplyTracker();
+  const planner = createSession("planner-id", "planner");
+  tracker.recordIncomingMessage(planner, createMessage("ask-1", "First"), 1000);
+  tracker.recordIncomingMessage(planner, createMessage("ask-2", "Second"), 1001);
+
+  // Neither name nor id can pick between them; the message id can.
+  assert.equal(tracker.resolveReplyTarget({ replyTo: "ask-2" }, 1002).message.id, "ask-2");
+  assert.equal(tracker.resolveReplyTarget({ replyTo: "ask-1" }, 1002).message.id, "ask-1");
+  // The sender-based path stays ambiguous and points the user at replyTo.
+  assert.throws(() => tracker.resolveReplyTarget({ to: "planner" }, 1002), /reply with the message id/);
+});
+
+test("reply with an unknown replyTo errors clearly", () => {
+  const tracker = new ReplyTracker();
+  tracker.recordIncomingMessage(createSession("planner-id", "planner"), createMessage("ask-1", "First"), 1000);
+  assert.throws(() => tracker.resolveReplyTarget({ replyTo: "nope" }, 1001), /No pending ask with id "nope"/);
+});
+
+test("explicit to wins over the current turn context", () => {
+  const tracker = new ReplyTracker();
+  const planner = createSession("planner-id", "planner");
+  const reviewer = createSession("reviewer-id", "reviewer");
+  // planner's ask triggers the current turn; reviewer's ask is also pending.
+  const triggered = tracker.recordIncomingMessage(planner, createMessage("ask-1", "From planner"), 1000);
+  tracker.queueTurnContext(triggered);
+  tracker.recordIncomingMessage(reviewer, createMessage("ask-2", "From reviewer"), 1001);
+  tracker.beginTurn(1002);
+
+  // No target -> the triggering message (planner).
+  assert.equal(tracker.resolveReplyTarget({}, 1003).message.id, "ask-1");
+  // Explicit to:reviewer -> reviewer, NOT the triggering planner message.
+  assert.equal(tracker.resolveReplyTarget({ to: "reviewer" }, 1003).message.id, "ask-2");
+});
+
+test("dropPendingFromSender clears a departed sender's asks and turn context", () => {
+  const tracker = new ReplyTracker();
+  const planner = createSession("planner-id", "planner");
+  const ctx = tracker.recordIncomingMessage(planner, createMessage("ask-1", "First"), 1000);
+  tracker.queueTurnContext(ctx);
+  tracker.recordIncomingMessage(createSession("reviewer-id", "reviewer"), createMessage("ask-2", "Second"), 1001);
+  tracker.beginTurn(1002);
+
+  tracker.dropPendingFromSender("planner-id");
+
+  // planner's ask is gone; only reviewer's remains, and it resolves cleanly.
+  assert.deepEqual(tracker.listPending(1003).map((c) => c.message.id), ["ask-2"]);
+  assert.equal(tracker.resolveReplyTarget({}, 1003).message.id, "ask-2");
+});
+
 test("reply errors when no context and no pending asks", () => {
   const tracker = new ReplyTracker();
 
@@ -106,49 +156,45 @@ test("pruneExpired drops stale queued turn contexts by age", () => {
   assert.equal((tracker as unknown as { currentTurnContext: { message: Message } }).currentTurnContext.message.id, "ask-new");
 });
 
-test("replyResolvesWaiter matches a full-id reply when the ask was addressed by a short/prefix id", () => {
-  // Regression: `intercom list` prints short (prefix) ids, so users address
-  // `ask` by them. The reply's from.id is the full session id; without using
-  // the broker-resolved recipientId the waiter never resolves and the reply is
-  // parked in the idle buffer until the turn ends (e.g. on cancel).
+test("replyResolvesWaiter correlates by questionId and asserts the sender", () => {
   const fullId = "2f123799-1a97-4f4f-b1fe-34bb5eeed9aa";
-  const waiter = { from: "2f123799", replyTo: "q1", recipientId: fullId };
-  const from = { id: fullId, name: "pi-intercom takeover survey" };
-
-  assert.equal(replyResolvesWaiter(waiter, from, { replyTo: "q1" }), true);
+  // Broker-resolved id is authoritative: a short/prefix-addressed ask still
+  // correlates because the reply's full from.id matches expectedSenderId.
+  const waiter = { questionId: "q1", expectedSenderTarget: "2f123799", expectedSenderId: fullId };
+  assert.equal(replyResolvesWaiter(waiter, { id: fullId, name: "survey" }, { replyTo: "q1" }), true);
 });
 
-test("replyResolvesWaiter does NOT match a prefix-addressed ask without recipientId", () => {
-  // Before the fix recipientId was captured but unused: short-id addressing
-  // could not correlate the full-id reply.
+test("replyResolvesWaiter falls back to permissive target match without a resolved id", () => {
   const fullId = "2f123799-1a97-4f4f-b1fe-34bb5eeed9aa";
-  const waiter = { from: "2f123799", replyTo: "q1" };
-  const from = { id: fullId, name: "pi-intercom takeover survey" };
-
-  assert.equal(replyResolvesWaiter(waiter, from, { replyTo: "q1" }), false);
-});
-
-test("replyResolvesWaiter still matches by full id and by name", () => {
-  const fullId = "2f123799-1a97-4f4f-b1fe-34bb5eeed9aa";
+  // No expectedSenderId yet: match the raw target by full id, id prefix, or name.
   assert.equal(
-    replyResolvesWaiter({ from: fullId, replyTo: "q1" }, { id: fullId, name: "X" }, { replyTo: "q1" }),
+    replyResolvesWaiter({ questionId: "q1", expectedSenderTarget: "2f123799" }, { id: fullId, name: "X" }, { replyTo: "q1" }),
     true,
+    "id prefix",
   );
   assert.equal(
-    replyResolvesWaiter({ from: "My Session", replyTo: "q1" }, { id: fullId, name: "My Session" }, { replyTo: "q1" }),
+    replyResolvesWaiter({ questionId: "q1", expectedSenderTarget: fullId }, { id: fullId, name: "X" }, { replyTo: "q1" }),
     true,
+    "full id",
+  );
+  assert.equal(
+    replyResolvesWaiter({ questionId: "q1", expectedSenderTarget: "My Session" }, { id: fullId, name: "My Session" }, { replyTo: "q1" }),
+    true,
+    "name",
   );
 });
 
-test("replyResolvesWaiter requires the reply's replyTo to match the question id", () => {
+test("replyResolvesWaiter requires the reply's replyTo to match the questionId", () => {
   const fullId = "2f123799-1a97-4f4f-b1fe-34bb5eeed9aa";
-  const waiter = { from: "2f123799", replyTo: "q1", recipientId: fullId };
+  const waiter = { questionId: "q1", expectedSenderTarget: "2f123799", expectedSenderId: fullId };
   // Right sender, wrong correlation id -> not this waiter's reply.
   assert.equal(replyResolvesWaiter(waiter, { id: fullId, name: "X" }, { replyTo: "q2" }), false);
 });
 
-test("replyResolvesWaiter does not match an unrelated sender", () => {
-  const waiter = { from: "2f123799", replyTo: "q1", recipientId: "2f123799-aaaa" };
-  const other = { id: "9999bbbb-cccc", name: "someone else" };
-  assert.equal(replyResolvesWaiter(waiter, other, { replyTo: "q1" }), false);
+test("replyResolvesWaiter rejects a valid questionId from the wrong sender (security assertion)", () => {
+  // A peer that is NOT the addressee replies with a stolen/guessed questionId:
+  // expectedSenderId is authoritative, so the reply must not resolve the wait.
+  const waiter = { questionId: "q1", expectedSenderTarget: "planner", expectedSenderId: "2f123799-aaaa" };
+  const impostor = { id: "9999bbbb-cccc", name: "someone else" };
+  assert.equal(replyResolvesWaiter(waiter, impostor, { replyTo: "q1" }), false);
 });
