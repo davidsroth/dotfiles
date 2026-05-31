@@ -1,5 +1,12 @@
 settings.local.json
 settings.json
+auth.json
+models.json
+
+# Runtime directories
+intercom/
+npm/
+sessions/
 
 # Per-machine memory (only global MEMORY.md is tracked)
 memory/MEMORY.local.md

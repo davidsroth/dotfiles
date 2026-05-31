@@ -26,7 +26,13 @@ class BorderedEditor extends CustomEditor {
 		const innerWidth = width - 2;
 		const lines = super.render(innerWidth);
 		const border = this.borderColor;
-		return lines.map((line) => border("│") + padRight(line, innerWidth) + border("│"));
+		if (lines.length < 2) {
+			return lines.map((line) => border("│") + padRight(line, innerWidth) + border("│"));
+		}
+		const top = border("╭") + lines[0]! + border("╮");
+		const middle = lines.slice(1, -1).map((line) => border("│") + padRight(line, innerWidth) + border("│"));
+		const bottom = border("╰") + lines[lines.length - 1]! + border("╯");
+		return [top, ...middle, bottom];
 	}
 }
 
