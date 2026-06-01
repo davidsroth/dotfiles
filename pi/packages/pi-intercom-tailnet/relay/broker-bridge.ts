@@ -10,6 +10,50 @@ import { EventEmitter } from "events";
 import { writeMessage, createMessageReader, isSocketBackedUp } from "../framing.js";
 import type { IntercomMessage, SessionInfo } from "../types.js";
 
+/**
+ * Client→broker message types understood by BOTH the upstream
+ * `nicobailon/pi-intercom` broker and the `@davidroth/pi-intercom` fork.
+ * See docs/adr/0001-dual-broker-compatibility.md.
+ *
+ * The bridge MUST NOT emit anything outside this set: upstream `throw`s on an
+ * unknown client message type and drops the whole connection, whereas the fork
+ * silently ignores it — so a fork-only verb would appear to work, then kill
+ * connections on baseline. `writeBrokerFrame` enforces membership at runtime.
+ */
+export const SHARED_BROKER_CLIENT_MESSAGE_TYPES = [
+  "register",
+  "list",
+  "send",
+  "unregister",
+] as const;
+
+export type SharedBrokerClientMessageType =
+  (typeof SHARED_BROKER_CLIENT_MESSAGE_TYPES)[number];
+
+const SHARED_TYPE_SET: ReadonlySet<string> = new Set(
+  SHARED_BROKER_CLIENT_MESSAGE_TYPES,
+);
+
+/**
+ * Single outbound writer for the broker socket. Asserts the frame's `type` is
+ * in the dual-broker shared subset before writing, so adding a verb is a
+ * deliberate change to SHARED_BROKER_CLIENT_MESSAGE_TYPES rather than an
+ * accidental upstream-incompatible regression (ADR 0001, decision 1).
+ */
+export function writeBrokerFrame(
+  socket: net.Socket,
+  frame: { type: SharedBrokerClientMessageType } & Record<string, unknown>,
+): void {
+  if (!SHARED_TYPE_SET.has(frame.type)) {
+    throw new Error(
+      `[pi-intercom-tailnet] refusing to send broker frame of type "${frame.type}": `
+        + `not in the dual-broker shared subset (${SHARED_BROKER_CLIENT_MESSAGE_TYPES.join(", ")}). `
+        + "See docs/adr/0001-dual-broker-compatibility.md.",
+    );
+  }
+  writeMessage(socket, frame);
+}
+
 /** Outcome of sending a DM out through a virtual session. */
 export interface SendResult {
   delivered: boolean;
@@ -69,6 +113,14 @@ interface BridgeEvents {
 export interface BrokerBridge extends EventEmitter {
   on<E extends keyof BridgeEvents>(event: E, listener: BridgeEvents[E]): this;
   emit<E extends keyof BridgeEvents>(event: E, ...args: Parameters<BridgeEvents[E]>): boolean;
+  /**
+   * Protocol version advertised by the broker on the control `registered`
+   * frame. A number ⇒ a version-advertising broker (the `@davidroth` fork);
+   * `null` ⇒ baseline upstream `pi-intercom`, which sends no version. This is
+   * the ONLY seam for gating future fork-only behavior — basic DM delivery must
+   * never depend on it being non-null (ADR 0001, decisions 3 & 4).
+   */
+  readonly brokerProtocolVersion: number | null;
   /** Open the control socket and resolve once registered. */
   start(): Promise<void>;
   /** Trigger a full `list` refresh of local sessions. */
@@ -84,6 +136,11 @@ export function createBrokerBridge(opts: BrokerBridgeOpts): BrokerBridge {
   let controlSocket: net.Socket | null = null;
   let controlReady = false;
   let closed = false;
+  let brokerProtocolVersion: number | null = null;
+  Object.defineProperty(ee, "brokerProtocolVersion", {
+    get: () => brokerProtocolVersion,
+    enumerable: true,
+  });
 
   const pendingLists = new Map<string, (sessions: SessionInfo[]) => void>();
 
@@ -93,6 +150,9 @@ export function createBrokerBridge(opts: BrokerBridgeOpts): BrokerBridge {
     switch (m.type) {
       case "registered": {
         controlReady = true;
+        // Fork advertises a numeric `version`; baseline upstream omits it.
+        // Record it as the dual-broker flavor signal (ADR 0001).
+        brokerProtocolVersion = typeof m.version === "number" ? m.version : null;
         break;
       }
       case "session_joined": {
@@ -146,7 +206,7 @@ export function createBrokerBridge(opts: BrokerBridgeOpts): BrokerBridge {
 
       sock.on("connect", () => {
         const now = Date.now();
-        writeMessage(sock, {
+        writeBrokerFrame(sock, {
           type: "register",
           session: {
             name: opts.controlName ?? "__tailnet_relay__",
@@ -179,7 +239,7 @@ export function createBrokerBridge(opts: BrokerBridgeOpts): BrokerBridge {
           reject(new Error(`list request ${requestId} timed out`));
         }
       }, 5000);
-      writeMessage(controlSocket, { type: "list", requestId });
+      writeBrokerFrame(controlSocket, { type: "list", requestId });
     });
   };
 
@@ -256,7 +316,7 @@ export function createBrokerBridge(opts: BrokerBridgeOpts): BrokerBridge {
 
     sock.on("connect", () => {
       const now = Date.now();
-      writeMessage(sock, {
+      writeBrokerFrame(sock, {
         type: "register",
         session: {
           name: init.displayName,
@@ -289,7 +349,7 @@ export function createBrokerBridge(opts: BrokerBridgeOpts): BrokerBridge {
             resolve(result);
           });
           try {
-            writeMessage(sock, { type: "send", to, message });
+            writeBrokerFrame(sock, { type: "send", to, message });
           } catch (err) {
             clearTimeout(timer);
             pendingSends.delete(messageId);
@@ -301,7 +361,7 @@ export function createBrokerBridge(opts: BrokerBridgeOpts): BrokerBridge {
         if (vClosed) return;
         vClosed = true;
         failAllPending("virtual session closed");
-        try { writeMessage(sock, { type: "unregister" }); } catch { /* socket already dead */ }
+        try { writeBrokerFrame(sock, { type: "unregister" }); } catch { /* socket already dead */ }
         sock.end();
       },
     };
@@ -311,7 +371,7 @@ export function createBrokerBridge(opts: BrokerBridgeOpts): BrokerBridge {
     if (closed) return;
     closed = true;
     if (controlSocket) {
-      try { writeMessage(controlSocket, { type: "unregister" }); } catch { /* ignore */ }
+      try { writeBrokerFrame(controlSocket, { type: "unregister" }); } catch { /* ignore */ }
       controlSocket.end();
       controlSocket = null;
     }

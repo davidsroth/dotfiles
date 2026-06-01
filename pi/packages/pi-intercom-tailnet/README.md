@@ -1,7 +1,23 @@
 # pi-intercom-tailnet
 
-Extension to [`@davidroth/pi-intercom`](../pi-intercom) that bridges DMs
-(and, in the future, channels) across a Tailscale tailnet.
+Extension that bridges DMs (and, in the future, channels) across a
+Tailscale tailnet by relaying through the **local intercom broker**.
+
+## Broker compatibility
+
+The relay talks to whatever intercom broker your local pi-intercom
+extension already started. It is wire-compatible with **both**:
+
+- upstream [`nicobailon/pi-intercom`](https://github.com/nicobailon/pi-intercom)
+  (`pi install npm:pi-intercom`), and
+- the [`@davidroth/pi-intercom`](../pi-intercom) fork.
+
+It only emits the broker control verbs both implementations understand
+(`register` / `list` / `send` / `unregister`) and ignores any
+fork-only fields, so no fork adoption or code change is needed to run it
+against the upstream broker. See
+[`docs/adr/0001-dual-broker-compatibility.md`](docs/adr/0001-dual-broker-compatibility.md)
+for the contract and how it's enforced + tested.
 
 > **Status: Phase 1 — cross-host session discovery.** Cross-host DMs
 > work with name-based targeting (`worker@maigret`). Behind a static

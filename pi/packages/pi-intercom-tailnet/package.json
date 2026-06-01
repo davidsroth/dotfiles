@@ -12,7 +12,8 @@
     "framing.ts",
     "tailscale.ts",
     "relay/**/*.ts",
-    "skills/**/*"
+    "skills/**/*",
+    "docs/**/*"
   ],
   "scripts": {
     "test": "tsx --test test/*.test.ts"
