@@ -11,6 +11,12 @@ _darcs
 # Generated per-machine file — managed by `just pi-settings`, not stowed
 ^\.pi/agent/settings\.json$
 
+# Don't stow pi/packages into ~/packages. The packages are loaded by absolute
+# resolution of `../../dotfiles/pi/packages/...` from ~/.pi/agent/settings.json
+# (see settings.base.json), so no ~/packages symlink is needed. Stowing it would
+# claim a generic ~/packages name and expose ~1.3 GB of node_modules under $HOME.
+^packages$
+
 # Memory dir is a mix of tracked (MEMORY.md) and per-machine local files.
 # install.sh / `just pi-memory` symlinks MEMORY.md explicitly; don't let stow
 # fold the whole dir (which would swallow local MEMORY.local.md/SCRATCHPAD/daily).
