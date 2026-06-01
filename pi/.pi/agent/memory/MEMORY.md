@@ -20,23 +20,21 @@ Stable facts and preferences that should influence future pi sessions.
 - Primary editor: Neovim.
 - Primary terminal: WezTerm.
 
-## Operating lessons — consolidated 2026-05-29 (first memory review; week of 05-24)
+## Operating lessons
 
-Recurring, cross-cutting lessons from a week of heavy multi-session work (DePuy
-CPQ build, the Context Mesh perf-PR campaign, pi-intercom fixes). Behavioral
-rules first; the concrete infra footguns point at deeper notes lower in this
-file. North star for these: what would have prevented the mistakes these
-sessions actually made.
+Recurring, cross-cutting lessons from heavy multi-session work (multi-PR build
+campaigns, backend perf work, pi-intercom fixes). Behavioral rules first; the
+concrete infra footguns point at deeper notes lower in this file. North star:
+what would have prevented the mistakes these sessions actually made.
 
-### Multi-session coordination (the #1 source of wasted effort this week)
-- **Shared working trees are the norm here.** Many pi sessions edit the SAME
-  checkout in `/Volumes/git/toolkit` and `/Users/davidroth/dotfiles`. `git add
-  <file>` stages whatever is on disk, including other sessions' uncommitted
-  hunks. Always `git add -p` to isolate your own changes, or use a dedicated
-  `git worktree`. (Caught real cross-staging more than once.)
+### Multi-session coordination (a top source of wasted effort)
+- **Shared working trees can be the norm.** Multiple pi sessions may edit the
+  SAME checkout. `git add <file>` stages whatever is on disk, including other
+  sessions' uncommitted hunks. Always `git add -p` to isolate your own changes,
+  or use a dedicated `git worktree`. (Caught real cross-staging more than once.)
 - **Re-verify git state on any resumed / long-lived session before acting on
   remembered state.** A resumed session's mental model can be many commits
-  behind reality. The pi-intercom session sent FALSE "X is uncommitted / Y not
+  behind reality. A session once sent FALSE "X is uncommitted / Y not
   built yet" warnings to peers from stale context, then had to retract. Run
   `git log --oneline -15`, `git status`, and `git reflog` before trusting what
   you "remember."
@@ -46,8 +44,8 @@ sessions actually made.
   status, read the actual `git diff` and describe what SHIPPED, not what you
   were attempting. (Extends the existing "we measured vs we suspect" note.)
 - **Don't assume your PR branch HEAD is stable** — peers force-push / rewrite
-  shared PR branches (PR #273 moved under multiple sessions). Re-fetch and
-  coordinate over intercom before rebasing or force-pushing.
+  shared PR branches (a shared PR branch once moved under multiple sessions).
+  Re-fetch and coordinate over intercom before rebasing or force-pushing.
 - **To capture what other sessions are doing, read their transcripts, not their
   self-reports.** Ground truth: `~/.pi/agent/sessions/<encoded-cwd>/<ts>_<uuid>.jsonl`
   (session NAME lives in `session_info` records, last one wins; a
@@ -58,12 +56,12 @@ sessions actually made.
 
 ### Verification discipline
 - **For schema / DB / index-mutating changes, verify what actually got
-  INSTALLED at runtime — not just "tests pass" + "endpoint is fast."** The CM
-  perf campaign nearly shipped a "#863 indexes contribute" narrative that was
-  false: a sibling PR's invalid `CREATE VECTOR INDEX ... WITH [...]` syntax
-  threw first and the index-creation loop never ran. The speedup was 100% from
-  other PRs. For index PRs, run `SHOW INDEXES` after restart; the failure was a
-  single easily-missed WARNING line.
+  INSTALLED at runtime — not just "tests pass" + "endpoint is fast."** A perf
+  campaign once nearly shipped an "indexes contribute to the speedup" narrative
+  that was false: a sibling PR's invalid `CREATE VECTOR INDEX ... WITH [...]`
+  syntax threw first and the index-creation loop never ran. The speedup was 100%
+  from other PRs. For index PRs, verify the indexes actually exist after restart
+  (e.g. `SHOW INDEXES`); the failure was a single easily-missed WARNING line.
 - **After resolving git conflicts, grep for leftover markers before
   continuing.** A stray `<<<<<<< HEAD` survived a multi-marker resolution and
   `git merge --continue` committed the broken file. Always run
@@ -71,18 +69,16 @@ sessions actually made.
 
 ### pi tooling
 - **A long-running broker/daemon does NOT pick up source edits.** The intercom
-  broker ran 3.5 days on stale code after `broker/` was edited 9 commits later;
-  asks routed to dead registry sockets. Restart the daemon after editing it (a
-  machine restart also clears it). General rule for any tsx/node daemon loaded
-  once at spawn. See the intercom sections below for addressing/reply details
-  (short-id reply correlation was fixed in `replyResolvesWaiter`; full-id and
-  exact-name addressing always worked).
+  broker once ran 3.5 days on stale code after its source was edited 9 commits
+  later; asks routed to dead registry sockets. Restart the daemon after editing
+  it (a machine restart also clears it). General rule for any tsx/node daemon
+  loaded once at spawn.
 - **When a long-running tool "breaks," check the RUNNING process against the
-  on-disk code before debugging the code.** On 2026-05-29 the on-disk intercom
-  code passed 79/79 tests while delivery was broken — the only fault was a
-  9-commit-stale broker process. Compare process start time (`ps -o lstart`)
-  against `git log` / file mtimes first; a 30-second check that avoids an hour
-  of debugging code that's already correct.
+  on-disk code before debugging the code.** Once, the on-disk intercom code
+  passed its full test suite while delivery was broken — the only fault was a
+  many-commits-stale broker process. Compare process start time (`ps -o
+  lstart`) against `git log` / file mtimes first; a 30-second check that avoids
+  an hour of debugging code that's already correct.
 
 ## pi-intercom — addressing, lifecycle, broker, dispatcher
 
@@ -92,7 +88,7 @@ behavior that changed across the @davidroth/pi-intercom Phase 1 patch
 (commit `d797a8a` on dotfiles main, 2026-05-26):
 
 - **Display name (unique)** — works in all broker versions. The human label
-  before the parens in `intercom list` (e.g. `depuy-cpq toolkit app`,
+  before the parens in `intercom list` (e.g. `app-build session`,
   `subagent-chat-aacd6b27`).
 - **Display name (multiple match)** — returns "Multiple sessions named X are
   connected. Use the session ID instead."
@@ -110,8 +106,8 @@ cleanup, and `session_left` ask fast-fail. (Separately, on 2026-05-29 the
 *client-side* short-id reply-correlation bug was fixed via `replyResolvesWaiter`
 — addressing by full id or exact name always worked; see daily 2026-05-29.)
 
-**Duplicate display names** block by-name routing entirely (e.g. two
-"DePuy Demo Seed (Twin)" after a fork): `to:"<name>"` errors with the
+**Duplicate display names** block by-name routing entirely (e.g. two sessions
+with the same name after a fork): `to:"<name>"` errors with the
 multiple-match message, and a prefix from `list` may not resolve either.
 Workarounds: ask the peer to `/name` itself uniquely (`Twin-A`/`Twin-B`); get
 its full UUID via `intercom status` from *its* session; or skip the
@@ -134,9 +130,9 @@ Neither identifier is a durable key:
   these. (Consistent with reaper-plan §1: `register` mints a fresh UUID; the
   UUID is not a stable identity. A future broker could let clients re-claim a
   prior UUID via a stable token.)
-- **Display names drift** when a session renames itself mid-life (e.g. broad
-  scope `Depuy CV integration` → narrow `Fix CPQ hydration race`), so a name
-  logged in an earlier turn can return "Session not found" later.
+- **Display names drift** when a session renames itself mid-life (e.g. from a
+  broad scope to a narrow one as work focuses), so a name logged in an earlier
+  turn can return "Session not found" later.
 
 So: a short-UUID prefix logged in turn N may not resolve in turn N+5 (it
 cycled), and a display name logged earlier may have changed. **Mitigations:**
@@ -147,13 +143,12 @@ cycled), and a display name logged earlier may have changed. **Mitigations:**
 - Use a tolerant retry: try the last-known name, and on "Session not found"
   fall back to `intercom list` + match.
 - Sessions that rename themselves should preserve discoverability — keep a
-  stable prefix/suffix (`Depuy CV integration (race fix)`) or announce the
-  rename on their next outbound.
+  stable prefix/suffix (`<broad scope> (narrow focus)`) or announce the rename
+  on their next outbound.
 
-(Discovered across 2026-05-24 → 05-26: by-name collisions blocking Twin
-notifications; UUIDs changing ~3h apart and after the morning broker cutover
-[`ac0e3789` → `eb661fc3` for `depuy-cpq fold-in: T1 tests`]; and a dispatcher
-send to `Depuy CV integration` failing after it renamed to `Fix CPQ hydration race`.)
+(Observed repeatedly: by-name collisions blocking notifications to a forked
+twin session; UUIDs changing hours apart and after a broker cutover; and a
+send failing after the target renamed itself mid-task.)
 
 ### Silence ≠ death; design liveness probes to demand a reply
 A pi session does NOT auto-process inbound intercom messages — it queues them in
@@ -188,10 +183,10 @@ silence [live, idle].)
   `intercom send` tool invocation with this content"); verify via
   `intercom pending` / inbox and re-ping if the pane says "sent" but nothing
   arrived; or have review sessions encode the verdict in their display name so
-  `intercom list` itself is the channel. (Discovered 2026-05-26, blind-review #1280.)
+  `intercom list` itself is the channel. (Observed during a blind PR review.)
 - **The dispatcher is NOT immune.** Under context pressure / many parallel
   threads, the dispatcher confabulated a subagent's A/B/C proposal *before*
-  receiving it and presented it as the subagent's output (2026-05-27). Before
+  receiving it and presented it as the subagent's output. Before
   presenting any subagent output, scan the actual conversation for the matching
   `📨 From …` inbound; if there isn't one, say "still in flight, no output yet"
   rather than fabricate. When unsure, run `intercom list` + check session state
@@ -201,8 +196,8 @@ silence [live, idle].)
   a reply target, so a bare `reply` can land on a session whose ask preceded the
   recent inbound by turns. Safe pattern: use explicit `intercom send
   to:<display-name>` for reports; use `reply` only immediately after answering a
-  specific `intercom ask`. (Discovered 2026-05-27: an ack for `Diagnose CM
-  slowdown` got routed to `subagent-chat-c0553839` via `intercom reply`.)
+  specific `intercom ask`. (Observed: an ack meant for one session got routed
+  to an unrelated `subagent-chat-…` via a bare `intercom reply`.)
 
 ### Caveat: this week's intercom observations predate the 2026-05-29 broker cutover
 The broker that served all of 2026-05-24 → 29 started 2026-05-26 09:19 on commit
@@ -305,53 +300,6 @@ would have wiped out every live session on the machine. Always
 sanity-check process counts with `tmux list-panes` and
 broker-side ping success rates before recommending a broker restart.
 
-### Agent SDK Python library `claude_agent_sdk` vs raw `anthropic`
-
-Two patterns in DistylAI agents:
-- **MCP-based** (CV's graph Q&A agent): uses `claude_agent_sdk.ClaudeSDKClient` with `mcp_servers={"context-objects": {...}, ...}` config. Tools come from MCP endpoints dynamically. Skills materialized from agent_repo file tree. `permission_mode="bypassPermissions"`, `max_turns` configurable. Used by CV's KGC dispatcher.
-- **Bespoke handlers** (pre-`f631948ea` depuy-cpq agent): uses `anthropic.AsyncAnthropic` directly + `messages.create(tools=TOOL_SCHEMAS)`. Tools are Python handlers in a `HANDLERS: dict[str, ToolHandler]` registry. Custom tool wrapping. Used to be 19 tools; now (post-f631948ea) 3.
-
-When extending agents, check which pattern they use; adding "MCP tools" to a bespoke-handler agent requires significant restructuring. Conversely, adding bespoke handlers to a ClaudeSDKClient agent isn't supported — you'd have to expose them via an in-process MCP server.
-
-### uvicorn `--reload` mode: the spawn_main child is the real worker
-
-  When uvicorn runs with `--reload` (toolkit-supervisor always does
-  in local dev), `pgrep -f worker_entrypoint.*depuy-cpq` finds only
-  the **parent watcher process**, whose `/proc/<pid>/status` stays
-  frozen at startup baseline (~650 MB VmSize, ~125 MB RSS) forever,
-  no matter how much load you throw at the app. The actual serving
-  worker is a multiprocessing child whose cmdline contains
-  `multiprocessing.spawn import spawn_main` and whose `PPid` is
-  the watcher's PID.
-
-  To find it inside the supervisor container:
-  ```sh
-  for pid in /proc/[0-9]*; do
-    pid=$(basename "$pid"); [ -r "/proc/$pid/cmdline" ] || continue
-    cmd=$(tr -d "\0" < /proc/$pid/cmdline 2>/dev/null)
-    case "$cmd" in
-      *spawn_main*)
-        ppid=$(awk '/^PPid:/{print $2}' /proc/$pid/status)
-        echo "PID=$pid PPid=$ppid"
-        cat /proc/$pid/limits | grep -i 'address space'
-        grep 'VmPeak\|VmHWM\|VmSize\|VmRSS' /proc/$pid/status
-        ;;
-    esac
-  done
-  ```
-  Note: `pgrep` / `ps` are not in the supervisor image — must walk
-  `/proc` by hand. The container also lacks `procps`.
-
-  RLIMIT_AS does inherit cleanly from parent to spawn_main child
-  (verified 2026-05-27: parent + child both showed 4 GiB after the
-  config bump).
-
-  Without this, debugging memory issues against the uvicorn worker
-  looks like "memory is frozen, the rlimit fix didn't take" when
-  in reality the wrong PID is being inspected. The brief in
-  `/tmp/supervisor-worker-memory-fix-brief.md` had the standard
-  `pgrep` recipe and would have produced misleading observations.
-
 ### Bash secret-redaction pitfall: `${VAR:+x}${VAR:-NO}` prints the value
 
 The pattern `${VAR:+present (length ${#VAR})}${VAR:-NO}` looks like it should print "present (length N)" if VAR is set or "NO" if not. But the two expansions concatenate — when VAR IS set, the first emits "present (length N)" AND the second emits the actual value (the `:-` default doesn't trigger because VAR is set). Result: the secret value appears in the output between them.
@@ -370,7 +318,7 @@ Or just always pipe through a length-only check:
 docker exec <c> sh -c 'if [ -n "${OPENAI_API_KEY:-}" ]; then echo "set length=${#OPENAI_API_KEY}"; else echo "unset"; fi'
 ```
 
-Discovered 2026-05-27 while probing CM container env. Accidentally printed full OPENAI_API_KEY value into a dispatcher pi conversation. Not externally leaked but a real footgun for any secret-probe shell.
+Discovered while probing a container's env for a set/unset secret. The buggy pattern accidentally printed the full secret value into the pi conversation. Not externally leaked, but a real footgun for any secret-probe shell.
 
 ### tlink pi-notification (desktop notifications on pi turn-end)
 
@@ -450,17 +398,15 @@ directly still pass; tests that went through the factory in X fail in
 ways that look like config-shape mismatches, masking the real "we kept
 two designs" bug.
 
-**Specific case (PR #1245, depuy-cpq, 2026-05-25, merge `687b0ace1`):**
-- Branch A (bootstrap, commit `d59bcab1d`, 1h before merge): coordinated
-  refactor that deleted the inline `class ContextMeshDataSource` stub
-  from `data_source.py` and added a 750-LOC standalone
-  `cm_data_source.py` + rewired the factory's `from ... import`.
-- Branch B (cv-wiring): two days of CV plumbing on top of the *original*
-  `data_source.py` with the inline stub intact. Never saw
-  `cm_data_source.py`.
-- Merge resolution: "take cv-wiring (structural superset)" for
-  `data_source.py`. Resurrected the inline stub, dropped A's import-line
-  surgery. `cm_data_source.py` survived unconflicted but orphaned.
+**Concrete shape (anonymized):**
+- Branch A (a refactor landed ~1h before the merge): deleted an inline
+  `class XDataSource` stub from `data_source.py` and added a standalone
+  `x_data_source.py` + rewired the factory's `from ... import`.
+- Branch B (a feature branch): days of plumbing on top of the *original*
+  `data_source.py` with the inline stub intact. Never saw `x_data_source.py`.
+- Merge resolution: "take B (structural superset)" for `data_source.py`.
+  Resurrected the inline stub, dropped A's import-line surgery.
+  `x_data_source.py` survived unconflicted but orphaned.
 - The merge commit message itself caught this as a known follow-up — but
   *after* resolving, not during. Cleanup took its own commit.
 
@@ -503,13 +449,12 @@ git patch-id < <(git show <sha>)       # → stable across cherry-pick
 git cherry <upstream> <branch>         # → "+" means not in upstream, "-" means in upstream by patch-id
 ```
 
-Discovered 2026-05-25 during the 70-zombie-session triage: I claimed
-`david/fix-exact-limit-pagination` had 3 net-new commits + 1
-duplicate. Actually all 4 commits were tree-identical to the first 4
-of PR #860 (cherry-picks). The branch was fully redundant and got
-deleted instead of becoming a new PR. A `git rev-parse <sha>^{tree}`
-or `git cherry origin/main david/fix-exact-limit-pagination`
-comparison would have caught this at triage time.
+Discovered during a worktree triage: a branch was reported as having 3 net-new
+commits + 1 duplicate. Actually all 4 commits were tree-identical to the first
+4 of an already-merged PR (cherry-picks). The branch was fully redundant and
+got deleted instead of becoming a new PR. A `git rev-parse <sha>^{tree}` or
+`git cherry origin/main <branch>` comparison would have caught this at triage
+time.
 
 Symptom of the gap: a triage report listing N net-new commits when
 in fact zero are net-new because they were all cherry-picked
@@ -541,11 +486,9 @@ done
 git log --no-merges --stat <sha-oldest>^..<sha-newest> --format='%h %s'
 ```
 
-Discovered 2026-05-25 during the same 70-zombie triage: I dispatched
-a brief saying "the 4 onsite-bootstrap commits touch 3 files (loader
-.py, ingest .py, runbook .md)" — actually all 4 commits only touch
-`scripts/load_depuy_onsite_graph_to_cm.py`. The 3-file list came from
-a cumulative diff between two diverging branch tips, not from the
+Discovered during a worktree triage: a brief claimed "the 4 commits touch 3
+files" — actually all 4 commits only touched a single script. The 3-file list
+came from a cumulative diff between two diverging branch tips, not from the
 commits themselves.
 
 Companion lesson (subordinate of the SHA-vs-tree-hash note above):
@@ -580,24 +523,15 @@ tmux list-panes -a -F '#{pane_current_path}' | grep -F "<worktree-path>"
 intercom list | grep -F "<worktree-path>"
 ```
 
-Discovered 2026-05-25 during the 70-session triage: I removed
-`/Volumes/git/context-mesh-bulk-ingest` (PR #859 merged → "definitively
-done"), and the `depuy-cpq toolkit app` session reported it had been
-"running a perf benchmark of #859's bulk-ingest path" in that dir.
-Post-hoc investigation showed: the benchmark actually targets cloud
-(vanilla.dev) and runs out of a *different* worktree
-(`/Volumes/git/context-views-depuy-readable`); the deleted worktree
-held only already-committed + already-pushed content (all 3 commits
-were in main via the squash-merge); no untracked artifacts were on
-it. So that specific removal turned out fine — but only by luck.
-Branch tip `b664a1d0` was still in the object DB as a dangling
-commit, so `git branch <name> <sha> && git worktree add ...` would
-have reconstructed it if needed.
-
-Same pattern same day also removed `toolkit-pa-voice-tests`
-(PR #740 merged) and `context-views-list-tickets` (PR #259 merged)
-without the same check — those happened to not have live sessions
-attached, but that was luck, not rigor.
+Discovered during a worktree triage: a worktree was removed because its PR was
+merged ("definitively done"), but another session reported it had been running
+a perf benchmark in that dir. Post-hoc it turned out fine — the benchmark
+actually ran out of a *different* worktree and the deleted one held only
+already-pushed content — but only by luck. (The branch tip was still a dangling
+commit in the object DB, so `git branch <name> <sha> && git worktree add ...`
+could have reconstructed it if needed.) The same sweep removed two other
+merged-PR worktrees without the usage check — they happened to have no live
+sessions attached, but that was luck, not rigor.
 
 Companion rule: when the user pre-approves a batch of removals,
 **re-verify each item's "no live attachment" status immediately
@@ -612,7 +546,7 @@ The git refs REST endpoint is consistent immediately:
 
 ```bash
 # Lagging (PR-object cache):
-gh pr view 273 -R <org>/<repo> --json headRefOid -q .headRefOid
+gh pr view <num> -R <org>/<repo> --json headRefOid -q .headRefOid
 
 # Immediate (git refs):
 gh api repos/<org>/<repo>/git/refs/heads/<branch> -q .object.sha
@@ -624,26 +558,24 @@ For automated verification scripts, prefer the refs API. For
 human-readable PR state, sleep+retry on `gh pr view` is fine but be
 aware of the staleness window.
 
-Observed twice 2026-05-25 during the loader-fixes-port cherry-pick
-push to PR #273. Push completed; refs API returned the new SHA
-instantly; `gh pr view` returned the old SHA for ~5s before
-catching up.
+Observed twice during a cherry-pick push to a PR: push completed, the refs API
+returned the new SHA instantly, but `gh pr view` returned the old SHA for ~5s
+before catching up.
 
 ### Never classify uncommitted work by path/filename — read the diff
 
 Uncommitted-files audits during a worktree triage MUST inspect the
 actual diff content, not bucket by path. Filenames like
-`config/settings-dev.toml` or `deployments/vanilla-dev.yaml` look
+`config/settings-dev.toml` or `deployments/some-env.yaml` look
 like "local dev tweaks" by convention but in practice often hold:
 
-- substantive bug fixes layered into module code (e.g. a 16-line
-  `_request_bearer_token` helper in `server/module.py` that ignores
-  the Toolkit mock-auth placeholder so requests fall back to CV's
-  service API key — looks like config-adjacent but is a real fix)
+- substantive bug fixes layered into module code (e.g. a small
+  auth-token helper added to a server module that works around a
+  mock-auth placeholder — looks config-adjacent but is a real fix)
 - production deployment tuning with runbook commentary (memory
   limits, concurrency caps, post-PR follow-ups)
 - environment-specific configuration overrides that local dev
-  literally cannot run without (agent repo IDs after a CM reseed)
+  literally cannot run without (e.g. service/agent IDs after a reseed)
 - safety snapshots (`.bak-before-X` files) that the user
   deliberately created and would be unhappy to lose
 
@@ -657,13 +589,12 @@ Practical rule for a triage report:
   commentary. A diff comment that explains *why* a change exists
   is a strong signal it's not just dev-machine drift.
 
-Discovered 2026-05-25: I dismissed 4 uncommitted files in
-`/Volumes/git/context-views` as "local-config-ish | local dev
-tweaks". Reading the actual diffs found a mock-auth bug fix
-(`server/module.py`), production OOM-fix deployment tuning
-(`vanilla-dev.yaml`), real CM-reseed overrides (`settings-dev.toml`)
-plus an explicit safety snapshot. The "Investigate postGraphChat
-500" session is the likely owner of part of this.
+Discovered during a worktree triage: 4 uncommitted files in a primary clone
+were dismissed as "local-config-ish / local dev tweaks". Reading the actual
+diffs found a real mock-auth bug fix in a server module, production OOM-fix
+deployment tuning in a deploy yaml, genuine environment overrides in a settings
+file, plus an explicit safety snapshot — none of it disposable, and owned by
+several different sessions.
 
 ### Git primary clone hosts side-effects from all its secondary worktrees
 
@@ -687,24 +618,18 @@ NOT automatically attributable to "the session whose registered cwd
 is here". It can come from any session. To identify the real owner:
 
 - Read the diff content and look for signature names/naming
-  conventions ("depuy-mini-default" → Twin, etc.).
+  conventions that identify a particular session's work.
 - Check file mtimes against known active-session windows.
 - Look for a sibling worktree dedicated to the same campaign (the
   primary clone often carries the deployment/config piece while
   the code piece lives in a focused secondary worktree).
 - Just ask via intercom — most sessions know if it's theirs.
 
-Discovered 2026-05-25 during the 70-session triage. The 4
-uncommitted files in `/Volumes/git/context-views` (the primary
-clone) belonged to at least 3 different sessions:
-- `server/module.py` → `Debug CV 503` (PR #278 dev-mount mirror)
-- `config/settings-dev.toml` → multiple sessions edited it for
-  local CM-reseed agent_repo_ids overrides
-- `deployments/vanilla-dev.yaml` → `DePuy Demo Seed (Twin)`
-  (thematically paired with David's PR #277 kg_ingest backoff;
-  parked locally pre-deploy-validation; not yet PR'd)
-- `config/secrets-dev.toml.bak-before-depuy-mini-default` → Twin
-  (matches their "depuy-mini-default" naming convention)
+Discovered during a worktree triage: 4 uncommitted files in a primary clone
+belonged to at least 3 different sessions (a server-module dev-mount mirror, a
+settings file edited by multiple sessions for local reseed overrides, a deploy
+yaml parked pre-deploy-validation by another session, and a secrets `.bak`
+snapshot whose filename matched a third session's naming convention).
 
 The "registered cwd" field in `intercom list` is misleading for
 primary clones — it tells you where a session was launched, not
@@ -768,30 +693,13 @@ git diff <picked-commit>^ <picked-commit> -- <file>  # what the pick actually ch
 If the ours-side drift extends beyond what the pick touches, hand-resolve
 the conflict instead.
 
-Discovered 2026-05-25 during PR #1245 cv-wiring → bootstrap consolidation
-(toolkit). `--theirs` on `mocks.py` dropped bootstrap's `d59bcab1d`-era
-GOVERNANCE_BY_CONTRACT / GENERATE_PREVIEWS comprehensions + ~100 lines of
-contract entries; caught by `pytest --collect-only` failing with 13
-failures before push, fixed by restoring `mocks.py` from HEAD~1 and
-surgically reapplying the 6-line doc-comment swap the pick actually
-intended. Safe on the 8 other files I `--theirs`'d in the same campaign
-because bootstrap had zero post-merge edits to them. The asymmetry is
-exactly the failure mode to watch for.
-
-### Git author email
-
-When making commits on the user's behalf, the correct git author is:
-
-```
-git -c user.name="David Roth" -c user.email="david.roth@distyl.ai" commit ...
-```
-
-NOT `david@distyl.ai` (that was a guess I used in commits up through PR #1286 on
-2026-05-26 before being corrected). Use `david.roth@distyl.ai`.
-
-If a project / worktree has a configured git identity already, prefer that
-over inline -c overrides. Inline -c is the right move when the worktree
-isn't configured for the user.
+Discovered during a branch-consolidation cherry-pick. `--theirs` on a `mocks.py`
+dropped ~100 lines of newer comprehensions + data entries that existed only on
+the HEAD side; caught by `pytest --collect-only` failing before push, fixed by
+restoring the file from HEAD~1 and surgically reapplying the 6-line doc-comment
+swap the pick actually intended. Safe on the other files `--theirs`'d in the
+same campaign because the picked branch had zero post-merge edits to them. The
+asymmetry is exactly the failure mode to watch for.
 
 ### Shallow clones cause phantom "AA" conflicts during rebase
 
@@ -820,14 +728,12 @@ git fetch --unshallow origin   # may auth-fail at the very end but
 
 Worktrees that share a `.git` are all shallow together (the shallowness
 lives on the primary clone's `.git/shallow` file). So if one worktree
-on `/Volumes/git/toolkit` is shallow, they all are. Unshallow once
-in any of them and the rest resolve.
+is shallow, they all are. Unshallow once in any of them and the rest resolve.
 
-Discovered 2026-05-26 by the fold-in session when rebasing #1285 onto
-`gautham/depuy-cpq-cm`'s new `f631948ea` tip — they hit 27 phantom AA
-conflicts, traced it to shallow state, ran `git fetch --unshallow`,
-and the rebase then resolved cleanly to merge-base `07676fa9c` with
-just 3 real file conflicts.
+Discovered while rebasing a branch onto a teammate's newly-advanced tip — the
+rebase hit 27 phantom AA conflicts, traced to shallow state; `git fetch
+--unshallow` then let the rebase resolve cleanly to the real merge-base with
+just 3 actual file conflicts.
 
 If a session reports an unexpectedly large or weird conflict set
 during a rebase, this is the first diagnostic to run before assuming
@@ -855,14 +761,14 @@ PR is already open, prefer **editing the PR title + description** over
 renaming the branch. Branch rename should be a pre-PR or stale-branch
 operation.
 
-Discovered 2026-05-27 doing the depuy-cpq-graph-query-prep rename — PR
-#1308 closed silently, had to re-open as #1309.
+Discovered renaming a branch with an open PR — the PR closed silently and had
+to be re-opened as a new PR number.
 
 ### Cherry-pick discipline: hooks-after-early-returns bug class
 
-When cherry-picking React components into a host page (`WorkspacePage`, `QueuePage`, etc.) that has existing early-return guards (loading / error / empty states), if the cherry-picked code adds a new hook call AFTER one of those guards, the host page violates Rules of Hooks. Symptom: "Rendered more hooks than during the previous render" at runtime. `pnpm build` + `pnpm test` + `pnpm typecheck` all pass — only browser render-cycle catches it.
+When cherry-picking React components into a host page that has existing early-return guards (loading / error / empty states), if the cherry-picked code adds a new hook call AFTER one of those guards, the host page violates Rules of Hooks. Symptom: "Rendered more hooks than during the previous render" at runtime. `pnpm build` + `pnpm test` + `pnpm typecheck` all pass — only browser render-cycle catches it.
 
-Example (caused by depuy-cpq Customer card PR #1317 + cherry-pick onto a WorkspacePage already 14 hooks in):
+Example (a card cherry-picked onto a host page already 14 hooks in):
 ```javascript
 export function WorkspacePage() {
   // ... 14 existing hooks ...
@@ -895,51 +801,37 @@ The hook handles the lifecycle when name changes from `''` (during loading) to t
 
 **For future cherry-picks of components that introduce a NEW hook call to a host page**: ALWAYS check that the new hook is invoked at the TOP of the host component, before any conditional returns. The PR's own diff looks innocent in isolation (it's an obviously-correct one-line insertion); the violation only emerges in the cherry-picked context where the host page already has early returns.
 
-Pattern also applies to other host pages: `QueuePage`, `TodayPage`, etc.
+Discovered via a browser-side React error after cherry-picking a card component onto a host page with pre-existing early returns.
 
-Discovered 2026-05-27 by browser-side React error after cherry-picking PR #1317.
+### Don't infer architecture / data-flow from file or directory names — read the flow
 
-### Don't infer route-data-flow from file names — read the flow
+Architectural guidance based on directory/file names is unreliable, and the
+error compounds when a dispatcher hands a naming-based guess to another session
+as if it were fact. Two recurring failure shapes:
 
-Dispatcher-level architectural guidance based on directory/file
-names is unreliable. Twice in two days I made the same mistake:
+1. **Assuming a structure that isn't there.** Scoping a fix around an assumed
+   rendering/integration architecture (e.g. "there's an iframe shim") when the
+   code actually does something simpler (a plain component in a shared router).
+   A read-only agent that read the real code found no such shim — but a
+   workaround commit message had already shipped the false claim.
 
-1. **2026-05-25 CV unmount**: I scoped the proper CV-side fix
-   assuming an iframe-shim architecture. A Plan agent reading the
-   actual code found there is no iframe shim — CV renders as a
-   normal `<Suspense>`-wrapped React component in a single shared
-   `<BrowserRouter>`. My commit message on the workaround landed
-   on PR #1245 still containing the false "iframe shim" claim
-   until corrected.
+2. **Inferring a module's role from its name.** Telling a session a new seam
+   should sit "parallel to the `X/` package" because the name *sounds* like the
+   relevant substrate — when reading the actual route-read path showed `X/` was
+   unrelated infrastructure and the correct seam was elsewhere in the flow.
 
-2. **2026-05-26 CV data fold-in shape**: I told a fold-in session
-   the CV seam should be "parallel to Gautham's `cm/` package",
-   inferring that `cm/` was the graph-read substrate based on the
-   directory name. A cv-fold-survey session reading the actual
-   route flow found Gautham's `cm/` is **file-store / parquet-
-   cache / auth-token** infrastructure, NOT graph reads. The actual
-   route-read path is `route → db.repo → pcl_state`. The correct
-   CV seam is **above `db.repo` in the route-read path**, not
-   alongside `cm/`.
+Workflow rule: when asked "where should X slot into codebase Y?" and I haven't
+read Y's actual flow end-to-end:
+1. Pull the seam-question to a session that HAS read it — dispatch a read-only
+   survey, get a code-grounded answer, route it back.
+2. Or explicitly preface my answer with "I haven't read this codebase's flow —
+   verify by reading X/Y/Z before acting on my guess."
+3. Never present an inferred-from-naming architectural claim with the same
+   confidence as a session that has actually read the code.
 
-Workflow rule: when a session asks me "where should X slot into
-codebase Y?", and I haven't read codebase Y's actual flow
-end-to-end:
-1. Either pull the seam-question to a session that has read it
-   (the cv-fold-survey pattern — dispatch a read-only survey
-   session, get a code-grounded answer, route it back).
-2. Or explicitly preface my answer with "I haven't read this
-   codebase's flow — verify by reading X/Y/Z before acting on my
-   guess."
-3. Never present an inferred-from-naming architectural claim with
-   the same confidence as a session that has actually read the
-   code.
-
-Companion rule for any future "where should this PR fit?" question:
-the session that did the read-only survey of the target codebase is
-the source of truth for the seam shape. Their answer overrides any
-naming-based intuition from sessions (including the dispatcher)
-that haven't.
+Companion rule: the session that did the read-only survey of the target
+codebase is the source of truth for the seam shape. Its answer overrides any
+naming-based intuition from sessions (including the dispatcher) that haven't.
 
 ## process & collaboration discipline
 
@@ -951,7 +843,7 @@ behalf unless explicitly asked to do so in that turn.
 
 This includes:
 - Replying to PR review comments (e.g. from CodeRabbit, claude-review, or
-  human reviewers like Clay)
+  human reviewers)
 - Posting "addressed in commit X" or similar fix-up notes
 - Resolving / dismissing review threads
 - Posting on issues, discussions, or GitHub team forums
@@ -967,8 +859,7 @@ Acceptable without being asked:
 Default behavior when a comment needs a reply: surface the comment back to
 the user, propose what I'd say, but let them post (or ask me to post).
 
-Established 2026-05-23 after I posted `@coderabbitai resume` on PR
-DistylAI/toolkit#1245 without being asked.
+Established after posting `@coderabbitai resume` on a PR without being asked.
 
 ### PR-campaign hygiene: "we measured" vs "we suspect"
 
@@ -978,7 +869,7 @@ over-claim in PR descriptions. Concrete claims like "720× amplification"
 or "fully hung" get written in the heat of the moment as if observed
 when they were actually inferred / arithmeticked / extrapolated.
 
-**Pattern that worked** (depuy-cpq / context-mesh #860 / context-views #275, 2026-05-24):
+**Pattern that worked** (a multi-repo, multi-PR perf campaign):
 
 1. Ship code aggressively (parallel subagents in isolated worktrees,
    adversarial blind review for each PR).
@@ -992,9 +883,9 @@ when they were actually inferred / arithmeticked / extrapolated.
    - Verify "incidentally fixes latent bug X" claims against the actual
      diff vs. main. Reviewer-subagents catch code bugs but rarely
      catch description-overclaim.
-3. If a claim is inferential, either MEASURE it (took 10 min: local CM
-   probe → measured 7× edge amplification → honest number for the PR)
-   or downgrade the language ("suspected", "estimated", "extrapolating").
+3. If a claim is inferential, either MEASURE it (e.g. a 10-min local probe
+   turned an arithmeticked guess into a measured number for the PR) or
+   downgrade the language ("suspected", "estimated", "extrapolating").
 4. If a whole PR's load-bearing justification fails the audit, CLOSE
    IT — don't ship correctness-positive code that defends zero live
    code paths. Open a tracking issue instead.
@@ -1024,16 +915,14 @@ the diff but the bug it addresses can only be fixed by both halves
 in concert. Reverting just one half then leaves the bug reintroduced
 while the user assumes "we kept the fix".
 
-Discovered 2026-05-25 on PR #1245's AppLayout.tsx workaround
-(commit 989969623). The diff had two parts: (1) a generic
-ShellSidebar anchor-click → useNavigate intercept, (2) a
-`/context-views` hard-nav escape via window.location.assign. I
-proposed partial-revert as an option ("keep the legit generic
-intercept, drop the hard-nav workaround"). The author had actually
+Discovered on a routing-workaround commit. The diff had two parts: (1) a
+generic sidebar anchor-click → useNavigate intercept, (2) a hard-nav escape via
+window.location.assign. I proposed partial-revert as an option ("keep the legit
+generic intercept, drop the hard-nav workaround"). The author had actually
 tested both halves and confirmed only the hard-nav escape fixes the
-stale-mounted CV UI bug. The generic intercept alone is a no-op for
-the failure mode. Partial revert would silently regress the demo
-while creating the appearance of preserving the fix.
+stale-mounted-UI bug; the generic intercept alone is a no-op for the failure
+mode. Partial revert would silently regress the fix while creating the
+appearance of preserving it.
 
 Rule: before proposing partial-revert of a workaround, either (a)
 get the original author to confirm which sub-change actually fixes
@@ -1059,50 +948,38 @@ Feed all of that to the Plan agent as "evidence to constrain the
 hypothesis space", not as background reading. The agent should
 explicitly reconcile its recommendation against the failed attempts.
 
-Discovered 2026-05-25 on the CV history-to-React-Router fix.
-Sequence of events:
+Discovered on a frontend routing bug. Sequence of events:
 
-1. "Debug app visibility" session hit the bug in the depuy-cpq demo:
-   clicking shell sidebar to leave /context-views, the outer URL
-   changed but the CV UI stayed mounted/rendered.
-2. They tried 4 fixes locally: synthetic PopStateEvent (no fix);
-   full useNavigate/useLocation conversion of CV (no fix); generic
-   shell anchor-intercept + navigate (no fix); only
-   window.location.assign hard-nav escape worked.
-3. They wrote up the workaround commit (since rewritten on PR #1245
-   with corrected provenance) and dropped a note describing the
-   intent.
-4. I dispatched a Plan agent to scope the "proper fix" based on
-   reading the code, WITHOUT first asking Debug app visibility what
-   they'd already tried.
-5. Plan agent hypothesized a L263 race (CV's effect rewriting URL
-   back) and recommended converting to useNavigate/useLocation —
-   essentially attempt #2 from Debug app visibility's list, which
-   they had already verified did NOT fix the bug.
-6. I dispatched an implementation session to do the recommended
-   fix. They were about to start editing.
-7. Debug app visibility responded to a separate ping with their
-   prior-attempt history; the contradiction caught the
-   implementation session before any edits.
+1. A debugging session hit the bug: clicking a shell sidebar link to leave a
+   sub-app changed the outer URL, but the sub-app's UI stayed mounted/rendered.
+2. They tried 4 fixes locally: a synthetic PopStateEvent (no fix); a full
+   useNavigate/useLocation conversion of the sub-app (no fix); a generic shell
+   anchor-intercept + navigate (no fix); only a `window.location.assign`
+   hard-nav escape worked.
+3. They wrote up a workaround commit and dropped a note describing the intent.
+4. I dispatched a Plan agent to scope the "proper fix" from reading the code,
+   WITHOUT first asking the debugging session what they'd already tried.
+5. The Plan agent hypothesized an effect-rewrites-URL race and recommended
+   converting to useNavigate/useLocation — essentially attempt #2 from the
+   debugging session's list, which they had already verified did NOT fix it.
+6. I dispatched an implementation session to do the recommended fix; they were
+   about to start editing.
+7. The debugging session responded to a separate ping with their prior-attempt
+   history; the contradiction caught the implementation session before any edits.
 
-If the prior-art survey had come BEFORE the Plan dispatch, the plan
-would've explicitly addressed "why didn't useNavigate conversion fix
-this? what's the actual mechanism?" and the recommendation would
-not have been Option C alone. The plan agent's own §3 open question
-1 ("verify the hypothesis at runtime before committing") was a
-hedge, but a hedge isn't a substitute for incorporating known
-runtime evidence.
+If the prior-art survey had come BEFORE the Plan dispatch, the plan would've
+explicitly addressed "why didn't the useNavigate conversion fix this? what's
+the actual mechanism?" and would not have recommended an already-failed fix. The
+plan's own "verify the hypothesis at runtime before committing" was a hedge, but
+a hedge isn't a substitute for incorporating known runtime evidence.
 
-Symptom-as-described matters. Debug app visibility's exact words:
-> "After failed attempts, clicking DePuy from CV changed the
-> address bar to /depuy-cpq, but the Context Views UI stayed
-> mounted/rendered. ... I did NOT observe the URL being rewritten
-> back to /context-views/..."
-
-That "outer URL changes, rendered UI stays" — vs. the plan's
-hypothesized "URL gets rewritten back" — is a meaningfully different
-mechanism. Mount/unmount problem (probably in the shell's dynamic-
-app lazy() / portal / outlet wiring) rather than a URL desync.
+Symptom-as-described matters. The reporter's exact words were roughly: "the
+address bar changed to the new route, but the old sub-app UI stayed
+mounted/rendered; I did NOT observe the URL being rewritten back." That "outer
+URL changes, rendered UI stays" — vs. the plan's hypothesized "URL gets
+rewritten back" — is a meaningfully different mechanism: a mount/unmount problem
+(likely in the shell's dynamic-app lazy()/portal/outlet wiring) rather than a
+URL desync.
 
 Rule: paraphrase every bug report into "what symptom was observed"
 + "what mechanisms it is therefore NOT" before generating a
@@ -1115,6 +992,22 @@ First consolidated 2026-05-29. Guidelines for keeping this file useful:
 - **Three tiers.** `daily/` is the append-only log (timestamped, may contain
   duplicates + later corrections); `SCRATCHPAD.md` is for uncertain/temporary
   reminders; this file (`MEMORY.md`) is durable long-term memory.
+- **Two scopes for durable memory (pick deliberately).** The pi-memory plugin
+  splits durable memory into `MEMORY.md` (**global** scope, the default) and
+  `MEMORY.local.md` (**local** scope). Both are injected into the system prompt
+  as separate labeled sections; `search` spans both.
+  - **global = `MEMORY.md`:** portable facts/preferences that hold across ALL
+    machines and contexts (general working-style preferences, tooling/process
+    lessons, anonymized footgun patterns). This file is version-controlled and
+    synced, so keep it free of machine-specific or employer/project-specific
+    detail — anonymize lessons before promoting them here.
+  - **local = `MEMORY.local.md`:** facts specific to THIS machine — its role
+    (e.g. work vs personal), machine-bound paths, git identity, and
+    machine/project-specific operational context. Not synced.
+  - When appending durable memory, set the `memory` tool's `scope` (`global`
+    default / `local`) accordingly. Litmus test: "would this be true/useful on a
+    different machine?" → global; "is this about this box, this employer, or a
+    specific local project?" → local.
 - **What earns a spot here:** the north-star test — *would this have prevented an
   error/footgun, or made a future session easier?* Keep behavioral rules,
   recurring infra footguns, stable preferences, and hard-won mental models.
