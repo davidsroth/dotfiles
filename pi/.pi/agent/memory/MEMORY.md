@@ -402,6 +402,29 @@ Gotchas observed 2026-06-01 (tlink 0.1.4):
   exits 0 and the notification banner still shows. The error is only the
   deeplink-open failing; it disappears once `tlink setup` is done.
 
+### Slack MCP wrapper (dotfiles `pi/.pi/agent/extensions/slack-mcp.ts`)
+Thin pi bridge spawning korotovsky/slack-mcp-server (Go, npm `slack-mcp-server`)
+via `~/.pi/agent/slack-mcp.json` (XOXP user token, not stowed). NOT the official
+`@modelcontextprotocol/server-slack` — symptoms like CSV output,
+`conversations_search_messages`, `conversations_unreads` are korotovsky-only.
+- **`from:@me` / `to:@me` silently return ZERO rows** — `@me` is not a valid Slack
+  search modifier. Use `from:<user_id>`. The wrapper now has a `slack_mcp_whoami`
+  tool (direct auth.test, cached) that returns the authenticated user_id.
+- **Config knobs added 2026-06-01** (commits 66242c3, d8fc901 on dotfiles main):
+  `requestTimeoutMs` / `requestTimeoutMsByTool` (default per-call timeout was a
+  hardcoded 60s — that's what made `conversations_unreads` over ~60 channels time
+  out); and `postProcess` (CSV cleanup: drops wide cols Permalink/AttachmentIDs/
+  HasMedia/BotName/Cursor, truncates Text at maxTextLength=2000, resolves
+  `<@U…>`→@name). Dropping `Cursor` preserves pagination via a `next_cursor:`
+  footer. `"postProcess": false` disables; omit a column from dropColumns to keep it.
+  Per-call escape hatch on conversations_history/replies/search_messages: tool
+  args `_maxTextLength` (override truncation for one call; 0=none) and `_raw`
+  (true=fully raw for one call); stripped before forwarding upstream.
+- **Reload gotcha:** pi loads this extension once at session start. Editing it does
+  NOT affect already-running sessions — they must reload/restart to pick up changes.
+  (Same long-running-process rule as the intercom broker.)
+
+
 
 ## git, worktrees & PR mechanics
 
