@@ -902,7 +902,11 @@ install_additional_tools() {
   else
     info "Installing tlink (user-local)"
     ensure_user_local_bin_path
-    if curl -fsSL https://raw.githubusercontent.com/ahnopologetic/tlink/main/install.sh | sh; then
+    # Download-then-run (not `curl | sh`) to match the Homebrew/NVM pattern above:
+    # lets us inspect/fail cleanly instead of executing a stream we never see.
+    local tlink_installer="${TMPDIR:-/tmp}/tlink-install-$$.sh"
+    if curl -fsSL https://raw.githubusercontent.com/ahnopologetic/tlink/main/install.sh -o "$tlink_installer" && sh "$tlink_installer"; then
+      rm -f "$tlink_installer"
       hash -r 2>/dev/null || true
       # The upstream installer may append a PATH line to ~/.zshrc; our PATH is
       # already managed in .zshenv/.zprofile, so strip the redundant line.
@@ -923,6 +927,7 @@ install_additional_tools() {
         warning "tlink installation reported success but binary not found on PATH"
       fi
     else
+      rm -f "$tlink_installer"
       warning "Failed to install tlink (notification deeplinks). Install manually from https://github.com/ahnopologetic/tlink"
     fi
   fi
@@ -973,7 +978,11 @@ backup_existing_files() {
   # Get list of files that would be stowed
   cd "$DOTFILES_DIR"
   local conflicts
-  conflicts=$(stow -n -v "${STOW_PACKAGES[@]}" 2>&1 | grep "existing target is" || true)
+  # GNU Stow (>=2.x) reports conflicts as:
+  #   * cannot stow ../pkg/.zshrc over existing target .zshrc since neither a link nor a directory ...
+  # Match that real format (the older "existing target is not owned by stow" wording
+  # is not emitted by current Stow, so the previous grep matched nothing).
+  conflicts=$(stow -n -v "${STOW_PACKAGES[@]}" 2>&1 | grep -E 'cannot stow .* over existing target' || true)
 
   if [[ -n "$conflicts" ]]; then
     warning "Found existing configuration files that would be overwritten"
@@ -984,7 +993,7 @@ backup_existing_files() {
 
       # Backup conflicting files
       while IFS= read -r line; do
-        if [[ $line =~ ^.*"existing target is not owned by stow: "(.*) ]]; then
+        if [[ $line =~ over\ existing\ target\ (.+)\ since ]]; then
           local file="$HOME/${BASH_REMATCH[1]}"
           if [[ -e "$file" ]] && [[ ! -L "$file" ]]; then
             local backup_path="$BACKUP_DIR/${BASH_REMATCH[1]}"
@@ -1081,7 +1090,7 @@ setup_pi_memory() {
   fi
 
   if [[ ! -L "$dest" ]]; then
-    ln -s "../../../dotfiles/pi/.pi/agent/memory/MEMORY.md" "$dest"
+    ln -s "$src" "$dest"
   fi
   success "Global memory linked: $dest → tracked MEMORY.md"
 }

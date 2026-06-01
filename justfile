@@ -50,7 +50,7 @@ pi-memory:
       echo "Backing up existing $DEST → $BACKUP"
       mv "$DEST" "$BACKUP"
     fi
-    ln -s "../../../dotfiles/pi/.pi/agent/memory/MEMORY.md" "$DEST"
+    ln -s "$SRC" "$DEST"
     echo "Linked global memory: $DEST"
   fi
 

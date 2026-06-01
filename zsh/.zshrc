@@ -143,7 +143,7 @@ pyenv() {
 
 # npm global prefix - version-independent globals (bw, pm2, gemini, etc.)
 # Separate from NVM so tools persist across node version switches
-export PATH="$HOME/.npm-global/bin:$PATH"
+[[ -d "$HOME/.npm-global/bin" && ":$PATH:" != *":$HOME/.npm-global/bin:"* ]] && export PATH="$HOME/.npm-global/bin:$PATH"
 
 # NVM - Node version management
 # Lazy load: only load when nvm, node, npm or npx is called

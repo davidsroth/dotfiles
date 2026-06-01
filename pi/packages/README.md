@@ -2,19 +2,27 @@
 
 This directory contains Pi packages that are intentionally vendored into the dotfiles repo.
 
-Current packages:
+Current packages (wired into Pi via `settings.base.json`):
 
 - `pi-vim`
 - `pi-subagents`
 - `pi-btw`
 - `@davidroth/pi-intercom` (directory: `pi-intercom`)
 - `pi-intercom-tailnet`
+- `pi-memory`
 - `pi-qna`
 - `pi-plan-review`
 
-These packages are loaded by Pi via relative paths from:
+Also vendored, but **not** wired into the active Pi config:
 
-- `pi/.pi/agent/settings.json`
+- `rpiv-mono` — a third-party Pi pipeline monorepo (upstream: `juicesharp/rpiv-mono`),
+  kept here for reference. Not referenced by `settings.base.json`.
+
+These packages are loaded by Pi via relative paths declared in the tracked
+`pi/.pi/agent/settings.base.json`. On install, `install.sh` (or `just pi-settings`)
+merges that base with any per-machine `settings.local.json` to generate the live,
+gitignored `pi/.pi/agent/settings.json`. Edit the package list in
+`settings.base.json`, not the generated `settings.json`.
 
 ## Why vendor them?
 

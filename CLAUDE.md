@@ -12,7 +12,7 @@ Personal dotfiles for macOS (Apple Silicon) managed with GNU Stow. Some configs 
 
 ## Adding new tool configs
 
-Three stow packages exist: `core`, `zsh`, `git-config`.
+Stow packages: `core`, `zsh`, `git-config`, `pi` (and `linux` on Linux hosts). The canonical set lives in `justfile`'s `stow_packages`.
 
 - New tool configs that live under `~/.config/` belong in `core/` (at `dotfiles/core/.config/<tool>/`).
 - Run `just stow` from `~/dotfiles/` to symlink all packages. See `justfile` for other maintenance tasks (`stow-restow`, `audit`, `doctor`, `clean`).

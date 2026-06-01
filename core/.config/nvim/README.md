@@ -143,7 +143,7 @@ Currently enabled extras:
 
 ## Dependencies
 
-- **Neovim**: v0.9.0+ (v0.10.0+ for all features)
+- **Neovim**: v0.10.0+ (config uses `vim.uv`, introduced in 0.10)
 - **Python**: Pyenv with a `py3nvim` environment
   - Create it with: `pyenv virtualenv 3.11 py3nvim && pyenv activate py3nvim && pip install pynvim`
 - **Node.js**: For LSP servers and formatters

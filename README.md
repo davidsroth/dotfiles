@@ -66,15 +66,16 @@ The installer will:
 This repo uses GNU Stow to create symlinks into your home directory. A `.stowrc` is provided that sets the target to `$HOME`, so you can run Stow commands from the repository root:
 
 ```bash
-# macOS: stow core, zsh, git-config
-stow -n -v core zsh git-config        # preview
-stow -R core zsh git-config           # apply
+# macOS: stow core, zsh, git-config, pi
+stow -n -v core zsh git-config pi     # preview
+stow -R core zsh git-config pi        # apply
 
 # Linux: add the `linux` package (awesome, kmonad)
-stow -R core zsh git-config linux
+stow -R core zsh git-config pi linux
 ```
 
-Or use `just stow` / `just stow-restow`, which picks the right package set based on OS.
+Or use `just stow` / `just stow-restow`, which picks the right package set based on OS
+(the canonical list lives in `justfile`'s `stow_packages`).
 
 Files and directories that should not be linked (e.g., scripts, docs) are excluded via `.stow-local-ignore`.
 
@@ -91,7 +92,7 @@ brew install stow
 
 # Create symlinks (add `linux` on Linux hosts)
 cd ~/dotfiles
-stow core zsh git-config
+stow core zsh git-config pi
 ```
 
 ## Key Features
