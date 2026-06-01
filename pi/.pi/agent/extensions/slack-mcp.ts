@@ -20,8 +20,20 @@
  *     "requestTimeoutMsByTool": {                        // optional: per-upstream-tool overrides
  *       "conversations_unreads": 180000                  //   (slow over many channels)
  *     },
+ *     "postProcess": {                                   // optional: trim/clean CSV output (default on)
+ *       "dropColumns": ["Permalink", "AttachmentIDs", "HasMedia", "BotName", "Cursor"],
+ *       "maxTextLength": 800,                            //   0 disables truncation
+ *       "resolveMentions": true                          //   <@U…> -> @name
+ *     },                                                 //   set "postProcess": false to disable entirely
  *     "disabledTools": ["usergroups_create", "users_search"]  // optional: skip these upstream tools
  *   }
+ *
+ * postProcess (CSV output cleanup): drops wide rarely-used columns, truncates
+ * long Text blobs, and resolves <@U…>/<#C…> mentions to @name/#name. Dropping
+ * `Cursor` preserves pagination via a `next_cursor: <value>` footer. Output that
+ * doesn't parse as consistent CSV is passed through untouched. To recover a
+ * dropped field (e.g. Permalink) set a custom `dropColumns` list omitting it,
+ * or set `"postProcess": false` for fully raw upstream output.
  *
  * `disabledTools` matches against upstream tool names (without `toolPrefix`).
  * Use this to trim system-prompt token weight by hiding tools you never call.
@@ -69,8 +81,42 @@ interface SlackMCPConfig {
    * { "conversations_unreads": 180000 }. Falls back to `requestTimeoutMs`.
    */
   requestTimeoutMsByTool?: Record<string, number>;
+  /**
+   * CSV output post-processing (token-trimming + readability). `false` disables
+   * entirely; an object overrides individual knobs. See PostProcessConfig.
+   */
+  postProcess?: PostProcessConfig | boolean;
   /** Upstream tool names (without toolPrefix) to skip when registering with pi. */
   disabledTools?: string[];
+}
+
+/**
+ * Post-processing applied to upstream CSV tool output (conversations_history,
+ * conversations_replies, conversations_search_messages, channels_list, ...).
+ * Safety: if the output doesn't parse as consistent CSV, it's passed through
+ * unchanged. Every transform is individually configurable and reversible.
+ */
+interface PostProcessConfig {
+  /** Master switch. Default true. */
+  enabled?: boolean;
+  /**
+   * CSV column names (header-row labels) to drop. Default drops the wide,
+   * rarely-used columns. To keep e.g. Permalink, pass a list without it.
+   * When `Cursor` is dropped, the last non-empty pagination cursor is
+   * preserved as a `next_cursor: <value>` footer so pagination still works.
+   */
+  dropColumns?: string[];
+  /** Truncate the `Text` column to this many chars (0 = no truncation). Default 800. */
+  maxTextLength?: number;
+  /** Resolve `<@U…>` / `<#C…>` mentions to @name / #name inline. Default true. */
+  resolveMentions?: boolean;
+}
+
+interface ResolvedPostProcess {
+  enabled: boolean;
+  dropColumns: Set<string>;
+  maxTextLength: number;
+  resolveMentions: boolean;
 }
 
 interface ResolvedConfig {
@@ -81,6 +127,7 @@ interface ResolvedConfig {
   startupTimeoutMs: number;
   requestTimeoutMs: number;
   requestTimeoutMsByTool: Record<string, number>;
+  postProcess: ResolvedPostProcess;
   /** Set of upstream tool names (without toolPrefix) to skip. */
   disabledTools: Set<string>;
 }
@@ -122,6 +169,13 @@ const DEFAULT_STARTUP_TIMEOUT_MS = 60_000;
 // Default per-tool-call timeout. Overridable via the auth file's
 // `requestTimeoutMs` (global) or `requestTimeoutMsByTool` (per upstream tool).
 const DEFAULT_REQUEST_TIMEOUT_MS = 60_000;
+
+// CSV post-processing defaults (see PostProcessConfig).
+const DEFAULT_DROP_COLUMNS = ["Permalink", "AttachmentIDs", "HasMedia", "BotName", "Cursor"];
+const DEFAULT_MAX_TEXT_LENGTH = 800;
+// Max NEW users.info lookups per tool call when resolving bare <@U…> mentions.
+// Inline `<@U…|name>` forms and already-cached IDs are free and uncapped.
+const MENTION_LOOKUP_CAP = 25;
 
 // How long to wait between graceful (stdin close + SIGTERM) and SIGKILL.
 // Short on purpose: we'd rather kill cleanly than leak orphans if pi is
@@ -294,7 +348,21 @@ function resolveConfig(cfg: SlackMCPConfig | null): ResolvedConfig {
     startupTimeoutMs: cfg?.startupTimeoutMs ?? DEFAULT_STARTUP_TIMEOUT_MS,
     requestTimeoutMs: cfg?.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS,
     requestTimeoutMsByTool: cfg?.requestTimeoutMsByTool ?? {},
+    postProcess: resolvePostProcess(cfg?.postProcess),
     disabledTools: new Set(cfg?.disabledTools ?? []),
+  };
+}
+
+function resolvePostProcess(pp?: PostProcessConfig | boolean): ResolvedPostProcess {
+  if (pp === false) {
+    return { enabled: false, dropColumns: new Set(), maxTextLength: 0, resolveMentions: false };
+  }
+  const o = pp && typeof pp === "object" ? pp : {};
+  return {
+    enabled: o.enabled ?? true,
+    dropColumns: new Set(o.dropColumns ?? DEFAULT_DROP_COLUMNS),
+    maxTextLength: o.maxTextLength ?? DEFAULT_MAX_TEXT_LENGTH,
+    resolveMentions: o.resolveMentions ?? true,
   };
 }
 
@@ -364,6 +432,175 @@ async function slackAuthTest(env: Record<string, string>): Promise<SlackIdentity
   }
 }
 
+// Best-effort user-name lookup (users.info), cached in userNameCache.
+async function fetchUserName(userId: string, env: Record<string, string>): Promise<string | null> {
+  const creds = resolveSlackToken(env);
+  if (!creds) return null;
+  try {
+    const headers: Record<string, string> = { Authorization: `Bearer ${creds.token}` };
+    if (creds.cookie) headers.Cookie = creds.cookie;
+    const resp = await fetch(`https://slack.com/api/users.info?user=${encodeURIComponent(userId)}`, { headers });
+    const data = (await resp.json()) as {
+      ok: boolean;
+      user?: { name?: string; profile?: { display_name?: string; real_name?: string } };
+    };
+    if (!data.ok || !data.user) return null;
+    const u = data.user;
+    return u.profile?.display_name || u.profile?.real_name || u.name || null;
+  } catch {
+    return null;
+  }
+}
+
+// =============================================================================
+// CSV output post-processing (token-trimming + readability)
+// =============================================================================
+//
+// The upstream korotovsky server emits wide RFC4180 CSV with several rarely-used
+// columns and unresolved <@U…> mention IDs. We trim/resolve here, in the one
+// chokepoint every tool call passes through (StdioMCPClient.callTool). Safety
+// first: anything that doesn't parse as consistent CSV is returned untouched,
+// and if no transform actually changed the data we return the ORIGINAL string
+// (never re-serialize for nothing). All transforms are config-gated.
+
+// id -> display name, accumulated across calls (seeded from CSV rows for free,
+// topped up via bounded users.info lookups).
+const userNameCache = new Map<string, string>();
+
+function parseCSV(text: string): string[][] | null {
+  const rows: string[][] = [];
+  let field = "";
+  let row: string[] = [];
+  let inQuotes = false;
+  let sawAny = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (inQuotes) {
+      if (c === '"') {
+        if (text[i + 1] === '"') { field += '"'; i++; continue; }
+        inQuotes = false;
+        continue;
+      }
+      field += c;
+      continue;
+    }
+    if (c === '"') { inQuotes = true; sawAny = true; continue; }
+    if (c === ",") { row.push(field); field = ""; sawAny = true; continue; }
+    if (c === "\r") continue;
+    if (c === "\n") { row.push(field); rows.push(row); row = []; field = ""; sawAny = true; continue; }
+    field += c;
+    sawAny = true;
+  }
+  if (inQuotes) return null; // unterminated quote => malformed, bail to passthrough
+  if (field.length > 0 || row.length > 0) { row.push(field); rows.push(row); }
+  return sawAny ? rows : null;
+}
+
+function serializeCSV(rows: string[][]): string {
+  const esc = (f: string) => (/[",\n\r]/.test(f) ? `"${f.replace(/"/g, '""')}"` : f);
+  return `${rows.map((r) => r.map(esc).join(",")).join("\n")}\n`;
+}
+
+// Resolve Slack mention tokens to readable names. Inline-name forms
+// (`<@U123|name>`, `<#C123|name>`) are free; bare `<@U123>` are resolved via
+// the shared cache, then via up to `budget.n` users.info lookups.
+async function resolveMentions(text: string, env: Record<string, string>, budget: { n: number }): Promise<string> {
+  let out = text.replace(/<@([UW][A-Z0-9]+)\|([^>]+)>/g, (_m, id: string, nm: string) => {
+    if (!userNameCache.has(id)) userNameCache.set(id, nm);
+    return `@${nm}`;
+  });
+  out = out.replace(/<#(C[A-Z0-9]+)\|([^>]+)>/g, (_m, _id: string, nm: string) => `#${nm}`);
+  const bare = new Set<string>();
+  for (const m of out.matchAll(/<@([UW][A-Z0-9]+)>/g)) {
+    if (!userNameCache.has(m[1])) bare.add(m[1]);
+  }
+  for (const id of bare) {
+    if (budget.n <= 0) break;
+    const nm = await fetchUserName(id, env);
+    budget.n--;
+    if (nm) userNameCache.set(id, nm);
+  }
+  out = out.replace(/<@([UW][A-Z0-9]+)>/g, (full, id: string) =>
+    userNameCache.has(id) ? `@${userNameCache.get(id)}` : full,
+  );
+  return out;
+}
+
+async function postProcessCsv(
+  text: string,
+  pp: ResolvedPostProcess,
+  env: Record<string, string>,
+): Promise<string> {
+  if (!pp.enabled || !text) return text;
+  try {
+    const rows = parseCSV(text);
+    if (!rows || rows.length < 2) return text; // need header + >= 1 data row
+    const header = rows[0];
+    if (header.length < 2) return text;
+    const ncol = header.length;
+    for (let i = 1; i < rows.length; i++) {
+      if (rows[i].length !== ncol) return text; // ragged => not the CSV we expect
+    }
+
+    const textIdx = header.indexOf("Text");
+    const cursorIdx = header.indexOf("Cursor");
+    const userIdx = header.indexOf("UserID");
+    const nameIdx = header.indexOf("UserName");
+    const realIdx = header.indexOf("RealName");
+
+    // Seed the name cache from the rows themselves (free coverage for authors).
+    if (userIdx >= 0) {
+      for (let i = 1; i < rows.length; i++) {
+        const id = rows[i][userIdx];
+        if (!id || userNameCache.has(id)) continue;
+        const nm = (nameIdx >= 0 && rows[i][nameIdx]) || (realIdx >= 0 && rows[i][realIdx]) || "";
+        if (nm) userNameCache.set(id, nm);
+      }
+    }
+
+    // Capture the pagination cursor before we (maybe) drop the column.
+    let nextCursor = "";
+    if (cursorIdx >= 0) {
+      for (let i = 1; i < rows.length; i++) if (rows[i][cursorIdx]) nextCursor = rows[i][cursorIdx];
+    }
+
+    let changed = false;
+
+    if (textIdx >= 0 && (pp.resolveMentions || pp.maxTextLength > 0)) {
+      const budget = { n: MENTION_LOOKUP_CAP };
+      for (let i = 1; i < rows.length; i++) {
+        const orig = rows[i][textIdx];
+        if (!orig) continue;
+        let t = orig;
+        if (pp.resolveMentions) t = await resolveMentions(t, env, budget);
+        if (pp.maxTextLength > 0 && t.length > pp.maxTextLength) {
+          const extra = t.length - pp.maxTextLength;
+          t = `${t.slice(0, pp.maxTextLength)}\u2026[+${extra} chars truncated]`;
+        }
+        if (t !== orig) { rows[i][textIdx] = t; changed = true; }
+      }
+    }
+
+    const dropIdx = new Set<number>();
+    header.forEach((h, idx) => { if (pp.dropColumns.has(h)) dropIdx.add(idx); });
+    let outRows = rows;
+    if (dropIdx.size > 0) {
+      outRows = rows.map((r) => r.filter((_v, idx) => !dropIdx.has(idx)));
+      changed = true;
+    }
+
+    if (!changed) return text; // nothing to do => keep upstream bytes verbatim
+
+    let out = serializeCSV(outRows);
+    if (cursorIdx >= 0 && dropIdx.has(cursorIdx) && nextCursor) {
+      out += `next_cursor: ${nextCursor}\n`;
+    }
+    return out;
+  } catch {
+    return text; // never let post-processing break a tool result
+  }
+}
+
 // =============================================================================
 // Stdio MCP client
 // =============================================================================
@@ -378,6 +615,9 @@ class StdioMCPClient {
   // Per-tool-call timeout, populated from ResolvedConfig at connect() time.
   private requestTimeoutMs = DEFAULT_REQUEST_TIMEOUT_MS;
   private requestTimeoutMsByTool: Record<string, number> = {};
+  // CSV post-processing config + auth env, populated at connect() time.
+  private postProcess: ResolvedPostProcess = resolvePostProcess(undefined);
+  private authEnv: Record<string, string> = {};
 
   get isConnected(): boolean {
     return this.connected;
@@ -404,6 +644,8 @@ class StdioMCPClient {
     if (this.connected) return;
     this.requestTimeoutMs = cfg.requestTimeoutMs;
     this.requestTimeoutMsByTool = cfg.requestTimeoutMsByTool;
+    this.postProcess = cfg.postProcess;
+    this.authEnv = cfg.env;
 
     // Ensure the at-exit reaper is registered before we spawn anything.
     installExitHookOnce();
@@ -502,10 +744,13 @@ class StdioMCPClient {
 
     if (!result) return "";
     const content = result.content;
+    let text: string;
     if (Array.isArray(content)) {
-      return content.map((c) => (c.type === "text" ? (c.text ?? "") : JSON.stringify(c))).join("\n");
+      text = content.map((c) => (c.type === "text" ? (c.text ?? "") : JSON.stringify(c))).join("\n");
+    } else {
+      text = JSON.stringify(result);
     }
-    return JSON.stringify(result);
+    return this.postProcess.enabled ? postProcessCsv(text, this.postProcess, this.authEnv) : text;
   }
 
   async disconnect(): Promise<void> {

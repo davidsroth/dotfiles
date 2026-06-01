@@ -24,5 +24,12 @@
 
   "_comment_timeout": "Per-tool-call timeout (ms, default 60000). Raise globally and/or per upstream tool for slow calls like conversations_unreads over many channels.",
   "requestTimeoutMs": 60000,
-  "requestTimeoutMsByTool": { "conversations_unreads": 180000 }
+  "requestTimeoutMsByTool": { "conversations_unreads": 180000 },
+
+  "_comment_postprocess": "CSV output cleanup (default on). Drops wide rarely-used columns, truncates long Text (maxTextLength, 0=off), and resolves <@U...> mentions to names. Dropping Cursor preserves pagination via a 'next_cursor:' footer. Set \"postProcess\": false for fully raw output, or omit a column from dropColumns to keep it (e.g. Permalink).",
+  "postProcess": {
+    "dropColumns": ["Permalink", "AttachmentIDs", "HasMedia", "BotName", "Cursor"],
+    "maxTextLength": 800,
+    "resolveMentions": true
+  }
 }
