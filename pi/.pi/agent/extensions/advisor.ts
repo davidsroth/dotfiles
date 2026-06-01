@@ -224,6 +224,10 @@ export default function (pi: ExtensionAPI) {
       ),
     }),
     async execute(_toolCallId, params, signal, onUpdate, ctx: ExtensionContext) {
+      // Fast-fail if already cancelled — avoids spinning up an expensive subagent session.
+      if (signal?.aborted) {
+        return { content: [{ type: "text", text: "advisor: cancelled before starting." }], isError: true };
+      }
       const cfg = loadConfig(ctx.cwd);
       const readOnly = cfg.readOnly ?? DEFAULTS.readOnly;
       const thinkingLevel = cfg.thinkingLevel ?? DEFAULTS.thinkingLevel;

@@ -101,7 +101,7 @@ export const GENERIC_ASSIGNMENT: SecretPattern = {
   // placeholder left by an earlier (more specific) pattern. Real secret values
   // do not contain square brackets.
   regex:
-    /\b([A-Za-z0-9_.-]*(?:passwd|password|secret|token|api[_-]?key|access[_-]?key|client[_-]?secret|auth[_-]?token|private[_-]?key|credential)[A-Za-z0-9_.-]*)(\s*[:=]\s*)(["'`]?)([^\s"'`,;\[\]]{6,})\3/gi,
+    /\b([A-Za-z0-9_.-]*(?:passwd|password|secret|token|api[_-]?key|access[_-]?key|client[_-]?secret|auth[_-]?token|private[_-]?key|credential)[A-Za-z0-9_.-]*)(\s*[:=]\s*)(["'`]?)([^\s"'`,;\[\]]{12,})\3/gi,
   render: (ph, _m, key, sep, quote) => `${key}${sep}${quote}${ph}${quote}`,
 };
 
@@ -196,6 +196,8 @@ export interface SecretGuardConfig {
   placeholder: string;
   extraPatterns: string[];
   allowlist: string[];
+  /** Tools where mode:"block" applies; all others fall back to "redact". Default: ["bash"]. */
+  blockTools: string[];
 }
 
 const DEFAULT_CONFIG: SecretGuardConfig = {
@@ -207,6 +209,7 @@ const DEFAULT_CONFIG: SecretGuardConfig = {
   placeholder: "[REDACTED]",
   extraPatterns: [],
   allowlist: [],
+  blockTools: ["bash"],
 };
 
 function readConfigFile(path: string): Partial<SecretGuardConfig> {
@@ -230,6 +233,7 @@ export function loadConfig(cwd: string): SecretGuardConfig {
   merged.mode = merged.mode === "block" ? "block" : "redact";
   merged.extraPatterns = Array.isArray(merged.extraPatterns) ? merged.extraPatterns : [];
   merged.allowlist = Array.isArray(merged.allowlist) ? merged.allowlist : [];
+  merged.blockTools = Array.isArray(merged.blockTools) ? merged.blockTools : ["bash"];
   return merged;
 }
 
@@ -290,12 +294,14 @@ export default function (pi: ExtensionAPI) {
 
     if (cfg.notify) {
       ctx.ui.notify(
-        `secret-guard: redacted ${result.totalHits} secret-like string(s) in ${event.toolName} output (${summarizeHits(result.hits)})`,
+        `[secret-guard] masked ${result.totalHits} secret-like string(s) in ${event.toolName} output (${summarizeHits(result.hits)})`,
+        // Note: message uses `[secret-guard]` (not `secret-guard:`) to avoid triggering our
+        // own generic-assignment pattern when this source file is read by an agent.
         "warning",
       );
     }
 
-    if (cfg.mode === "block") {
+    if (cfg.mode === "block" && cfg.blockTools.includes(event.toolName)) {
       return {
         content: [
           {
