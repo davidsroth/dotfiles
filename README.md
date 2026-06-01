@@ -145,6 +145,14 @@ stow core zsh git-config
 - **Pi coding agent**
   - Agent config is stowed from `pi/.pi/agent/`
   - Local Pi packages are vendored in `pi/packages/` and loaded via `pi/.pi/agent/settings.json`
+  - Desktop notifications on turn-end via [`tlink`](https://github.com/ahnopologetic/tlink):
+    the customized `pi/.pi/agent/extensions/pi-notification.ts` fires a
+    `terminal-notifier` banner (project, git branch, tmux location, response
+    time, and a markdown-stripped preview) when pi finishes a turn; clicking it
+    jumps back to the originating tmux pane. `install.sh` installs the `tlink`
+    binary; run `tlink setup` once (macOS, interactive) to register the
+    `tmux://` scheme. Do **not** run `tlink install pi-notification` — the
+    stowed extension is the maintained version.
   - See `pi/packages/README.md`
 - **Opencode** - AI coding assistant integration
   - Neovim plugin

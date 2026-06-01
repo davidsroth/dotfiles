@@ -50,6 +50,7 @@ brew "btop"            # Modern system monitor
 brew "bottom"          # Modern system monitor (provides `btm`)
 brew "doggo"           # Modern DNS client (actively maintained)
 brew "fastfetch"       # System info display
+brew "terminal-notifier" # macOS desktop notifications (pi-notification / tlink backend)
 brew "yazi"            # Terminal file manager
 brew "k9s"             # Kubernetes TUI
 

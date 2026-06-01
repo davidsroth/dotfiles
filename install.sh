@@ -893,6 +893,39 @@ install_additional_tools() {
       warning "npm not found; skipping tree-sitter CLI (needed by nvim-treesitter). Install Node/npm or set NVIM_METHOD=backports and install tree-sitter system-wide."
     fi
   fi
+
+  # tlink — tmux:// deeplinks + pi desktop-notification addon (pi-notification)
+  # Binary install works on macOS and Linux; the tmux:// URI-scheme handler
+  # (tlink setup) and the notification banners are macOS-only in practice.
+  if check_command tlink; then
+    [[ "$VERBOSE" == "true" ]] && success "tlink already installed" || true
+  else
+    info "Installing tlink (user-local)"
+    ensure_user_local_bin_path
+    if curl -fsSL https://raw.githubusercontent.com/ahnopologetic/tlink/main/install.sh | sh; then
+      hash -r 2>/dev/null || true
+      # The upstream installer may append a PATH line to ~/.zshrc; our PATH is
+      # already managed in .zshenv/.zprofile, so strip the redundant line.
+      if [[ -f "$HOME/.zshrc" ]]; then
+        sed -i.bak '/^export PATH="\$HOME\/\.local\/bin:\$PATH"$/d' "$HOME/.zshrc" 2>/dev/null && rm -f "$HOME/.zshrc.bak"
+      fi
+      if check_command tlink; then
+        success "tlink installed to $HOME/.local/bin/tlink"
+        if [[ "${OSTYPE}" == darwin* ]]; then
+          info "For pi desktop notifications (macOS), run once — interactive:"
+          info "  tlink setup   # register tmux:// scheme so clicking a banner jumps to the pane"
+          info "                # (may prompt for a macOS security approval)"
+          info "  Then enable 'terminal-notifier' in System Settings > Notifications."
+          info "  Do NOT run 'tlink install pi-notification' — this repo's customized"
+          info "  pi-notification.ts is stowed into ~/.pi/agent/extensions/ already."
+        fi
+      else
+        warning "tlink installation reported success but binary not found on PATH"
+      fi
+    else
+      warning "Failed to install tlink (notification deeplinks). Install manually from https://github.com/ahnopologetic/tlink"
+    fi
+  fi
 }
 
 # Clone dotfiles repository or update if already exists

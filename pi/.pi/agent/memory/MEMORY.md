@@ -372,6 +372,37 @@ docker exec <c> sh -c 'if [ -n "${OPENAI_API_KEY:-}" ]; then echo "set length=${
 
 Discovered 2026-05-27 while probing CM container env. Accidentally printed full OPENAI_API_KEY value into a dispatcher pi conversation. Not externally leaked but a real footgun for any secret-probe shell.
 
+### tlink pi-notification (desktop notifications on pi turn-end)
+
+`tlink` (github.com/ahnopologetic/tlink) gives pi desktop notifications +
+clickable `tmux://` deeplinks back to the exact pane. Three parts:
+1. Install binary: `curl -fsSL .../install.sh | sh` → `~/.local/bin/tlink`.
+   NOTE: the installer appends `export PATH="$HOME/.local/bin:$PATH"` to
+   `~/.zshrc`; on a dotfiles-stowed `.zshrc` where `.local/bin` is already on
+   PATH (via `.zshenv`/`.zprofile`) this is a redundant tracked-file edit —
+   remove it after install.
+2. `tlink setup` — interactive TUI, compiles a Swift TmuxLink.app, registers
+   the `tmux://` URI scheme (macOS only). May trigger a macOS security dialog.
+   Must be run by the human; can't be driven headless.
+3. `tlink install pi-notification` — TUI wizard; writes pi extension to
+   `~/.pi/agent/extensions/pi-notification.ts`. Default event = `agent_end`
+   only (= "pi finished a turn / waiting for input"); other selectable events:
+   turn_end, session_start, session_shutdown, tool_execution_end. The extension
+   shells `tlink notify` via child_process.spawn with a JSON stdin payload.
+   Reload pi (`/reload`) after install.
+
+Gotchas observed 2026-06-01 (tlink 0.1.4):
+- **Released binary lags repo `main`.** The `main` extension passes `--source pi`
+  to `tlink notify`, but the 0.1.4 binary's `notify` rejects `--source`
+  (exit 2). If you hand-write the extension from `main`, drop `--source`.
+- Default `notification_method` is `osascript` (not terminal-notifier, despite
+  README). The osascript adapter does `display notification` THEN
+  `open location "tmux://..."`. Before `tlink setup` registers the scheme, the
+  open-location step throws AppleScript error `-10814` — but `notify` still
+  exits 0 and the notification banner still shows. The error is only the
+  deeplink-open failing; it disappears once `tlink setup` is done.
+
+
 ## git, worktrees & PR mechanics
 
 ### "Structural-superset wins" merge resolution can silently undo cross-file surgery
