@@ -22,7 +22,7 @@
  *     },
  *     "postProcess": {                                   // optional: trim/clean CSV output (default on)
  *       "dropColumns": ["Permalink", "AttachmentIDs", "HasMedia", "BotName", "Cursor"],
- *       "maxTextLength": 800,                            //   0 disables truncation
+ *       "maxTextLength": 2000,                           //   0 disables truncation
  *       "resolveMentions": true                          //   <@U…> -> @name
  *     },                                                 //   set "postProcess": false to disable entirely
  *     "disabledTools": ["usergroups_create", "users_search"]  // optional: skip these upstream tools
@@ -34,6 +34,11 @@
  * doesn't parse as consistent CSV is passed through untouched. To recover a
  * dropped field (e.g. Permalink) set a custom `dropColumns` list omitting it,
  * or set `"postProcess": false` for fully raw upstream output.
+ *
+ * Per-call overrides (no config edit needed): message-text tools
+ * (conversations_history/replies/search_messages) accept `_maxTextLength`
+ * (override truncation for one call; 0 = none) and `_raw` (true = fully raw
+ * output for one call). These args are stripped before forwarding upstream.
  *
  * `disabledTools` matches against upstream tool names (without `toolPrefix`).
  * Use this to trim system-prompt token weight by hiding tools you never call.
@@ -172,7 +177,15 @@ const DEFAULT_REQUEST_TIMEOUT_MS = 60_000;
 
 // CSV post-processing defaults (see PostProcessConfig).
 const DEFAULT_DROP_COLUMNS = ["Permalink", "AttachmentIDs", "HasMedia", "BotName", "Cursor"];
-const DEFAULT_MAX_TEXT_LENGTH = 800;
+const DEFAULT_MAX_TEXT_LENGTH = 2000;
+// Upstream tools whose output has a Text column worth truncating. We expose the
+// per-call `_maxTextLength` / `_raw` override args only on these (keeps schema
+// token overhead off tools where it does nothing, e.g. channels_list).
+const MESSAGE_TEXT_TOOLS = new Set([
+  "conversations_history",
+  "conversations_replies",
+  "conversations_search_messages",
+]);
 // Max NEW users.info lookups per tool call when resolving bare <@U…> mentions.
 // Inline `<@U…|name>` forms and already-cached IDs are free and uncapped.
 const MENTION_LOOKUP_CAP = 25;
@@ -601,6 +614,44 @@ async function postProcessCsv(
   }
 }
 
+// Add the wrapper's per-call override args to a message-text tool's JSON Schema
+// so the model can discover them. Stripped before forwarding upstream (see
+// callTool). Returns the schema unchanged for non-text tools or when CSV
+// post-processing is disabled (the overrides would be no-ops).
+function augmentSchemaWithControls(
+  schema: Record<string, unknown>,
+  toolName: string,
+  pp: ResolvedPostProcess,
+): Record<string, unknown> {
+  try {
+    if (!pp.enabled || !MESSAGE_TEXT_TOOLS.has(toolName)) return schema;
+    if (!schema || schema.type !== "object") return schema;
+    const props =
+      schema.properties && typeof schema.properties === "object"
+        ? (schema.properties as Record<string, unknown>)
+        : {};
+    return {
+      ...schema,
+      properties: {
+        ...props,
+        _maxTextLength: {
+          type: "number",
+          description:
+            `Override the Text-column truncation limit for THIS call only (chars; 0 = no truncation). Default is ${pp.maxTextLength}. Use 0 when you need the full untruncated message body (e.g. long bootstrap/instructions).`,
+        },
+        _raw: {
+          type: "boolean",
+          description:
+            "If true, return fully raw upstream output for THIS call only " +
+            "(skips column-drop, truncation, and mention resolution).",
+        },
+      },
+    };
+  } catch {
+    return schema;
+  }
+}
+
 // =============================================================================
 // Stdio MCP client
 // =============================================================================
@@ -737,8 +788,25 @@ class StdioMCPClient {
   }
 
   async callTool(name: string, args: Record<string, unknown>): Promise<string> {
+    // Pull out wrapper-only control args (NOT forwarded to the upstream server,
+    // which would reject unknown params). These let the model override
+    // post-processing for a single call without editing the JSON config.
+    const forwarded = { ...args };
+    let raw = false;
+    let maxTextOverride: number | undefined;
+    if ("_raw" in forwarded) {
+      raw = forwarded._raw === true || forwarded._raw === "true";
+      delete forwarded._raw;
+    }
+    if ("_maxTextLength" in forwarded) {
+      const v = forwarded._maxTextLength;
+      const n = typeof v === "number" ? v : typeof v === "string" ? Number(v) : Number.NaN;
+      if (Number.isFinite(n) && n >= 0) maxTextOverride = n;
+      delete forwarded._maxTextLength;
+    }
+
     const timeoutMs = this.requestTimeoutMsByTool[name] ?? this.requestTimeoutMs;
-    const result = (await this.request("tools/call", { name, arguments: args }, timeoutMs)) as
+    const result = (await this.request("tools/call", { name, arguments: forwarded }, timeoutMs)) as
       | { content?: Array<{ type: string; text?: string }>; isError?: boolean }
       | undefined;
 
@@ -750,7 +818,12 @@ class StdioMCPClient {
     } else {
       text = JSON.stringify(result);
     }
-    return this.postProcess.enabled ? postProcessCsv(text, this.postProcess, this.authEnv) : text;
+    if (raw || !this.postProcess.enabled) return text;
+    const pp =
+      maxTextOverride === undefined
+        ? this.postProcess
+        : { ...this.postProcess, maxTextLength: maxTextOverride };
+    return postProcessCsv(text, pp, this.authEnv);
   }
 
   async disconnect(): Promise<void> {
@@ -1236,8 +1309,9 @@ export default async function slackMCPExtension(pi: ExtensionAPI): Promise<void>
         name: piName,
         label: `Slack: ${tool.name.replace(/_/g, " ")}`,
         description,
-        // Pass the upstream JSON Schema through unchanged.
-        parameters: Type.Unsafe(tool.inputSchema),
+        // Pass the upstream JSON Schema through, augmented (for message-text
+        // tools) with the wrapper's per-call override args.
+        parameters: Type.Unsafe(augmentSchemaWithControls(tool.inputSchema, tool.name, cfg.postProcess)),
         async execute(_toolCallId, params) {
           // Re-check `client` each call: a /slack force-restart from another
           // session can drop our reference. The closure captures the outer

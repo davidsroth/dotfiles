@@ -26,10 +26,10 @@
   "requestTimeoutMs": 60000,
   "requestTimeoutMsByTool": { "conversations_unreads": 180000 },
 
-  "_comment_postprocess": "CSV output cleanup (default on). Drops wide rarely-used columns, truncates long Text (maxTextLength, 0=off), and resolves <@U...> mentions to names. Dropping Cursor preserves pagination via a 'next_cursor:' footer. Set \"postProcess\": false for fully raw output, or omit a column from dropColumns to keep it (e.g. Permalink).",
+  "_comment_postprocess": "CSV output cleanup (default on). Drops wide rarely-used columns, truncates long Text (maxTextLength, 0=off), and resolves <@U...> mentions to names. Dropping Cursor preserves pagination via a 'next_cursor:' footer. Set \"postProcess\": false for fully raw output, or omit a column from dropColumns to keep it (e.g. Permalink). Per-call escape hatch: conversations_history/replies/search_messages accept tool args _maxTextLength (override truncation for one call; 0=none) and _raw (true=fully raw for one call).",
   "postProcess": {
     "dropColumns": ["Permalink", "AttachmentIDs", "HasMedia", "BotName", "Cursor"],
-    "maxTextLength": 800,
+    "maxTextLength": 2000,
     "resolveMentions": true
   }
 }
