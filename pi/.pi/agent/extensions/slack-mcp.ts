@@ -16,6 +16,10 @@
  *     },
  *     "autoConnect": true,                               // connect at extension load
  *     "toolPrefix": "slack_",                            // prefix for registered tool names
+ *     "requestTimeoutMs": 60000,                         // optional: per-tool-call timeout (default 60000)
+ *     "requestTimeoutMsByTool": {                        // optional: per-upstream-tool overrides
+ *       "conversations_unreads": 180000                  //   (slow over many channels)
+ *     },
  *     "disabledTools": ["usergroups_create", "users_search"]  // optional: skip these upstream tools
  *   }
  *
@@ -29,7 +33,9 @@
  *   /slack                connect / show status / disconnect / restart
  *
  * LLM-callable tools (always present):
- *   slack_mcp_connect, slack_mcp_disconnect, slack_mcp_status
+ *   slack_mcp_connect, slack_mcp_disconnect, slack_mcp_status, slack_mcp_call,
+ *   slack_mcp_whoami (auth.test — returns the authenticated user_id; use
+ *   `from:<user_id>` in searches since `from:@me` is unsupported by Slack)
  *
  * Plus every tool reported by the upstream MCP server (e.g. conversations_history,
  * channels_list, conversations_search_messages), each prefixed with `toolPrefix`.
@@ -53,6 +59,16 @@ interface SlackMCPConfig {
   autoConnect?: boolean;
   toolPrefix?: string;
   startupTimeoutMs?: number;
+  /**
+   * Per-tool-call timeout in ms (applies to every `tools/call`). Default 60000.
+   * Raise this for slow tools like `conversations_unreads` over many channels.
+   */
+  requestTimeoutMs?: number;
+  /**
+   * Per-upstream-tool timeout overrides (without toolPrefix), e.g.
+   * { "conversations_unreads": 180000 }. Falls back to `requestTimeoutMs`.
+   */
+  requestTimeoutMsByTool?: Record<string, number>;
   /** Upstream tool names (without toolPrefix) to skip when registering with pi. */
   disabledTools?: string[];
 }
@@ -63,6 +79,8 @@ interface ResolvedConfig {
   env: Record<string, string>;
   toolPrefix: string;
   startupTimeoutMs: number;
+  requestTimeoutMs: number;
+  requestTimeoutMsByTool: Record<string, number>;
   /** Set of upstream tool names (without toolPrefix) to skip. */
   disabledTools: Set<string>;
 }
@@ -101,7 +119,9 @@ const DEFAULT_COMMAND = "npx";
 const DEFAULT_ARGS = ["-y", "slack-mcp-server@latest", "--transport", "stdio"];
 const DEFAULT_TOOL_PREFIX = "slack_";
 const DEFAULT_STARTUP_TIMEOUT_MS = 60_000;
-const REQUEST_TIMEOUT_MS = 60_000;
+// Default per-tool-call timeout. Overridable via the auth file's
+// `requestTimeoutMs` (global) or `requestTimeoutMsByTool` (per upstream tool).
+const DEFAULT_REQUEST_TIMEOUT_MS = 60_000;
 
 // How long to wait between graceful (stdin close + SIGTERM) and SIGKILL.
 // Short on purpose: we'd rather kill cleanly than leak orphans if pi is
@@ -272,6 +292,8 @@ function resolveConfig(cfg: SlackMCPConfig | null): ResolvedConfig {
     env: cfg?.env ?? {},
     toolPrefix: cfg?.toolPrefix ?? DEFAULT_TOOL_PREFIX,
     startupTimeoutMs: cfg?.startupTimeoutMs ?? DEFAULT_STARTUP_TIMEOUT_MS,
+    requestTimeoutMs: cfg?.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS,
+    requestTimeoutMsByTool: cfg?.requestTimeoutMsByTool ?? {},
     disabledTools: new Set(cfg?.disabledTools ?? []),
   };
 }
@@ -289,6 +311,60 @@ function hasAuthEnv(env: Record<string, string>): boolean {
 }
 
 // =============================================================================
+// Identity (auth.test) — powers the slack_mcp_whoami tool
+// =============================================================================
+//
+// The upstream korotovsky server exposes no whoami/auth_test tool, so search
+// modifiers like `from:@me` don't resolve and silently return zero rows.
+// We call Slack's auth.test directly with the configured token to surface the
+// authenticated user's ID (use `from:<user_id>` in searches). Result is cached
+// per token so repeated calls are free.
+
+interface SlackIdentity {
+  ok: boolean;
+  url?: string;
+  team?: string;
+  user?: string;
+  team_id?: string;
+  user_id?: string;
+  error?: string;
+}
+
+const identityCache = new Map<string, SlackIdentity>();
+
+function resolveSlackToken(env: Record<string, string>): { token: string; cookie?: string } | null {
+  const xoxp = env.SLACK_MCP_XOXP_TOKEN || process.env.SLACK_MCP_XOXP_TOKEN;
+  if (xoxp) return { token: xoxp };
+  const xoxb = env.SLACK_MCP_XOXB_TOKEN || process.env.SLACK_MCP_XOXB_TOKEN;
+  if (xoxb) return { token: xoxb };
+  // Browser (stealth) tokens: xoxc is the Bearer, xoxd is the `d` cookie.
+  const xoxc = env.SLACK_MCP_XOXC_TOKEN || process.env.SLACK_MCP_XOXC_TOKEN;
+  const xoxd = env.SLACK_MCP_XOXD_TOKEN || process.env.SLACK_MCP_XOXD_TOKEN;
+  if (xoxc && xoxd) return { token: xoxc, cookie: `d=${xoxd}` };
+  return null;
+}
+
+async function slackAuthTest(env: Record<string, string>): Promise<SlackIdentity> {
+  const creds = resolveSlackToken(env);
+  if (!creds) return { ok: false, error: "no_token" };
+  const cached = identityCache.get(creds.token);
+  if (cached) return cached;
+  try {
+    const headers: Record<string, string> = {
+      Authorization: `Bearer ${creds.token}`,
+      "Content-Type": "application/x-www-form-urlencoded",
+    };
+    if (creds.cookie) headers.Cookie = creds.cookie;
+    const resp = await fetch("https://slack.com/api/auth.test", { method: "POST", headers });
+    const data = (await resp.json()) as SlackIdentity;
+    if (data.ok) identityCache.set(creds.token, data);
+    return data;
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+// =============================================================================
 // Stdio MCP client
 // =============================================================================
 
@@ -299,6 +375,9 @@ class StdioMCPClient {
   private pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void; timer: NodeJS.Timeout }>();
   private tools: MCPTool[] = [];
   private connected = false;
+  // Per-tool-call timeout, populated from ResolvedConfig at connect() time.
+  private requestTimeoutMs = DEFAULT_REQUEST_TIMEOUT_MS;
+  private requestTimeoutMsByTool: Record<string, number> = {};
 
   get isConnected(): boolean {
     return this.connected;
@@ -323,6 +402,8 @@ class StdioMCPClient {
 
   async connect(cfg: ResolvedConfig): Promise<void> {
     if (this.connected) return;
+    this.requestTimeoutMs = cfg.requestTimeoutMs;
+    this.requestTimeoutMsByTool = cfg.requestTimeoutMsByTool;
 
     // Ensure the at-exit reaper is registered before we spawn anything.
     installExitHookOnce();
@@ -414,7 +495,8 @@ class StdioMCPClient {
   }
 
   async callTool(name: string, args: Record<string, unknown>): Promise<string> {
-    const result = (await this.request("tools/call", { name, arguments: args })) as
+    const timeoutMs = this.requestTimeoutMsByTool[name] ?? this.requestTimeoutMs;
+    const result = (await this.request("tools/call", { name, arguments: args }, timeoutMs)) as
       | { content?: Array<{ type: string; text?: string }>; isError?: boolean }
       | undefined;
 
@@ -540,7 +622,7 @@ class StdioMCPClient {
     this.child.stdin.write(`${JSON.stringify(payload)}\n`);
   }
 
-  private request(method: string, params: Record<string, unknown>, timeoutMs = REQUEST_TIMEOUT_MS): Promise<unknown> {
+  private request(method: string, params: Record<string, unknown>, timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS): Promise<unknown> {
     const id = this.nextId++;
     return new Promise<unknown>((resolve, reject) => {
       const timer = setTimeout(() => {
@@ -863,7 +945,7 @@ export default async function slackMCPExtension(pi: ExtensionAPI): Promise<void>
 
   const registryDiagnostics = (): StatusDiagnostics => {
     try {
-      const controlToolNames = new Set(["slack_mcp_connect", "slack_mcp_disconnect", "slack_mcp_call", "slack_mcp_status"]);
+      const controlToolNames = new Set(["slack_mcp_connect", "slack_mcp_disconnect", "slack_mcp_call", "slack_mcp_status", "slack_mcp_whoami"]);
       const isSlackTool = (name: string) => name.startsWith(cfg.toolPrefix) && !controlToolNames.has(name);
       return {
         registeredToolNames: pi.getAllTools().map((t) => t.name).filter(isSlackTool).sort(),
@@ -1150,6 +1232,41 @@ export default async function slackMCPExtension(pi: ExtensionAPI): Promise<void>
         const msg = error instanceof Error ? error.message : String(error);
         return toolError("slack_mcp_call", `Error calling ${upstreamTool}: ${msg}`, { upstreamTool, error: msg });
       }
+    },
+  });
+
+  pi.registerTool({
+    name: "slack_mcp_whoami",
+    label: "Slack MCP Whoami",
+    description:
+      "Return the authenticated Slack user's identity (user_id, user, team, team_id, url) via auth.test. " +
+      "Use the returned user_id with search modifiers like 'from:<user_id>' \u2014 the bare 'from:@me' " +
+      "modifier is NOT supported by Slack search and silently returns zero results. No MCP connection required.",
+    parameters: Type.Object({}),
+    async execute() {
+      const config = refreshConfig();
+      if (!hasAuthEnv(config.env)) {
+        return toolError("slack_mcp_whoami", `No Slack auth tokens found. Create ${AUTH_FILE} with a SLACK_MCP_XOXP_TOKEN (or XOXB, or XOXC+XOXD).`);
+      }
+      const id = await slackAuthTest(config.env);
+      if (!id.ok) {
+        return toolError("slack_mcp_whoami", `Slack auth.test failed: ${id.error ?? "unknown error"}`, { error: id.error });
+      }
+      const text = [
+        `user_id: ${id.user_id}`,
+        `user:    ${id.user}`,
+        `team:    ${id.team} (${id.team_id})`,
+        `url:     ${id.url}`,
+        ``,
+        `Tip: use 'from:${id.user_id}' (or 'to:${id.user_id}') in conversations_search_messages \u2014 'from:@me' does not work.`,
+      ].join("\n");
+      return toolResult("slack_mcp_whoami", text, {
+        user_id: id.user_id,
+        user: id.user,
+        team: id.team,
+        team_id: id.team_id,
+        url: id.url,
+      });
     },
   });
 

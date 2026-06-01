@@ -20,5 +20,9 @@
 
   "autoConnect": true,
   "toolPrefix": "slack_",
-  "startupTimeoutMs": 30000
+  "startupTimeoutMs": 30000,
+
+  "_comment_timeout": "Per-tool-call timeout (ms, default 60000). Raise globally and/or per upstream tool for slow calls like conversations_unreads over many channels.",
+  "requestTimeoutMs": 60000,
+  "requestTimeoutMsByTool": { "conversations_unreads": 180000 }
 }
