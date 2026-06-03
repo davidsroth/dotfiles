@@ -9,7 +9,7 @@ export default function (pi: ExtensionAPI) {
 
   pi.registerProvider("azure-foundry", {
     baseUrl,
-    apiKey: "AZURE_INFERENCE_CREDENTIAL",
+    apiKey: "$AZURE_INFERENCE_CREDENTIAL",
     authHeader: true,
     api: "openai-completions",
     models: [
