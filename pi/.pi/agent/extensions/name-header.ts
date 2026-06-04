@@ -2,6 +2,7 @@ import { execFile, spawn } from "node:child_process";
 import type { ExtensionAPI, ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
 import { Key, matchesKey, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import type { KeyId } from "@earendil-works/pi-tui";
+import { padRight } from "./_shared/tui";
 
 // Optional env overrides (reload pi after changing them):
 // - PI_DASHBOARD_LOCATION="San Francisco"
@@ -164,11 +165,6 @@ function execFileText(file: string, args: string[], timeout: number): Promise<st
 	});
 }
 
-function padRight(text: string, width: number): string {
-	const textWidth = visibleWidth(text);
-	if (textWidth >= width) return truncateToWidth(text, width, "");
-	return text + " ".repeat(width - textWidth);
-}
 
 function topBorderWithTitle(theme: Theme, title: string, inner: number): string {
 	const accent = (text: string) => theme.fg("borderAccent", text);

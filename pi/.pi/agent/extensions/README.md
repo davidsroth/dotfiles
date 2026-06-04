@@ -24,8 +24,11 @@ never shadows the SDK.
 
 ## Shared helpers (`_shared/`)
 
-Code reused across extensions lives in `_shared/` (e.g. `_shared/config.ts`,
-the layered `defaults < ~/.pi/agent/<file> < <cwd>/.pi/<file>` config loader).
+Code reused across extensions lives in `_shared/`:
+
+- `_shared/config.ts` — the layered `defaults < ~/.pi/agent/<file> <
+  <cwd>/.pi/<file>` config loader.
+- `_shared/tui.ts` — terminal rendering helpers (e.g. `padRight`).
 
 **Why a subdirectory without `index.ts`:** pi's extension discovery only
 auto-loads top-level `*.ts`/`*.js` files and subdirectories that contain an

@@ -31,11 +31,12 @@
 import { type Dirent, existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { type ExtensionAPI, type ExtensionContext, getAgentDir } from "@earendil-works/pi-coding-agent";
 import { Box, Text } from "@earendil-works/pi-tui";
 
 const CUSTOM_TYPE = "resource-tokens";
-const AGENT_DIR = join(homedir(), ".pi", "agent");
+// Use the SDK resolver (honors PI config-dir overrides) rather than hardcoding ~/.pi/agent.
+const AGENT_DIR = getAgentDir();
 const CONFIG_DIR_NAME = ".pi";
 
 // ----- token approximation -----

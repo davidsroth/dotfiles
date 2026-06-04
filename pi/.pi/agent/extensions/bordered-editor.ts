@@ -5,14 +5,8 @@
 
 import type { ExtensionAPI, KeybindingsManager } from "@earendil-works/pi-coding-agent";
 import { CustomEditor } from "@earendil-works/pi-coding-agent";
-import { visibleWidth } from "@earendil-works/pi-tui";
 import type { TUI, EditorTheme, EditorOptions } from "@earendil-works/pi-tui";
-
-function padRight(text: string, width: number): string {
-	const w = visibleWidth(text);
-	if (w >= width) return text;
-	return text + " ".repeat(width - w);
-}
+import { padRight } from "./_shared/tui";
 
 class BorderedEditor extends CustomEditor {
 	constructor(tui: TUI, theme: EditorTheme, keybindings: KeybindingsManager, options?: EditorOptions) {
