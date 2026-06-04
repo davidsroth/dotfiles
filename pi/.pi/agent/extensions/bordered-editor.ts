@@ -3,10 +3,10 @@
  * the dashboard / subagents widget visual identity.
  */
 
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, KeybindingsManager } from "@earendil-works/pi-coding-agent";
 import { CustomEditor } from "@earendil-works/pi-coding-agent";
 import { visibleWidth } from "@earendil-works/pi-tui";
-import type { TUI, EditorTheme, KeybindingsManager, EditorOptions } from "@earendil-works/pi-tui";
+import type { TUI, EditorTheme, EditorOptions } from "@earendil-works/pi-tui";
 
 function padRight(text: string, width: number): string {
 	const w = visibleWidth(text);

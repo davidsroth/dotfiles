@@ -28,7 +28,7 @@
  * project + package-installed resources.
  */
 
-import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { type Dirent, existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
@@ -78,7 +78,7 @@ function readFileSafe(p: string): string | undefined {
 
 function* walkSkillFiles(dir: string): Generator<string> {
 	if (!existsSync(dir)) return;
-	let entries: ReturnType<typeof readdirSync>;
+	let entries: Dirent[];
 	try {
 		entries = readdirSync(dir, { withFileTypes: true });
 	} catch {

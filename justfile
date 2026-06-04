@@ -33,6 +33,13 @@ pi-settings:
 
 alias pis := pi-settings
 
+# Typecheck the hand-written pi extensions (pi/.pi/agent/extensions) against the
+# installed pi SDK. Builds a gitignored node_modules symlink farm, then `tsc --noEmit`.
+pi-check:
+  bash {{justfile_directory()}}/scripts/pi-typecheck.sh
+
+alias pic := pi-check
+
 # Link the tracked global memory file (~/.pi/agent/memory/MEMORY.md → repo).
 # Per-machine memory (MEMORY.local.md, SCRATCHPAD.md, daily/) stays local.
 pi-memory:

@@ -1,6 +1,7 @@
 import { execFile, spawn } from "node:child_process";
 import type { ExtensionAPI, ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
 import { Key, matchesKey, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import type { KeyId } from "@earendil-works/pi-tui";
 
 // Optional env overrides (reload pi after changing them):
 // - PI_DASHBOARD_LOCATION="San Francisco"
@@ -227,7 +228,7 @@ function parseAgendaJson(payload: string): AgendaEvent[] {
 	const horizon = now + AGENDA_LOOKAHEAD_HOURS * 60 * 60 * 1000;
 
 	return parsed
-		.map((item) => {
+		.map((item): AgendaEvent | undefined => {
 			if (!item || typeof item !== "object") return undefined;
 			const event = item as Record<string, unknown>;
 			const title = sanitizeText(event.title, "Untitled");
@@ -303,7 +304,7 @@ function parsePrsJson(payload: string): PullRequest[] {
 	if (!Array.isArray(parsed)) return [];
 
 	return parsed
-		.map((item) => {
+		.map((item): PullRequest | undefined => {
 			if (!item || typeof item !== "object") return undefined;
 			const pr = item as Record<string, unknown>;
 			const number = typeof pr.number === "number" ? pr.number : Number.parseInt(String(pr.number ?? ""), 10);
@@ -955,7 +956,7 @@ export default function dashboardWidget(pi: ExtensionAPI) {
 	});
 
 	if (!PRS_DISABLED) {
-		pi.registerShortcut(PR_PICKER_KEY, {
+		pi.registerShortcut(PR_PICKER_KEY as KeyId, {
 			description: "Toggle the PR picker from the dashboard widget",
 			handler: async (ctx) => {
 				await openPrPicker(ctx);

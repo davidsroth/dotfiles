@@ -25,15 +25,9 @@
  * alone. `user_bash` (`!`/`!!`) output is NOT covered — only LLM tool calls.
  */
 
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
-import type {
-  ExtensionAPI,
-  ExtensionContext,
-  TextContent,
-  ImageContent,
-} from "@earendil-works/pi-coding-agent";
-import { getAgentDir } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { TextContent, ImageContent } from "@earendil-works/pi-ai";
+import { loadLayeredConfig } from "./_shared/config";
 
 // ---------------------------------------------------------------------------
 // Patterns
@@ -212,23 +206,13 @@ const DEFAULT_CONFIG: SecretGuardConfig = {
   blockTools: ["bash"],
 };
 
-function readConfigFile(path: string): Partial<SecretGuardConfig> {
-  if (!existsSync(path)) return {};
-  try {
-    const raw = JSON.parse(readFileSync(path, "utf-8"));
-    if (!raw || typeof raw !== "object") return {};
-    return raw as Partial<SecretGuardConfig>;
-  } catch (err) {
-    const reason = err instanceof Error ? err.message : String(err);
-    console.warn(`[secret-guard] Ignoring malformed config at ${path}: ${reason}`);
-    return {};
-  }
-}
-
 export function loadConfig(cwd: string): SecretGuardConfig {
-  const global = readConfigFile(join(getAgentDir(), "secret-guard.json"));
-  const project = readConfigFile(join(cwd, ".pi", "secret-guard.json"));
-  const merged = { ...DEFAULT_CONFIG, ...global, ...project };
+  const merged = loadLayeredConfig<SecretGuardConfig>({
+    filename: "secret-guard.json",
+    cwd,
+    logPrefix: "secret-guard",
+    defaults: DEFAULT_CONFIG,
+  });
   // Coerce/validate shape defensively.
   merged.mode = merged.mode === "block" ? "block" : "redact";
   merged.extraPatterns = Array.isArray(merged.extraPatterns) ? merged.extraPatterns : [];

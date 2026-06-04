@@ -17,8 +17,6 @@
  *   }
  */
 
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
 import type { Model } from "@earendil-works/pi-ai";
 import {
   type AgentSession,
@@ -32,6 +30,7 @@ import {
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
+import { loadLayeredConfig } from "./_shared/config";
 
 type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
 
@@ -76,21 +75,13 @@ function sanitize(raw: unknown): AdvisorConfig {
   return out;
 }
 
-function readConfigFile(path: string): AdvisorConfig {
-  if (!existsSync(path)) return {};
-  try {
-    return sanitize(JSON.parse(readFileSync(path, "utf-8")));
-  } catch (err) {
-    const reason = err instanceof Error ? err.message : String(err);
-    console.warn(`[advisor] Ignoring malformed config at ${path}: ${reason}`);
-    return {};
-  }
-}
-
 function loadConfig(cwd: string): AdvisorConfig {
-  const global = readConfigFile(join(getAgentDir(), "advisor.json"));
-  const project = readConfigFile(join(cwd, ".pi", "advisor.json"));
-  return { ...global, ...project };
+  return loadLayeredConfig<AdvisorConfig>({
+    filename: "advisor.json",
+    cwd,
+    logPrefix: "advisor",
+    sanitize,
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -226,7 +217,11 @@ export default function (pi: ExtensionAPI) {
     async execute(_toolCallId, params, signal, onUpdate, ctx: ExtensionContext) {
       // Fast-fail if already cancelled — avoids spinning up an expensive subagent session.
       if (signal?.aborted) {
-        return { content: [{ type: "text", text: "advisor: cancelled before starting." }], isError: true };
+        return {
+          content: [{ type: "text", text: "advisor: cancelled before starting." }],
+          isError: true,
+          details: undefined,
+        };
       }
       const cfg = loadConfig(ctx.cwd);
       const readOnly = cfg.readOnly ?? DEFAULTS.readOnly;
@@ -245,12 +240,14 @@ export default function (pi: ExtensionAPI) {
             },
           ],
           isError: true,
+          details: undefined,
         };
       }
 
       const modelLabel = `${(model as any).provider}/${(model as any).id}`;
       onUpdate?.({
         content: [{ type: "text", text: `Consulting advisor (${modelLabel})…` }],
+        details: undefined,
       });
 
       // Lean, isolated loader: advisor persona, no extensions/skills/context
@@ -302,6 +299,7 @@ export default function (pi: ExtensionAPI) {
         if (event.type === "tool_execution_start") {
           onUpdate?.({
             content: [{ type: "text", text: `advisor → ${event.toolName}` }],
+            details: undefined,
           });
         }
       });
