@@ -53,5 +53,12 @@ the reference example:
   (mirrors pi-intercom's `AgentPickerOverlay`); the orchestrator injects data
   + callbacks and wires the instance's `requestRender()` / `close()`.
 
+`slack-mcp/` is a second example (an MCP bridge rather than a widget):
+`index.ts` orchestrates pi tool/command wiring; siblings split out `types`,
+`constants`, `config`, `identity`, `postprocess`, `process-tracker`,
+`mcp-client` (the `StdioMCPClient`), `registry` (cross-session shared client),
+and `tool-helpers`. Non-`.ts` files (e.g. `slack-mcp.example.json`) can live in
+the directory too — discovery ignores them.
+
 Keep only `index.ts` as an entry point — sibling `*.ts` files are imported, not
 discovered (discovery does not recurse past the directory's entry point).
