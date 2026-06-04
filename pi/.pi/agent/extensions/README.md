@@ -36,3 +36,22 @@ auto-loads top-level `*.ts`/`*.js` files and subdirectories that contain an
 `_shared/` with neither is ignored by discovery, so its modules are *not* loaded
 as extensions — they're just imported relatively (`import { ... } from
 "./_shared/config"`). Do **not** add an `index.ts` to `_shared/`.
+
+## Multi-file extensions (directory layout)
+
+A larger extension is a subdirectory with an `index.ts` entry point (which pi
+discovers and loads) plus sibling helper modules it imports. `name-header/` is
+the reference example:
+
+- `index.ts`  — entry point: the default factory, mutable widget state, refresh
+  lifecycle, and pi event/command/shortcut wiring (orchestration only).
+- `config.ts` — constants + env overrides.
+- `types.ts`  — data shapes.
+- `data.ts`   — IO layer (shells out to weather / calendar / `gh`).
+- `render.ts` — pure presentation helpers (theme + state → lines).
+- `pr-picker.ts` — the PR picker overlay as a self-contained `Component` class
+  (mirrors pi-intercom's `AgentPickerOverlay`); the orchestrator injects data
+  + callbacks and wires the instance's `requestRender()` / `close()`.
+
+Keep only `index.ts` as an entry point — sibling `*.ts` files are imported, not
+discovered (discovery does not recurse past the directory's entry point).
