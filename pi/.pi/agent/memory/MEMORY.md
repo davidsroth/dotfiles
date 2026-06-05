@@ -350,7 +350,12 @@ Gotchas observed 2026-06-01 (tlink 0.1.4):
   exits 0 and the notification banner still shows. The error is only the
   deeplink-open failing; it disappears once `tlink setup` is done.
 
-### Slack MCP wrapper (dotfiles `pi/.pi/agent/extensions/slack-mcp.ts`)
+### Slack MCP wrapper (dotfiles `pi/.pi/agent/extensions/slack-mcp/`)
+NOTE (2026-06-04): split from the old single-file `slack-mcp.ts` into a
+directory extension — entry `slack-mcp/index.ts`, with siblings
+types/constants/config/identity/postprocess/process-tracker/mcp-client/
+registry/tool-helpers. Behavior unchanged; edit the relevant module, not a
+monolith. `just pi-check` typechecks it.
 Thin pi bridge spawning korotovsky/slack-mcp-server (Go, npm `slack-mcp-server`)
 via `~/.pi/agent/slack-mcp.json` (XOXP user token, not stowed). NOT the official
 `@modelcontextprotocol/server-slack` — symptoms like CSV output,
@@ -371,6 +376,57 @@ via `~/.pi/agent/slack-mcp.json` (XOXP user token, not stowed). NOT the official
 - **Reload gotcha:** pi loads this extension once at session start. Editing it does
   NOT affect already-running sessions — they must reload/restart to pick up changes.
   (Same long-running-process rule as the intercom broker.)
+
+### pi extension loading internals + typecheck harness (dotfiles)
+
+How pi (0.78.x) loads `~/.pi/agent/extensions/`, verified by reading
+`pi-coding-agent/dist/core/extensions/loader.js` and driving
+`discoverAndLoadExtensions` directly:
+
+- **Loader = `jiti`** (Node/dev mode). It sets `alias` mapping the specifiers
+  `@earendil-works/{pi-coding-agent,pi-tui,pi-ai,pi-agent-core,pi-ai/oauth}`
+  and `typebox` to pi's OWN bundled copies — applied transitively to modules the
+  extension imports. **Consequence: a local `node_modules` next to an extension
+  does NOT shadow the SDK at runtime.** Safe to add one for tooling.
+- **Discovery rules (one level, no recursion):** auto-loads top-level
+  `extensions/*.ts|*.js`, AND a subdir only if it has `index.ts`/`index.js` OR a
+  `package.json` with a `pi` manifest field. So a helper subdir like
+  `_shared/` WITHOUT an index is ignored by discovery — perfect for shared code
+  imported relatively (`import … from "./_shared/config"`). Do NOT add index.ts
+  to such a dir or it becomes an extension.
+- SDK packages live under the global install: `pi` binary → realpath →
+  `<prefix>/lib/node_modules/@earendil-works/pi-coding-agent/dist/cli.js`; its
+  nested deps (pi-tui/pi-ai/pi-agent-core/typebox) are under that pkg's
+  `node_modules`. `@earendil-works/pi-coding-agent` IS published on npm (the SDK
+  exports map has only `.` and `./hooks`; `TextContent`/`ImageContent` are NOT
+  re-exported from pi-coding-agent — import them from `@earendil-works/pi-ai`).
+- **Typecheck harness** (added 2026-06-04, commit 7c95bce): `just pi-check`
+  (alias `just pic`) → `scripts/pi-typecheck.sh` builds a gitignored
+  `extensions/node_modules/` symlink farm pointing at the installed SDK, then
+  `npx -p typescript@5.7 tsc --noEmit -p extensions/tsconfig.json` (strict).
+  Pins typecheck to the exact running pi version, no drift/download; build-time
+  only (jiti aliasing makes the farm runtime-inert). Verify changes with
+  `just pi-check` AND a runtime load probe via `discoverAndLoadExtensions([],
+  cwd, agentDir)` checking `res.errors` is empty.
+- Shared layered-config loader extracted to `extensions/_shared/config.ts`
+  (`loadLayeredConfig`: defaults < `~/.pi/agent/<file>` < `<cwd>/.pi/<file>`,
+  warn-and-ignore malformed JSON); advisor.ts + secret-guard.ts migrated onto it.
+
+### dotfiles agent skills live in `.agent/skills/`, NOT the pi stow package
+
+Cross-harness agent skills in dotfiles belong in `dotfiles/.agent/skills/<name>/SKILL.md`
+(tracked in git). `install.sh` (`setup_agent_skills`) symlinks that one dir into
+`~/.pi/agent/skills`, `~/.claude/skills`, `~/.gemini/skills`, `~/.cursor/skills`,
+`~/.codex/skills` so every harness shares it.
+
+Footgun: do NOT put skills under `pi/.pi/agent/skills/` in the pi stow package.
+`pi/.pi/agent/skills` is `.gitignore`d (it's meant to be the install.sh symlink),
+and if you create a real dir there, `just stow` hijacks `~/.pi/agent/skills` to
+point at the pi package instead of `.agent/skills` (stow re-LINKs it). Fix:
+remove `pi/.pi/agent/skills`, recreate `~/.pi/agent/skills -> dotfiles/.agent/skills`.
+Discovered 2026-06-05 adding the `atomic-commits` skill (commit ade8d77).
+
+
 
 
 
