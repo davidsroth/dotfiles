@@ -59,6 +59,7 @@ alias gpu='git push'
 alias gsh='git rev-parse --short HEAD'
 if command -v lazygit >/dev/null 2>&1; then
   alias lg='lazygit'
+  alias lz='lazygit'
 fi
 
 # Codex-assisted commit organization (guarded)
@@ -89,6 +90,7 @@ if command -v brew >/dev/null 2>&1; then
 fi
 
 # Quick clear
+alias cl='clear'
 alias cls='clear'
 
 # Modern alternative tools (NOT aliased over POSIX utils — they are not drop-in compatible):
@@ -123,6 +125,12 @@ alias oc='opencode'
 if command -v gemini >/dev/null 2>&1; then
   alias gmi='gemini'
   alias gmir='gemini -r'
+fi
+
+# tuxedo
+if command -v tuxedo >/dev/null 2>&1; then
+  alias tux='tuxedo ~/notes/todo.txt'
+  alias tx="tuxedo ~/notes/todo.txt"
 fi
 
 # tlog viewers live in functions.sh so they can ensure today's dir + log exist.
