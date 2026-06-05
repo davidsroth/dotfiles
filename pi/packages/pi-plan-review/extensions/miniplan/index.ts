@@ -9,9 +9,9 @@
 
 import { exec, execFile } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { readFileSync, statSync } from "node:fs";
+import { mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
-import { extname, resolve } from "node:path";
+import { basename, dirname, extname, resolve } from "node:path";
 import { promisify } from "node:util";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 
@@ -1194,8 +1194,15 @@ export default function plan(pi: ExtensionAPI): void {
 			}
 			let content: string;
 			try {
-				if (!statSync(fullPath).isFile()) throw new Error("not a file");
-				content = readFileSync(fullPath, "utf-8");
+				if (!statSync(fullPath, { throwIfNoEntry: false })?.isFile()) {
+					// File doesn't exist yet — create it with a placeholder heading
+					const heading = `# ${basename(fullPath, extname(fullPath))}\n\n`;
+					mkdirSync(dirname(fullPath), { recursive: true });
+					writeFileSync(fullPath, heading, "utf-8");
+					content = heading;
+				} else {
+					content = readFileSync(fullPath, "utf-8");
+				}
 			} catch (err) {
 				return { content: [{ type: "text", text: `Error reading ${inputPath}: ${err instanceof Error ? err.message : String(err)}` }] };
 			}
