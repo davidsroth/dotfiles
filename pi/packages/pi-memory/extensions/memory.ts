@@ -1,6 +1,7 @@
 import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { withFileMutationQueue } from "@earendil-works/pi-coding-agent";
+import { existsSync } from "node:fs";
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, relative } from "node:path";
@@ -12,7 +13,7 @@ const TOOL_READ_MAX_CHARS = 50_000;
 
 const TARGETS = ["memory", "scratchpad", "daily", "all"] as const;
 const ACTIONS = ["read", "search", "append", "replace", "scratch_done"] as const;
-const SCOPES = ["global", "local"] as const;
+const SCOPES = ["global", "local", "project"] as const;
 
 type Target = (typeof TARGETS)[number];
 type Action = (typeof ACTIONS)[number];
@@ -37,6 +38,11 @@ type StorePaths = {
 	memoryLocal: string;
 	scratchpad: string;
 	today: string;
+	// Project-scoped memory: <projectRoot>/.pi/memory/MEMORY.md. projectRoot is the
+	// nearest ancestor of the session cwd containing a .git entry (else cwd itself).
+	projectRoot: string;
+	projectDir: string;
+	project: string;
 };
 
 const MemoryParamsSchema = Type.Object({
@@ -60,7 +66,7 @@ const MemoryParamsSchema = Type.Object({
 	scope: Type.Optional(
 		StringEnum(SCOPES, {
 			description:
-				"For target=memory only: 'global' (default) = MEMORY.md, synced across machines; 'local' = MEMORY.local.md, specific to this machine. Ignored for daily/scratchpad.",
+				"For target=memory only: 'global' (default) = MEMORY.md, synced across machines; 'local' = MEMORY.local.md, specific to this machine; 'project' = <repo>/.pi/memory/MEMORY.md, scoped to the current project/repo and travels with the working tree. Ignored for daily/scratchpad.",
 		}),
 	),
 });
@@ -116,10 +122,26 @@ const timeString = (date = new Date()): string => {
 
 const getAgentDir = (): string => process.env.PI_CODING_AGENT_DIR ?? join(homedir(), ".pi", "agent");
 
-const getStorePaths = (): StorePaths => {
+// Walk up from cwd to the nearest ancestor containing a `.git` entry (the
+// project root). Falls back to cwd when not inside a work tree. Pure filesystem,
+// so no git dependency and matches pi's `<cwd>/.pi/agents/` project convention.
+const findProjectRoot = (cwd: string): string => {
+	let dir = cwd;
+	// eslint-disable-next-line no-constant-condition
+	while (true) {
+		if (existsSync(join(dir, ".git"))) return dir;
+		const parent = dirname(dir);
+		if (parent === dir) return cwd;
+		dir = parent;
+	}
+};
+
+const getStorePaths = (cwd: string = process.cwd()): StorePaths => {
 	const dir = join(getAgentDir(), "memory");
 	const dailyDir = join(dir, "daily");
 	const today = todayString();
+	const projectRoot = findProjectRoot(cwd);
+	const projectDir = join(projectRoot, ".pi", "memory");
 	return {
 		dir,
 		dailyDir,
@@ -127,13 +149,16 @@ const getStorePaths = (): StorePaths => {
 		memoryLocal: join(dir, "MEMORY.local.md"),
 		scratchpad: join(dir, "SCRATCHPAD.md"),
 		today: join(dailyDir, `${today}.md`),
+		projectRoot,
+		projectDir,
+		project: join(projectDir, "MEMORY.md"),
 	};
 };
 
 // Resolve the MEMORY file for a scope. Global (default) syncs across machines;
-// local stays on this machine.
+// local stays on this machine; project lives in the current repo's .pi/memory/.
 const memoryPathForScope = (paths: StorePaths, scope: Scope | undefined): string =>
-	scope === "local" ? paths.memoryLocal : paths.memory;
+	scope === "local" ? paths.memoryLocal : scope === "project" ? paths.project : paths.memory;
 
 const writeFileIfMissing = async (path: string, content: string): Promise<void> => {
 	await mkdir(dirname(path), { recursive: true });
@@ -145,8 +170,10 @@ const writeFileIfMissing = async (path: string, content: string): Promise<void> 
 	}
 };
 
-const ensureStore = async (): Promise<StorePaths> => {
-	const paths = getStorePaths();
+// NOTE: deliberately does NOT create the project file — that would litter every
+// repo the user opens. Project memory is created lazily on first scope=project write.
+const ensureStore = async (cwd?: string): Promise<StorePaths> => {
+	const paths = getStorePaths(cwd);
 	await mkdir(paths.dailyDir, { recursive: true });
 	await writeFileIfMissing(paths.memory, defaultMemoryTemplate);
 	await writeFileIfMissing(paths.memoryLocal, defaultMemoryLocalTemplate);
@@ -225,8 +252,9 @@ const buildOutline = (content: string): string =>
 const resolveTargetPath = async (
 	target: Target | undefined,
 	scope?: Scope,
+	cwd?: string,
 ): Promise<{ paths: StorePaths; path?: string }> => {
-	const paths = await ensureStore();
+	const paths = await ensureStore(cwd);
 	const resolved = target ?? "memory";
 	if (resolved === "memory") return { paths, path: memoryPathForScope(paths, scope) };
 	if (resolved === "scratchpad") return { paths, path: paths.scratchpad };
@@ -256,15 +284,26 @@ const formatFileBlock = (storeDir: string, path: string, content: string): strin
 	return `## ${rel}\n\n${content.trimEnd()}`;
 };
 
-const readTarget = async (target: Target | undefined, scope?: Scope): Promise<{ text: string; files: string[] }> => {
-	const { paths, path } = await resolveTargetPath(target, scope);
+// Human-readable path for messages: project file shown relative to its repo
+// root, everything else relative to the central store dir.
+const displayPath = (paths: StorePaths, path: string): string =>
+	path === paths.project ? relative(paths.projectRoot, path) : relative(paths.dir, path);
+
+const readTarget = async (target: Target | undefined, scope?: Scope, cwd?: string): Promise<{ text: string; files: string[] }> => {
+	const { paths, path } = await resolveTargetPath(target, scope, cwd);
 	if ((target ?? "memory") === "all") {
 		await ensureDailyFile(paths);
 		const files = [paths.memory, paths.memoryLocal, paths.scratchpad, paths.today];
-		const blocks = await Promise.all(files.map(async (file) => formatFileBlock(paths.dir, file, await readTextFile(file))));
+		if (existsSync(paths.project)) files.push(paths.project);
+		const blocks = await Promise.all(
+			files.map(async (file) => formatFileBlock(file === paths.project ? paths.projectRoot : paths.dir, file, await readTextFile(file))),
+		);
 		return { text: blocks.join("\n\n---\n\n"), files };
 	}
 	if (!path) throw new Error("No path resolved for target");
+	if (scope === "project" && !existsSync(path)) {
+		return { text: `No project memory yet at ${path}. Append with scope="project" to create it.`, files: [path] };
+	}
 	return { text: await readTextFile(path), files: [path] };
 };
 
@@ -272,34 +311,40 @@ const readSection = async (
 	target: Target | undefined,
 	section: string,
 	scope?: Scope,
+	cwd?: string,
 ): Promise<{ text: string; files: string[] }> => {
-	const { paths, path } = await resolveTargetPath(target ?? "memory", scope);
+	const { paths, path } = await resolveTargetPath(target ?? "memory", scope, cwd);
 	if (!path) return { text: "Error: section read requires target memory, scratchpad, or daily.", files: [] };
 	if ((target ?? "memory") === "daily") await ensureDailyFile(paths);
+	if (scope === "project" && !existsSync(path)) return { text: `No project memory yet at ${path}.`, files: [path] };
 	const content = await readTextFile(path);
 	const lines = content.split("\n");
 	const range = findSectionRange(lines, section);
 	if (!range) {
 		return {
-			text: `Error: section "${section}" not found in ${relative(paths.dir, path)}.\n\nAvailable sections:\n${buildOutline(content)}`,
+			text: `Error: section "${section}" not found in ${displayPath(paths, path)}.\n\nAvailable sections:\n${buildOutline(content)}`,
 			files: [path],
 		};
 	}
 	return { text: lines.slice(range.start, range.end).join("\n").trimEnd(), files: [path] };
 };
 
-const searchMemory = async (params: MemoryParams): Promise<{ text: string; files: string[]; count: number }> => {
+const searchMemory = async (params: MemoryParams, cwd?: string): Promise<{ text: string; files: string[]; count: number }> => {
 	const query = params.query?.trim() || params.text?.trim();
 	if (!query) return { text: "Error: query is required for memory search.", files: [], count: 0 };
 
-	const paths = await ensureStore();
-	const files = await listMarkdownFiles(paths.dir);
+	const paths = await ensureStore(cwd);
+	// Scan the central store plus the current project's memory file (labelled
+	// relative to its own root so crumbs stay readable).
+	const scanned: { file: string; root: string }[] = (await listMarkdownFiles(paths.dir)).map((file) => ({ file, root: paths.dir }));
+	if (existsSync(paths.project)) scanned.push({ file: paths.project, root: paths.projectRoot });
+	const files = scanned.map((entry) => entry.file);
 	const needle = query.toLowerCase();
 	const limit = Math.min(Math.max(Math.floor(params.limit ?? 30), 1), 100);
 	const matches: string[] = [];
 
-	for (const file of files) {
-		const rel = relative(paths.dir, file);
+	for (const { file, root } of scanned) {
+		const rel = relative(root, file);
 		const lines = (await readTextFile(file)).split("\n");
 		const headByIndex = new Map(parseHeadings(lines).map((head) => [head.index, head]));
 		const stack: { level: number; title: string }[] = [];
@@ -331,17 +376,17 @@ const searchMemory = async (params: MemoryParams): Promise<{ text: string; files
 	};
 };
 
-const appendToTarget = async (params: MemoryParams): Promise<{ text: string; files: string[] }> => {
+const appendToTarget = async (params: MemoryParams, cwd?: string): Promise<{ text: string; files: string[] }> => {
 	const target = params.target;
 	const text = params.text?.trim();
 	if (!text) return { text: "Error: text is required for append.", files: [] };
 	if (!target || target === "all") return { text: "Error: target must be memory, scratchpad, or daily for append.", files: [] };
 
-	const { paths, path } = await resolveTargetPath(target, params.scope);
+	const { paths, path } = await resolveTargetPath(target, params.scope, cwd);
 	if (!path) throw new Error("No path resolved for append target");
 	if (target === "daily") await ensureDailyFile(paths);
 
-	let resultText = `Appended to ${relative(paths.dir, path)}.`;
+	let resultText = `Appended to ${displayPath(paths, path)}.`;
 
 	await withFileMutationQueue(path, async () => {
 		await mkdir(dirname(path), { recursive: true });
@@ -367,7 +412,7 @@ const appendToTarget = async (params: MemoryParams): Promise<{ text: string; fil
 				const range = findSectionRange(lines, sectionName);
 				if (!range) {
 					resultText =
-						`Section "${sectionName}" not found in ${relative(paths.dir, path)} \u2014 nothing written.\n` +
+						`Section "${sectionName}" not found in ${displayPath(paths, path)} \u2014 nothing written.\n` +
 						`Existing sections:\n${buildOutline(current)}\n` +
 						`To create a new section, append a block whose first line is "## ${sectionName}" and omit \`section\`.`;
 					return;
@@ -376,7 +421,7 @@ const appendToTarget = async (params: MemoryParams): Promise<{ text: string; fil
 				while (insertAt > range.start + 1 && (lines[insertAt - 1] ?? "").trim() === "") insertAt--;
 				lines.splice(insertAt, 0, "", block, "");
 				await writeFile(path, lines.join("\n"), "utf8");
-				resultText = `Appended under "${sectionName}" in ${relative(paths.dir, path)}.`;
+				resultText = `Appended under "${sectionName}" in ${displayPath(paths, path)}.`;
 			} else {
 				const sep = current.length === 0 || current.endsWith("\n") ? "" : "\n";
 				await writeFile(path, `${current}${sep}\n${block}\n`, "utf8");
@@ -392,7 +437,7 @@ const appendToTarget = async (params: MemoryParams): Promise<{ text: string; fil
 	return { text: resultText, files: [path] };
 };
 
-const replaceInTarget = async (params: MemoryParams): Promise<{ text: string; files: string[] }> => {
+const replaceInTarget = async (params: MemoryParams, cwd?: string): Promise<{ text: string; files: string[] }> => {
 	const target = params.target ?? "memory";
 	if (target === "daily" || target === "all") {
 		return { text: "Error: replace is only allowed for memory or scratchpad. Daily logs are append-only.", files: [] };
@@ -400,8 +445,9 @@ const replaceInTarget = async (params: MemoryParams): Promise<{ text: string; fi
 	if (!params.oldText) return { text: "Error: oldText is required for replace.", files: [] };
 	if (params.newText === undefined) return { text: "Error: newText is required for replace.", files: [] };
 
-	const { paths, path } = await resolveTargetPath(target, params.scope);
+	const { paths, path } = await resolveTargetPath(target, params.scope, cwd);
 	if (!path) throw new Error("No path resolved for replace target");
+	if (!existsSync(path)) return { text: `Error: ${path} does not exist yet — nothing to replace.`, files: [path] };
 
 	let replacementCount = 0;
 	await withFileMutationQueue(path, async () => {
@@ -411,14 +457,14 @@ const replaceInTarget = async (params: MemoryParams): Promise<{ text: string; fi
 		await writeFile(path, current.replace(params.oldText as string, params.newText as string), "utf8");
 	});
 
-	if (replacementCount === 0) return { text: `Error: oldText was not found in ${relative(paths.dir, path)}.`, files: [path] };
+	if (replacementCount === 0) return { text: `Error: oldText was not found in ${displayPath(paths, path)}.`, files: [path] };
 	if (replacementCount > 1) {
 		return {
-			text: `Error: oldText matched ${replacementCount} times in ${relative(paths.dir, path)}. Use a more specific oldText.`,
+			text: `Error: oldText matched ${replacementCount} times in ${displayPath(paths, path)}. Use a more specific oldText.`,
 			files: [path],
 		};
 	}
-	return { text: `Replaced one occurrence in ${relative(paths.dir, path)}.`, files: [path] };
+	return { text: `Replaced one occurrence in ${displayPath(paths, path)}.`, files: [path] };
 };
 
 const markScratchDone = async (params: MemoryParams): Promise<{ text: string; files: string[] }> => {
@@ -461,9 +507,10 @@ const markScratchDone = async (params: MemoryParams): Promise<{ text: string; fi
 	return { text: result, files: [path] };
 };
 
-const buildCommandPathMessage = async (target: string | undefined): Promise<string> => {
-	const paths = await ensureStore();
+const buildCommandPathMessage = async (target: string | undefined, cwd?: string): Promise<string> => {
+	const paths = await ensureStore(cwd);
 	const normalized = target?.trim().toLowerCase();
+	if (normalized === "project" || normalized === "memory.project" || normalized === "project.md") return paths.project;
 	if (normalized === "memory" || normalized === "memory.md") return paths.memory;
 	if (normalized === "scratchpad" || normalized === "scratchpad.md") return paths.scratchpad;
 	if (normalized === "daily" || normalized === "today" || normalized === "today daily") {
@@ -476,6 +523,7 @@ const buildCommandPathMessage = async (target: string | undefined): Promise<stri
 		`Memory directory: ${paths.dir}`,
 		`MEMORY.md (global): ${paths.memory}`,
 		`MEMORY.local.md (this machine): ${paths.memoryLocal}`,
+		`MEMORY.md (project): ${paths.project}${existsSync(paths.project) ? "" : " (not created yet)"}`,
 		`SCRATCHPAD.md: ${paths.scratchpad}`,
 		`Today: ${paths.today}`,
 	].join("\n");
@@ -491,8 +539,8 @@ export default function memoryExtension(pi: ExtensionAPI) {
 		}
 	});
 
-	pi.on("before_agent_start", async (event) => {
-		const paths = await ensureStore();
+	pi.on("before_agent_start", async (event, ctx) => {
+		const paths = await ensureStore(ctx.cwd);
 
 		// Render one MEMORY file into a labeled prompt section, truncating with an
 		// outline fallback so a large file still exposes its section map.
@@ -526,6 +574,12 @@ export default function memoryExtension(pi: ExtensionAPI) {
 					"scope=local",
 					"The following content is from `~/.pi/agent/memory/MEMORY.local.md` (specific to THIS machine, not synced). Treat it as persistent machine-local context.",
 				),
+				renderBlock(
+					paths.project,
+					"## Project memory (this repo)",
+					"scope=project",
+					`The following content is from this project's memory file at \`${paths.project}\` (scope=project; specific to this repo/working tree, not synced globally). Treat it as persistent project context.`,
+				),
 			])
 		).filter((block): block is string => block !== null);
 
@@ -539,11 +593,11 @@ export default function memoryExtension(pi: ExtensionAPI) {
 			const trimmed = args.trim();
 			let target = trimmed;
 			if (!target && ctx.hasUI) {
-				const choice = await ctx.ui.select("Memory", ["directory", "MEMORY.md", "MEMORY.local.md", "SCRATCHPAD.md", "today daily"]);
+				const choice = await ctx.ui.select("Memory", ["directory", "MEMORY.md", "MEMORY.local.md", "project", "SCRATCHPAD.md", "today daily"]);
 				if (!choice) return;
 				target = choice;
 			}
-			const message = await buildCommandPathMessage(target);
+			const message = await buildCommandPathMessage(target, ctx.cwd);
 			ctx.ui.notify(message, "info");
 		},
 	});
@@ -558,25 +612,26 @@ export default function memoryExtension(pi: ExtensionAPI) {
 		promptGuidelines: [
 			"Use memory opportunistically when durable preferences, recurring facts, decisions, discoveries, or follow-up tasks would help future pi sessions.",
 			"Use memory target=memory for stable long-term facts/preferences; target=scratchpad for uncertain reminders or cleanup items; target=daily for timestamped session facts, decisions, and discoveries.",
-			"For target=memory, choose scope: omit/scope=global for portable facts that apply across all machines and contexts (preferences, general tooling/process lessons); scope=local for facts specific to THIS machine (its role e.g. work vs personal, machine-bound paths, machine/project-specific operational context). Global memory is committed and synced; local memory stays on this machine.",
+			"For target=memory, choose scope: omit/scope=global for portable facts that apply across all machines and contexts (preferences, general tooling/process lessons); scope=local for facts specific to THIS machine (its role e.g. work vs personal, machine-bound paths); scope=project for facts tied to the CURRENT repo/project (architecture, build commands, project-specific gotchas) — stored in <repo>/.pi/memory/MEMORY.md, which travels with the working tree. Global is committed+synced; local stays on this machine; project lives in the repo.",
 			"When appending to target=memory, pass a well-formed Markdown block (e.g. a `### Title` heading plus body). Set `section` to an EXISTING `##` heading to insert under it; if the section doesn't exist the append is rejected (with the section list) rather than fragmenting the file. To create a new section, append a block whose first line is `## Title` and omit `section`. Don't append bare bullets or `- ##` headers.",
 			"To inspect part of a large MEMORY.md, call read with `section=\"<## heading>\"` rather than reading the whole file; a read that truncates appends an outline of available sections.",
 			"Use memory search/read before adding long-term memory when duplication or conflict is likely.",
 			"Do not store secrets, credentials, private tokens, or highly ephemeral implementation details in memory.",
 		],
 		parameters: MemoryParamsSchema,
-		async execute(_toolCallId, params: MemoryParams) {
+		async execute(_toolCallId, params: MemoryParams, _signal, _onUpdate, ctx) {
 			let output: { text: string; files: string[]; count?: number };
+			const cwd = ctx?.cwd;
 
 			switch (params.action) {
 				case "read": {
 					if (params.section?.trim() && (params.target ?? "memory") !== "all") {
-						const result = await readSection(params.target, params.section.trim(), params.scope);
+						const result = await readSection(params.target, params.section.trim(), params.scope, cwd);
 						const truncated = truncateText(result.text, TOOL_READ_MAX_CHARS);
 						output = { text: truncated.text, files: result.files };
 						break;
 					}
-					const result = await readTarget(params.target, params.scope);
+					const result = await readTarget(params.target, params.scope, cwd);
 					const truncated = truncateText(result.text, TOOL_READ_MAX_CHARS);
 					const text =
 						truncated.truncated && (params.target ?? "memory") === "memory"
@@ -586,13 +641,13 @@ export default function memoryExtension(pi: ExtensionAPI) {
 					break;
 				}
 				case "search":
-					output = await searchMemory(params);
+					output = await searchMemory(params, cwd);
 					break;
 				case "append":
-					output = await appendToTarget(params);
+					output = await appendToTarget(params, cwd);
 					break;
 				case "replace":
-					output = await replaceInTarget(params);
+					output = await replaceInTarget(params, cwd);
 					break;
 				case "scratch_done":
 					output = await markScratchDone(params);

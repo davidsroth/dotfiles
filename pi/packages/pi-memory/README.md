@@ -17,25 +17,42 @@ The extension stores Markdown files under:
 
 If `PI_CODING_AGENT_DIR` is set, the extension uses `$PI_CODING_AGENT_DIR/memory` instead.
 
-## Scopes: global vs local
+Project-scoped memory lives in the current repo instead of the central store:
 
-Curated memory has two scopes:
+```txt
+<project-root>/.pi/memory/MEMORY.md   # Project/repo-scoped memory
+```
+
+The project root is the nearest ancestor of the session's working directory that
+contains a `.git` entry (falling back to the cwd when not in a work tree),
+matching pi's existing `<cwd>/.pi/agents/` convention. The file is created
+lazily on the first `scope="project"` write, so it never litters repos you only
+read from. Commit it or add it to `.gitignore` as you prefer.
+
+## Scopes: global vs local vs project
+
+Curated memory has three scopes:
 
 - **global** (`MEMORY.md`) — portable facts/preferences that apply across all
   machines and contexts. Intended to be tracked in version control and synced.
 - **local** (`MEMORY.local.md`) — facts specific to *this* machine (its role,
-  machine-bound paths, machine/project-specific operational context). Not synced.
+  machine-bound paths, machine-specific operational context). Not synced.
+- **project** (`<repo>/.pi/memory/MEMORY.md`) — facts tied to the *current*
+  repo/project (architecture, build commands, project-specific gotchas). Travels
+  with the working tree, so a session in repo A never sees repo B's project
+  memory.
 
-Both files are injected into the system prompt (clearly labeled). The `memory`
-tool's `scope` parameter (`global` by default, or `local`) selects which file
-`read`/`append`/`replace` operate on for `target=memory`. `search` always spans
-both (and `daily`/`scratchpad`), with a `file › section` breadcrumb.
+All present files are injected into the system prompt (clearly labeled). The
+`memory` tool's `scope` parameter (`global` by default, or `local`/`project`)
+selects which file `read`/`append`/`replace` operate on for `target=memory`.
+`search` always spans the central store *and* the current project's memory (plus
+`daily`/`scratchpad`), with a `file › section` breadcrumb.
 
 `SCRATCHPAD.md` and `daily/` are inherently per-machine and have no scope.
 
 ## Behavior
 
-- `MEMORY.md` (global) and `MEMORY.local.md` (this machine) are automatically injected into the system prompt as separate labeled sections, each capped to a small size. When a file exceeds the cap, an outline of its `##`/`###` section headings is appended so the model can `read` a specific section on demand.
+- `MEMORY.md` (global), `MEMORY.local.md` (this machine), and the project's `.pi/memory/MEMORY.md` (when it exists) are automatically injected into the system prompt as separate labeled sections, each capped to a small size. When a file exceeds the cap, an outline of its `##`/`###` section headings is appended so the model can `read` a specific section on demand.
 - The model can call the `memory` tool to read, search, append, update curated memory, or mark scratchpad items done.
 - `MEMORY.md` is treated as sectioned Markdown: appends place a well-formed block (no bullet wrapper) under a named `section`, and reads/searches are section-aware. Code fences are respected, so `#` lines inside ``` blocks aren't mistaken for headings.
 - Daily files are append-only through the tool.
@@ -47,9 +64,9 @@ The extension registers one tool: `memory`.
 
 Actions:
 
-- `read` — read `memory`, `scratchpad`, `daily`, or `all`. For `memory`, pass `scope="global"` (default) or `scope="local"` to choose the file, and `section="<## heading>"` to read just that section; a truncated full read appends a section outline.
-- `search` — case-insensitive text search across all memory files (both global and local); results include a `file › section › subsection` breadcrumb.
-- `append` — append to `memory`, `scratchpad`, or today's `daily` log. For `memory`, pass `scope` (`global` default / `local`) and a well-formed Markdown block; optional `section` inserts it under an **existing** `##` heading (a missing section is rejected with the section list, not auto-created — create one by appending a block whose first line is `## Title`).
+- `read` — read `memory`, `scratchpad`, `daily`, or `all`. For `memory`, pass `scope="global"` (default), `scope="local"`, or `scope="project"` to choose the file, and `section="<## heading>"` to read just that section; a truncated full read appends a section outline.
+- `search` — case-insensitive text search across the central memory files (global + local + scratchpad + daily) and the current project's memory; results include a `file › section › subsection` breadcrumb.
+- `append` — append to `memory`, `scratchpad`, or today's `daily` log. For `memory`, pass `scope` (`global` default / `local` / `project`) and a well-formed Markdown block; optional `section` inserts it under an **existing** `##` heading (a missing section is rejected with the section list, not auto-created — create one by appending a block whose first line is `## Title`).
 - `replace` — exact text replacement in `MEMORY.md` or `SCRATCHPAD.md`.
 - `scratch_done` — mark one incomplete scratchpad checkbox complete by query.
 
@@ -57,4 +74,4 @@ Actions:
 
 `/memory` shows the storage location and common file paths.
 
-`/memory memory`, `/memory local`, `/memory scratchpad`, and `/memory daily` print the selected file path.
+`/memory memory`, `/memory local`, `/memory project`, `/memory scratchpad`, and `/memory daily` print the selected file path.
