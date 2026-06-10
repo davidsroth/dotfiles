@@ -5,31 +5,31 @@
  * User can run /markup to review the agent's last message.
  * Browser opens a clean review page: select text to annotate, reply, approve, or send feedback.
  * Inherits the active pi theme for colors.
+ *
+ * Theme/server/browser/markdown helpers are shared via ../_review and ./markdown.
  */
 
-import { exec, execFile } from "node:child_process";
-import { randomBytes } from "node:crypto";
-import { mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
-import { createServer } from "node:http";
-import { basename, dirname, extname, resolve } from "node:path";
-import { promisify } from "node:util";
+import { readFileSync, statSync } from "node:fs";
+import { extname, resolve } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-
-const execAsync = promisify(exec);
-const execFileAsync = promisify(execFile);
+import { escapeHtml, scriptJson } from "../_review/html";
+import { createReviewServer } from "../_review/server";
+import { buildPalette, loadTheme, type Palette, rootVarsBlock } from "../_review/theme";
+import { toolText } from "../_review/tool";
+import { mdToHtml } from "./markdown";
 
 // ── Types ──────────────────────────────────────────────────────────────
 
-interface PlanComment {
+export interface PlanComment {
 	id: number;
 	selectedText: string;
 	context?: string;
 	text: string;
 }
 
-type ReviewAction = "approve" | "send-feedback" | "reply";
+export type ReviewAction = "approve" | "send-feedback" | "reply" | "cancel";
 
-interface ReviewResult {
+export interface ReviewResult {
 	action?: ReviewAction;
 	approved: boolean;
 	feedback?: string;
@@ -56,23 +56,6 @@ interface ReviewPageOptions {
 }
 
 // ── Utilities ──────────────────────────────────────────────────────────
-
-function escapeHtml(str: string): string {
-	return str
-		.replace(/&/g, "&amp;")
-		.replace(/</g, "&lt;")
-		.replace(/>/g, "&gt;")
-		.replace(/"/g, "&quot;")
-		.replace(/'/g, "&#x27;");
-}
-
-function scriptJson(value: unknown): string {
-	return JSON.stringify(value)
-		.replace(/</g, "\\u003c")
-		.replace(/>/g, "\\u003e")
-		.replace(/\u2028/g, "\\u2028")
-		.replace(/\u2029/g, "\\u2029");
-}
 
 function resolveMarkdownPath(input: string, cwd: string): string | null {
 	if (!input) return null;
@@ -108,7 +91,7 @@ interface AssistantTextResult {
  * empty/aborted reply), we report it as incomplete so the caller can show a
  * useful message.
  */
-function findLastAssistantText(branchEntries: readonly unknown[]): AssistantTextResult | null {
+export function findLastAssistantText(branchEntries: readonly unknown[]): AssistantTextResult | null {
 	for (let i = branchEntries.length - 1; i >= 0; i--) {
 		const entry = branchEntries[i] as { type?: string; id?: string; timestamp?: string; message?: unknown } | null | undefined;
 		if (!entry || entry.type !== "message") continue;
@@ -134,317 +117,17 @@ function findLastAssistantText(branchEntries: readonly unknown[]): AssistantText
 	return null;
 }
 
-function loadTheme(ctx: ExtensionContext): { colors: Record<string, string>; isLight: boolean } {
-	let colors: Record<string, string> = {};
-	let isLight = false;
-	try {
-		const theme = (ctx as unknown as Record<string, unknown>)?.theme;
-		if (theme && typeof theme === "object") {
-			const themeAny = theme as Record<string, unknown>;
-			const sourcePath = themeAny.sourcePath ? String(themeAny.sourcePath) : undefined;
-			if (sourcePath) {
-				const json = JSON.parse(readFileSync(sourcePath, "utf-8")) as Record<string, unknown>;
-				colors = resolveThemeColors(json);
-				isLight = json.name === "light" || String(json.name).toLowerCase().includes("light");
-			}
-		}
-	} catch (e) {
-		console.log("[Plan] theme load failed:", e);
-	}
-	return { colors, isLight };
-}
+// ── CSS ────────────────────────────────────────────────────────────────
 
-function renderInline(md: string): string {
-	const codeSpans: string[] = [];
-	let html = escapeHtml(md).replace(/`([^`\n]+)`/g, (_match, code: string) => {
-		const token = `@@CODE${codeSpans.length}@@`;
-		codeSpans.push(`<code>${code}</code>`);
-		return token;
-	});
-
-	html = html.replace(/~~(.+?)~~/g, "<del>$1</del>");
-	html = html.replace(/\*\*\*(.+?)\*\*\*/g, "<strong><em>$1</em></strong>");
-	html = html.replace(/___(.+?)___/g, "<strong><em>$1</em></strong>");
-	html = html.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
-	html = html.replace(/__(.+?)__/g, "<strong>$1</strong>");
-	html = html.replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, "$1<em>$2</em>");
-	html = html.replace(/(^|[^_])_([^_\n]+)_(?!_)/g, "$1<em>$2</em>");
-	html = html.replace(
-		/\[([^\]]+)\]\((https?:\/\/[^\s)]+|#[^\s)]+|\/[^\s)]+)\)/g,
-		'<a href="$2" target="_blank" rel="noreferrer">$1</a>',
-	);
-
-	for (let i = 0; i < codeSpans.length; i++) {
-		html = html.replace(`@@CODE${i}@@`, codeSpans[i] ?? "");
-	}
-	return html;
-}
-
-function isHr(line: string): boolean {
-	return /^\s{0,3}([-*_])(?:\s*\1){2,}\s*$/.test(line);
-}
-
-function isFenceStart(line: string): RegExpMatchArray | null {
-	return line.match(/^\s{0,3}(`{3,}|~{3,})\s*([^`]*)\s*$/);
-}
-
-function isTableSeparator(line: string): boolean {
-	return /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(line);
-}
-
-function splitTableRow(line: string): string[] {
-	let trimmed = line.trim();
-	if (trimmed.startsWith("|")) trimmed = trimmed.slice(1);
-	if (trimmed.endsWith("|")) trimmed = trimmed.slice(0, -1);
-	return trimmed.split("|").map((cell) => cell.trim());
-}
-
-function isBlockStart(lines: string[], index: number): boolean {
-	const line = lines[index] ?? "";
-	const next = lines[index + 1] ?? "";
-	return (
-		line.trim() === "" ||
-		isFenceStart(line) !== null ||
-		/^\s{0,3}#{1,6}\s+/.test(line) ||
-		isHr(line) ||
-		/^\s{0,3}>/.test(line) ||
-		/^\s*(?:[-*+]|\d+[.)])\s+/.test(line) ||
-		(line.includes("|") && isTableSeparator(next))
-	);
-}
-
-interface ListLine {
-	indent: number;
-	ordered: boolean;
-	text: string;
-}
-
-function parseListLine(line: string): ListLine | null {
-	const match = line.match(/^(\s*)((?:[-*+])|(?:\d+[.)]))\s+(.+)$/);
-	if (!match) return null;
-	return {
-		indent: (match[1] ?? "").replace(/\t/g, "    ").length,
-		ordered: /\d/.test(match[2] ?? ""),
-		text: match[3] ?? "",
-	};
-}
-
-function renderListItemText(text: string): { html: string; className: string } {
-	const task = text.match(/^\[([ xX])\]\s+(.+)$/);
-	if (!task) return { html: renderInline(text), className: "" };
-	const checked = (task[1] ?? "").toLowerCase() === "x";
-	return {
-		html: `<span class="bx">[${checked ? "x" : " "}]</span> ${renderInline(task[2] ?? "")}`,
-		className: ` class="task${checked ? " done" : ""}"`,
-	};
-}
-
-function renderListAt(lines: string[], start: number, indent: number, ordered: boolean): { html: string; next: number } {
-	const tag = ordered ? "ol" : "ul";
-	const items: string[] = [];
-	let i = start;
-
-	while (i < lines.length) {
-		const parsed = parseListLine(lines[i] ?? "");
-		if (!parsed || parsed.indent < indent) break;
-
-		if (parsed.indent > indent) {
-			if (items.length === 0) break;
-			const nested = renderListAt(lines, i, parsed.indent, parsed.ordered);
-			items[items.length - 1] = `${items[items.length - 1]?.replace(/<\/li>$/, "") ?? ""}${nested.html}</li>`;
-			i = nested.next;
-			continue;
-		}
-
-		if (parsed.ordered !== ordered) break;
-
-		const rendered = renderListItemText(parsed.text);
-		let itemHtml = `<li${rendered.className}>${rendered.html}`;
-		i++;
-
-		while (i < lines.length) {
-			const next = parseListLine(lines[i] ?? "");
-			if (!next || next.indent <= indent) break;
-			const nested = renderListAt(lines, i, next.indent, next.ordered);
-			itemHtml += nested.html;
-			i = nested.next;
-		}
-
-		items.push(`${itemHtml}</li>`);
-	}
-
-	return { html: `<${tag}>${items.join("\n")}</${tag}>`, next: i };
-}
-
-function renderListBlock(lines: string[], start: number): { html: string; next: number } | null {
-	const first = parseListLine(lines[start] ?? "");
-	if (!first) return null;
-	return renderListAt(lines, start, first.indent, first.ordered);
-}
-
-function mdToHtml(md: string): string {
-	const lines = md.replace(/\r\n/g, "\n").split("\n");
-	const out: string[] = [];
-	let i = 0;
-
-	while (i < lines.length) {
-		const line = lines[i] ?? "";
-		if (line.trim() === "") { i++; continue; }
-
-		const fence = isFenceStart(line);
-		if (fence) {
-			const marker = fence[1] ?? "```";
-			const char = marker[0] ?? "`";
-			const len = marker.length;
-			const lang = (fence[2] ?? "").trim().split(/\s+/)[0] ?? "";
-			i++;
-			const code: string[] = [];
-			while (i < lines.length) {
-				const candidate = lines[i] ?? "";
-				if (new RegExp(`^\\s{0,3}${char}{${len},}\\s*$`).test(candidate)) { i++; break; }
-				code.push(candidate);
-				i++;
-			}
-			const langAttr = lang ? ` data-lang="${escapeHtml(lang)}"` : "";
-			out.push(`<pre${langAttr}><code>${escapeHtml(code.join("\n"))}</code></pre>`);
-			continue;
-		}
-
-		const heading = line.match(/^\s{0,3}(#{1,6})\s+(.+?)\s*#*\s*$/);
-		if (heading) {
-			const level = heading[1]?.length ?? 1;
-			out.push(`<h${level}>${renderInline(heading[2] ?? "")}</h${level}>`);
-			i++;
-			continue;
-		}
-
-		if (isHr(line)) {
-			out.push("<hr>");
-			i++;
-			continue;
-		}
-
-		if (/^\s{0,3}>/.test(line)) {
-			const quoted: string[] = [];
-			while (i < lines.length && /^\s{0,3}>/.test(lines[i] ?? "")) {
-				quoted.push((lines[i] ?? "").replace(/^\s{0,3}>\s?/, ""));
-				i++;
-			}
-			out.push(`<blockquote>${mdToHtml(quoted.join("\n"))}</blockquote>`);
-			continue;
-		}
-
-		if (line.includes("|") && isTableSeparator(lines[i + 1] ?? "")) {
-			const headers = splitTableRow(line);
-			i += 2;
-			const rows: string[][] = [];
-			while (i < lines.length && (lines[i] ?? "").includes("|") && (lines[i] ?? "").trim() !== "") {
-				rows.push(splitTableRow(lines[i] ?? ""));
-				i++;
-			}
-			out.push(
-				`<table><thead><tr>${headers.map((h) => `<th>${renderInline(h)}</th>`).join("")}</tr></thead>` +
-				`<tbody>${rows.map((row) => `<tr>${headers.map((_h, idx) => `<td>${renderInline(row[idx] ?? "")}</td>`).join("")}</tr>`).join("")}</tbody></table>`,
-			);
-			continue;
-		}
-
-		const listBlock = renderListBlock(lines, i);
-		if (listBlock) {
-			out.push(listBlock.html);
-			i = listBlock.next;
-			continue;
-		}
-
-		const para: string[] = [];
-		while (i < lines.length && !isBlockStart(lines, i)) {
-			para.push(lines[i] ?? "");
-			i++;
-		}
-		if (para.length === 0) {
-			out.push(`<p>${renderInline(line)}</p>`);
-			i++;
-		} else {
-			out.push(`<p>${para.map(renderInline).join("<br>")}</p>`);
-		}
-	}
-
-	return out.join("\n");
-}
-
-// ── Theme helpers ──────────────────────────────────────────────────────
-
-function ansi256ToHex(index: number): string {
-	const basic = ["#000000","#800000","#008000","#808000","#000080","#800080","#008080","#c0c0c0","#808080","#ff0000","#00ff00","#ffff00","#0000ff","#ff00ff","#00ffff","#ffffff"];
-	if (index < 16) return basic[index];
-	if (index < 232) {
-		const ci = index - 16;
-		const r = Math.floor(ci / 36), g = Math.floor((ci % 36) / 6), b = ci % 6;
-		const h = (n: number) => (n === 0 ? 0 : 55 + n * 40).toString(16).padStart(2, "0");
-		return `#${h(r)}${h(g)}${h(b)}`;
-	}
-	const gray = 8 + (index - 232) * 10;
-	const gh = gray.toString(16).padStart(2, "0");
-	return `#${gh}${gh}${gh}`;
-}
-
-function contrastText(bgHex: string): string {
-	const hex = bgHex.replace("#", "");
-	const r = parseInt(hex.slice(0, 2), 16);
-	const g = parseInt(hex.slice(2, 4), 16);
-	const b = parseInt(hex.slice(4, 6), 16);
-	const yiq = (r * 299 + g * 587 + b * 114) / 1000;
-	return yiq >= 140 ? "#111111" : "#ffffff";
-}
-
-function resolveThemeColors(json: Record<string, unknown>): Record<string, string> {
-	const vars = (json.vars as Record<string, string | number>) ?? {};
-	const raw = (json.colors as Record<string, string | number>) ?? {};
-	const resolved: Record<string, string> = {};
-	for (const [k, v] of Object.entries(raw)) {
-		if (typeof v === "number") resolved[k] = ansi256ToHex(v);
-		else if (typeof v === "string" && v.startsWith("#")) resolved[k] = v;
-		else if (typeof v === "string" && vars[v]) {
-			const rv = vars[v];
-			resolved[k] = typeof rv === "number" ? ansi256ToHex(rv) : rv;
-		} else if (typeof v === "string" && v !== "") resolved[k] = v;
-	}
-	return resolved;
-}
-
-function buildCss(colors: Record<string, string>, isLight: boolean): string {
-	const accent = colors.accent ?? (isLight ? "#2563eb" : "#60a5fa");
-	const success = colors.success ?? (isLight ? "#16a34a" : "#22c55e");
-	const error = colors.error ?? (isLight ? "#dc2626" : "#ef4444");
-	const border = colors.border ?? (isLight ? "#ddd" : "#444");
-	const muted = colors.muted ?? (isLight ? "#666" : "#999");
-	const pageBg = isLight ? "#faf9f7" : "#1a1a1a";
-	const pageFg = isLight ? "#1a1a1a" : "#e8e6e3";
-	const codeBg = isLight ? "#f3f3f3" : "#2a2a2a";
-	const hl = isLight ? "#fef3c7" : "#451a03";
+function buildCss(palette: Palette): string {
+	const extraVars =
+		`  --hl: ${palette.hl};\n` +
+		`  --side: 360px;\n` +
+		`  --interactive-subtle: color-mix(in oklab, var(--interactive) 15%, var(--surface));\n` +
+		`  --danger: ${palette.error};\n`;
 
 	return `
-:root {
-  --surface: ${pageBg};
-  --surface-elevated: color-mix(in oklab, ${pageBg} 95%, ${pageFg});
-  --text: ${pageFg};
-  --text-muted: ${muted};
-  --border: ${border};
-  --code-bg: ${codeBg};
-  --hl: ${hl};
-  --side: 360px;
-
-  --interactive: ${accent};
-  --interactive-text: ${contrastText(accent)};
-  --interactive-hover: color-mix(in oklab, var(--interactive) 80%, black);
-  --interactive-subtle: color-mix(in oklab, var(--interactive) 15%, var(--surface));
-
-  --success: ${success};
-  --success-text: ${contrastText(success)};
-  --success-hover: color-mix(in oklab, var(--success) 80%, black);
-
-  --danger: ${error};
-}
+${rootVarsBlock(palette, extraVars)}
 
 * { box-sizing: border-box; margin: 0; }
 html, body { height: 100%; overflow: hidden; }
@@ -547,32 +230,7 @@ button.success:hover { background: var(--success-hover); }
 `;
 }
 
-// ── Browser ────────────────────────────────────────────────────────────
-
-async function openBrowser(url: string): Promise<void> {
-	const cmd = process.platform === "darwin" ? `open "${url}"` : process.platform === "win32" ? `start "" "${url}"` : `xdg-open "${url}"`;
-	try { await execAsync(cmd); } catch { /* user navigates manually */ }
-}
-
-async function getFrontmostAppName(): Promise<string | null> {
-	if (process.platform !== "darwin") return null;
-	try {
-		const { stdout } = await execFileAsync("osascript", [
-			"-e",
-			'tell application "System Events" to get name of first application process whose frontmost is true',
-		]);
-		return stdout.trim() || null;
-	} catch {
-		return null;
-	}
-}
-
-function focusApp(appName: string | null): void {
-	if (process.platform !== "darwin" || !appName) return;
-	setTimeout(() => {
-		void execFileAsync("osascript", ["-e", `tell application ${JSON.stringify(appName)} to activate`]).catch(() => undefined);
-	}, 800);
-}
+// ── Page options ─────────────────────────────────────────────────────────
 
 const PLAN_REVIEW_OPTIONS: ReviewPageOptions = {
 	title: "Plan Review",
@@ -601,9 +259,49 @@ const LAST_REPLY_OPTIONS: ReviewPageOptions = {
 	timeoutFeedback: "",
 };
 
-function buildPage(content: string, options: ReviewPageOptions, colors: Record<string, string>, isLight: boolean, nonce: string): string {
+// ── Decision parsing ─────────────────────────────────────────────────────
+
+const VALID_ACTIONS = new Set<ReviewAction>(["approve", "send-feedback", "reply", "cancel"]);
+
+function parseComments(raw: unknown): PlanComment[] {
+	if (!Array.isArray(raw)) return [];
+	const out: PlanComment[] = [];
+	for (const item of raw) {
+		if (!item || typeof item !== "object") continue;
+		const c = item as Record<string, unknown>;
+		const selectedText = typeof c.selectedText === "string" ? c.selectedText : "";
+		const text = typeof c.text === "string" ? c.text : "";
+		if (!text.trim()) continue;
+		out.push({
+			id: typeof c.id === "number" ? c.id : out.length + 1,
+			selectedText,
+			context: typeof c.context === "string" ? c.context : undefined,
+			text,
+		});
+	}
+	return out;
+}
+
+/** Validate + normalize a posted review decision (nonce already verified). */
+export function parseReviewDecision(data: Record<string, unknown>): ReviewResult {
+	const rawAction = data.action;
+	const action: ReviewAction | undefined =
+		typeof rawAction === "string" && VALID_ACTIONS.has(rawAction as ReviewAction)
+			? (rawAction as ReviewAction)
+			: undefined;
+	return {
+		action,
+		approved: data.approved === true,
+		feedback: typeof data.feedback === "string" ? data.feedback : undefined,
+		comments: parseComments(data.comments),
+	};
+}
+
+// ── Page rendering ───────────────────────────────────────────────────────
+
+function buildPage(content: string, options: ReviewPageOptions, palette: Palette, nonce: string): string {
 	const body = mdToHtml(content);
-	const css = buildCss(colors, isLight);
+	const css = buildCss(palette);
 	const buttons = options.buttons.map((button) => (
 		`<button class="${button.variant}" data-action="${escapeHtml(button.action)}" data-approved="${button.approved ? "true" : "false"}" data-done="${escapeHtml(button.doneText)}">[ ${escapeHtml(button.label)} ]</button>`
 	)).join("\n      ");
@@ -646,6 +344,7 @@ let comments=[];
 let nextId=1;
 let floater=null;
 let draft=null;
+let sent=false;
 function $(id){return document.getElementById(id);}
 
 function unwrapHighlight(span){
@@ -881,9 +580,11 @@ function sendDefault(action){
 }
 
 async function send(action,fallbackAction,approved,doneText){
+  if(sent)return;
   const finalAction=action||fallbackAction;
   const feedback=$('general').value.trim();
   const payload={nonce:pageOptions.nonce,action:finalAction,approved,feedback,comments:comments.filter(c=>c.text.trim())};
+  sent=true;
   document.querySelectorAll('button[data-action]').forEach(b=>b.disabled=true);
   $('load').style.display='block';
   try{
@@ -898,6 +599,7 @@ async function send(action,fallbackAction,approved,doneText){
     }else{throw new Error('status '+r.status);}
   }catch(e){
     console.error('[Review] fetch error',e);
+    sent=false;
     document.querySelectorAll('button[data-action]').forEach(b=>b.disabled=false);
     $('load').style.display='none';
     alert('Failed to send. Check console and try again.');
@@ -917,98 +619,104 @@ document.addEventListener('keydown',e=>{
 $('general').addEventListener('keydown',e=>{
   if(e.key==='Enter'&&e.shiftKey){e.preventDefault();sendDefault(pageOptions.textareaShortcutAction);}
 });
+
+// Best-effort cancel on tab close so closing the window releases the agent
+// immediately instead of blocking until the 30-minute timeout.
+window.addEventListener('beforeunload',()=>{
+  if(sent)return;
+  try{
+    const blob=new Blob([JSON.stringify({nonce:pageOptions.nonce,action:'cancel',approved:false,feedback:'',comments:[]})],{type:'application/json'});
+    navigator.sendBeacon('/decision',blob);
+  }catch(e){}
+});
 </script>
 </body>
 </html>`;
 }
 
-function startServer(content: string, options: ReviewPageOptions, colors: Record<string, string>, isLight: boolean, onUrl?: (url: string) => void): Promise<ReviewResult> {
-	return new Promise((resolve, reject) => {
-		let done = false;
-		let timeout: ReturnType<typeof setTimeout> | undefined;
-		let returnFocusApp: string | null = null;
-		const nonce = randomBytes(16).toString("hex");
+// ── Result formatting (pure; exported for tests) ─────────────────────────
 
-		const closeSoon = (finish: () => void) => {
-			setTimeout(() => {
-				server.closeAllConnections?.();
-				server.close(finish);
-			}, 150);
-		};
+const MAX_CONTEXT_LEN = 240;
 
-		const server = createServer((req, res) => {
-			if (req.method === "OPTIONS") { res.writeHead(403); res.end(); return; }
-			if (req.method === "POST" && req.url === "/decision") {
-				let body = "";
-				req.on("data", (c) => {
-					body += c;
-					if (body.length > 1_000_000) req.destroy();
-				});
-				req.on("end", () => {
-					if (done) {
-						res.writeHead(200, { "Content-Type": "application/json" });
-						res.end(JSON.stringify({ ok: true, duplicate: true }));
-						return;
-					}
-					try {
-						const data = JSON.parse(body) as ReviewResult & { nonce?: string };
-						if (data.nonce !== nonce) {
-							res.writeHead(403, { "Content-Type": "application/json" });
-							res.end(JSON.stringify({ error: "bad nonce" }));
-							return;
-						}
-						delete data.nonce;
-						done = true;
-						if (timeout) clearTimeout(timeout);
-						res.writeHead(200, { "Content-Type": "application/json" });
-						res.end(JSON.stringify({ ok: true }), () => {
-							focusApp(returnFocusApp);
-							closeSoon(() => resolve(data));
-						});
-					} catch {
-						res.writeHead(400, { "Content-Type": "application/json" });
-						res.end(JSON.stringify({ error: "bad json" }));
-					}
-				});
-				return;
-			}
-			res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
-			res.end(buildPage(content, options, colors, isLight, nonce));
-		});
-		server.once("error", (err) => {
-			if (!done) {
-				done = true;
-				if (timeout) clearTimeout(timeout);
-				reject(err);
-			}
-		});
-		server.listen(0, "127.0.0.1", () => {
-			void (async () => {
-				try {
-					const addr = server.address();
-					if (!addr || typeof addr === "string") throw new Error("bind failed");
-					returnFocusApp = await getFrontmostAppName();
-					const url = `http://127.0.0.1:${addr.port}`;
-					try { onUrl?.(url); } catch { /* notify is best-effort */ }
-					await openBrowser(url);
-				} catch (err) {
-					if (!done) {
-						done = true;
-						if (timeout) clearTimeout(timeout);
-						server.closeAllConnections?.();
-						server.close(() => reject(err instanceof Error ? err : new Error(String(err))));
-					}
-				}
-			})();
-		});
-		timeout = setTimeout(() => {
-			if (!done) {
-				done = true;
-				server.closeAllConnections?.();
-				server.close(() => resolve({ action: options.defaultAction, approved: false, feedback: options.timeoutFeedback }));
-			}
-		}, 30 * 60 * 1000);
+export function truncate(s: string, max: number): string {
+	if (s.length <= max) return s;
+	return `${s.slice(0, max - 1).trimEnd()}\u2026`;
+}
+
+/** Bullet form, used by the `submit_plan` feedback path only. */
+function formatCommentBullets(comments: PlanComment[] | undefined): string[] {
+	if (!comments || comments.length === 0) return [];
+	return comments.map((c) => {
+		if (c.context && c.context !== c.selectedText) {
+			return `- \u201c${c.selectedText}\u201d (in: \u201c${truncate(c.context, MAX_CONTEXT_LEN)}\u201d) \u2014 ${c.text}`;
+		}
+		return `- \u201c${c.selectedText}\u201d \u2014 ${c.text}`;
 	});
+}
+
+export function formatPlanFeedback(result: ReviewResult): string {
+	const parts: string[] = [];
+	const commentLines = formatCommentBullets(result.comments);
+	if (commentLines.length > 0) {
+		parts.push("## Inline comments\n");
+		parts.push(...commentLines);
+		parts.push("");
+	}
+	if (result.feedback) {
+		parts.push("## General feedback\n");
+		parts.push(result.feedback);
+	}
+	return parts.join("\n");
+}
+
+/** One inline note rendered as a markdown quote block + paragraph. */
+function formatCommentBlock(c: PlanComment): string {
+	const sel = c.selectedText.trim();
+	const ctx = c.context?.trim() ?? "";
+	const note = c.text.trim();
+	const lines: string[] = [`> \u201c${sel}\u201d`];
+	if (ctx && ctx !== sel) {
+		lines.push(`> _in: \u201c${truncate(ctx, MAX_CONTEXT_LEN)}\u201d_`);
+	}
+	lines.push("");
+	lines.push(note);
+	return lines.join("\n");
+}
+
+/**
+ * Format the captured /markup result as a user-message payload.
+ *
+ *   - 0 notes → just the typed reply (or empty, caller handles).
+ *   - 1 note, no separate reply text → single compact
+ *     `Re "sel": note` line, with `(in: "…")` only
+ *     when the surrounding block differs from the selection.
+ *   - otherwise → per-note quote blocks followed by the reply text
+ *     (if any), separated by blank lines.
+ *
+ * No entryId, short-id, or timestamp — the agent already has the
+ * previous assistant turn in context, and the heading was just noise.
+ */
+export function formatLastReply(result: ReviewResult): string {
+	const feedback = result.feedback?.trim() ?? "";
+	const comments = (result.comments ?? []).filter((c) => c.text.trim().length > 0);
+
+	if (comments.length === 0) return feedback;
+
+	if (comments.length === 1 && !feedback) {
+		const c = comments[0];
+		const sel = c.selectedText.trim();
+		const ctx = c.context?.trim() ?? "";
+		const note = c.text.trim();
+		if (!ctx || ctx === sel) {
+			return `Re \u201c${sel}\u201d: ${note}`;
+		}
+		return `Re \u201c${sel}\u201d (in: \u201c${truncate(ctx, MAX_CONTEXT_LEN)}\u201d): ${note}`;
+	}
+
+	const blocks: string[] = [];
+	for (const c of comments) blocks.push(formatCommentBlock(c));
+	if (feedback) blocks.push(feedback);
+	return blocks.join("\n\n");
 }
 
 // ── Extension ──────────────────────────────────────────────────────────
@@ -1018,89 +726,6 @@ export default function plan(pi: ExtensionAPI): void {
 
 	function persist(): void {
 		pi.appendEntry("plan", { currentPlanPath });
-	}
-
-	const MAX_CONTEXT_LEN = 240;
-
-	function truncate(s: string, max: number): string {
-		if (s.length <= max) return s;
-		return `${s.slice(0, max - 1).trimEnd()}\u2026`;
-	}
-
-	/** Bullet form, used by the `submit_plan` feedback path only. */
-	function formatCommentBullets(comments: PlanComment[] | undefined): string[] {
-		if (!comments || comments.length === 0) return [];
-		return comments.map((c) => {
-			if (c.context && c.context !== c.selectedText) {
-				return `- \u201c${c.selectedText}\u201d (in: \u201c${truncate(c.context, MAX_CONTEXT_LEN)}\u201d) \u2014 ${c.text}`;
-			}
-			return `- \u201c${c.selectedText}\u201d \u2014 ${c.text}`;
-		});
-	}
-
-	function formatPlanFeedback(result: ReviewResult): string {
-		const parts: string[] = [];
-		const commentLines = formatCommentBullets(result.comments);
-		if (commentLines.length > 0) {
-			parts.push("## Inline comments\n");
-			parts.push(...commentLines);
-			parts.push("");
-		}
-		if (result.feedback) {
-			parts.push("## General feedback\n");
-			parts.push(result.feedback);
-		}
-		return parts.join("\n");
-	}
-
-	/** One inline note rendered as a markdown quote block + paragraph. */
-	function formatCommentBlock(c: PlanComment): string {
-		const sel = c.selectedText.trim();
-		const ctx = c.context?.trim() ?? "";
-		const note = c.text.trim();
-		const lines: string[] = [`> \u201c${sel}\u201d`];
-		if (ctx && ctx !== sel) {
-			lines.push(`> _in: \u201c${truncate(ctx, MAX_CONTEXT_LEN)}\u201d_`);
-		}
-		lines.push("");
-		lines.push(note);
-		return lines.join("\n");
-	}
-
-	/**
-	 * Format the captured /markup result as a user-message payload.
-	 *
-	 *   - 0 notes \u2192 just the typed reply (or empty, caller handles).
-	 *   - 1 note, no separate reply text \u2192 single compact
-	 *     `Re \u201csel\u201d: note` line, with `(in: \u201c\u2026\u201d)` only
-	 *     when the surrounding block differs from the selection.
-	 *   - otherwise \u2192 reply text (if any) followed by per-note quote
-	 *     blocks, separated by blank lines.
-	 *
-	 * No entryId, short-id, or timestamp \u2014 the agent already has the
-	 * previous assistant turn in context, and the heading was just noise.
-	 */
-	function formatLastReply(result: ReviewResult, _found: AssistantTextResult): string {
-		const feedback = result.feedback?.trim() ?? "";
-		const comments = (result.comments ?? []).filter((c) => c.text.trim().length > 0);
-
-		if (comments.length === 0) return feedback;
-
-		if (comments.length === 1 && !feedback) {
-			const c = comments[0];
-			const sel = c.selectedText.trim();
-			const ctx = c.context?.trim() ?? "";
-			const note = c.text.trim();
-			if (!ctx || ctx === sel) {
-				return `Re \u201c${sel}\u201d: ${note}`;
-			}
-			return `Re \u201c${sel}\u201d (in: \u201c${truncate(ctx, MAX_CONTEXT_LEN)}\u201d): ${note}`;
-		}
-
-		const blocks: string[] = [];
-		if (feedback) blocks.push(feedback);
-		for (const c of comments) blocks.push(formatCommentBlock(c));
-		return blocks.join("\n\n");
 	}
 
 	pi.registerCommand("plan-status", {
@@ -1132,12 +757,22 @@ export default function plan(pi: ExtensionAPI): void {
 		}
 
 		const { colors, isLight } = loadTheme(ctx);
+		const palette = buildPalette(colors, isLight);
 
-		void startServer(found.text, LAST_REPLY_OPTIONS, colors, isLight, (url) => {
-			try { ctx.ui.notify(`Markup: opening last assistant message in browser: ${url}`, "info"); } catch {}
+		void createReviewServer<ReviewResult>({
+			renderPage: (nonce) => buildPage(found.text, LAST_REPLY_OPTIONS, palette, nonce),
+			parseDecision: parseReviewDecision,
+			onTimeout: () => ({ action: LAST_REPLY_OPTIONS.defaultAction, approved: false, feedback: LAST_REPLY_OPTIONS.timeoutFeedback }),
+			onUrl: (url) => {
+				try { ctx.ui.notify(`Markup: opening last assistant message in browser: ${url}`, "info"); } catch {}
+			},
 		})
 			.then((result) => {
-				const reply = formatLastReply(result, found).trim();
+				if (result.action === "cancel") {
+					ctx.ui.notify("Markup review dismissed.", "info");
+					return;
+				}
+				const reply = formatLastReply(result).trim();
 				if (!reply) {
 					ctx.ui.notify("No reply captured.", "info");
 					return;
@@ -1167,80 +802,90 @@ export default function plan(pi: ExtensionAPI): void {
 
 	pi.registerCommand("markup", {
 		description: "Open the last assistant message in the browser markup UI",
-		handler: (_args, ctx) => reviewLastAssistantMessage(ctx),
+		handler: async (_args, ctx) => { reviewLastAssistantMessage(ctx); },
 	});
 
 	pi.registerTool({
 		name: "submit_plan",
 		label: "Submit Plan",
 		description:
-			"Submit a markdown plan file for user review. The user can highlight text, " +
-			"add inline comments, and send feedback or approve. If feedback is sent, " +
-			"revise the same file and call this tool again.",
+			"Submit a plan or design for the user to review and sign off on before you implement a " +
+			"non-trivial change. Write the plan to a .md or .mdx file first, then call this tool with " +
+			"that file's path. The user can highlight text to add inline comments and either approve " +
+			"or send feedback; if feedback is sent, revise the same file and call this tool again.",
 		parameters: {
 			type: "object",
 			properties: {
-				filePath: { type: "string", description: "Path to the markdown plan file (.md or .mdx). Relative paths are resolved against cwd; absolute paths are allowed." },
+				filePath: { type: "string", description: "Path to the markdown plan file (.md or .mdx). The file must already exist — write the plan to it before calling. Relative paths are resolved against cwd; absolute paths are allowed." },
 			},
 			required: ["filePath"],
 		},
 
-		async execute(_id, params, _signal, _onUpdate, ctx) {
+		async execute(_id, params, _signal, _onUpdate, ctx: ExtensionContext) {
 			const inputPath = (params as { filePath?: string })?.filePath?.trim();
-			if (!inputPath) return { content: [{ type: "text", text: "Error: submit_plan requires filePath." }] };
+			if (!inputPath) return toolText("Error: submit_plan requires filePath.");
 			const fullPath = resolveMarkdownPath(inputPath, ctx.cwd);
 			if (!fullPath) {
-				return { content: [{ type: "text", text: `Error: file must be .md/.mdx. Got: ${inputPath}` }] };
+				return toolText(`Error: file must be .md/.mdx. Got: ${inputPath}`);
+			}
+
+			// Fail safe: the agent is expected to have written the plan first.
+			// Don't silently scaffold a placeholder the user would then "approve".
+			if (!statSync(fullPath, { throwIfNoEntry: false })?.isFile()) {
+				return toolText(`Error: ${inputPath} does not exist. Write the plan to that file first, then call submit_plan.`);
 			}
 			let content: string;
 			try {
-				if (!statSync(fullPath, { throwIfNoEntry: false })?.isFile()) {
-					// File doesn't exist yet — create it with a placeholder heading
-					const heading = `# ${basename(fullPath, extname(fullPath))}\n\n`;
-					mkdirSync(dirname(fullPath), { recursive: true });
-					writeFileSync(fullPath, heading, "utf-8");
-					content = heading;
-				} else {
-					content = readFileSync(fullPath, "utf-8");
-				}
+				content = readFileSync(fullPath, "utf-8");
 			} catch (err) {
-				return { content: [{ type: "text", text: `Error reading ${inputPath}: ${err instanceof Error ? err.message : String(err)}` }] };
+				return toolText(`Error reading ${inputPath}: ${err instanceof Error ? err.message : String(err)}`);
 			}
-			if (!content.trim()) return { content: [{ type: "text", text: `Error: ${inputPath} is empty.` }] };
+			if (!content.trim()) return toolText(`Error: ${inputPath} is empty.`);
 
 			currentPlanPath = inputPath;
 			persist();
 
 			if (!ctx.hasUI) {
-				return { content: [{ type: "text", text: `Plan auto-approved (non-interactive): ${inputPath}` }] };
+				return toolText(`Plan auto-approved (non-interactive): ${inputPath}`);
 			}
 
 			const { colors, isLight } = loadTheme(ctx);
+			const palette = buildPalette(colors, isLight);
 
 			let result: ReviewResult;
 			try {
-				result = await startServer(content, { ...PLAN_REVIEW_OPTIONS, sourceLabel: inputPath }, colors, isLight, (url) => {
-					try { ctx.ui.notify(`Plan: opening review in browser: ${url}`, "info"); } catch {}
+				result = await createReviewServer<ReviewResult>({
+					renderPage: (nonce) => buildPage(content, { ...PLAN_REVIEW_OPTIONS, sourceLabel: inputPath }, palette, nonce),
+					parseDecision: parseReviewDecision,
+					// Timeout = no decision → route to the feedback path (NOT approve).
+					onTimeout: () => ({ action: "send-feedback", approved: false, feedback: PLAN_REVIEW_OPTIONS.timeoutFeedback }),
+					onUrl: (url) => {
+						try { ctx.ui.notify(`Plan: opening review in browser: ${url}`, "info"); } catch {}
+					},
 				});
 			} catch (err) {
+				// Fail safe: if review can't happen, do NOT approve. The agent
+				// should treat this as "review unavailable" and not proceed.
 				const msg = err instanceof Error ? err.message : String(err);
-				return { content: [{ type: "text", text: `Browser review failed (${msg}). Proceeding with auto-approve.` }] };
+				return toolText(`Plan review unavailable (${msg}) — NOT approved. The browser review could not open; do not proceed. Try submit_plan again, or ask the user to review ${inputPath} directly.`);
+			}
+
+			if (result.action === "cancel") {
+				return toolText(`Plan review dismissed (window closed) for ${inputPath} — NOT approved. Do not proceed; resubmit when ready for review.`);
 			}
 
 			const feedback = formatPlanFeedback(result);
 			if (result.approved) {
-				return {
-					content: [{ type: "text", text: `Plan approved!\n\n${feedback}`.trim() }],
-				};
+				return toolText(`Plan approved!\n\n${feedback}`.trim());
 			}
 			const fb = feedback || "Plan needs revision. Please update and resubmit.";
-			return { content: [{ type: "text", text: `Feedback on ${inputPath}:\n\n${fb}\n\nRevise and submit again.` }] };
+			return toolText(`Feedback on ${inputPath}:\n\n${fb}\n\nRevise and submit again.`);
 		},
 	});
 
 	pi.on("session_start", async (_event, ctx) => {
 		const entries = ctx.sessionManager.getEntries().filter(
-			(e) => e.type === "custom" && (e as Record<string, unknown>).customType === "plan",
+			(e) => e.type === "custom" && (e as unknown as Record<string, unknown>).customType === "plan",
 		);
 		const last = entries.pop() as Record<string, unknown> | undefined;
 		if (last?.data && typeof last.data === "object") {

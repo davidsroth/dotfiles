@@ -47,9 +47,11 @@ Constraints:
 - file must be `.md` or `.mdx`
 - relative paths are resolved against the current working directory
 - absolute paths are allowed
-- empty files are rejected
+- the file must already exist (the agent writes the plan first) and be non-empty — missing/empty files are rejected rather than scaffolded
 
-If you approve the plan, the tool returns approval to the assistant. If you send feedback, the tool returns inline comments and general feedback and asks the assistant to revise and resubmit.
+If you approve the plan, the tool returns approval to the assistant. If you send feedback, the tool returns inline comments (ordered first) and general feedback and asks the assistant to revise and resubmit.
+
+**Fail-safe:** the review is a human gate, so it never silently auto-approves when review can't happen interactively. Closing the review window/tab, or a failure to open the browser, returns a *not-approved* result that tells the agent not to proceed. (Non-interactive/headless mode still auto-approves, like `submit_draft`.)
 
 ### `submit_draft`
 
@@ -84,7 +86,7 @@ Return shape:
 /markup
 ```
 
-Opens the last completed assistant message in the browser markup UI. Any reply or inline comments are loaded into the pi editor for review before sending.
+Opens the last completed assistant message in the browser markup UI. Inline comments (ordered first) followed by any freeform reply are sent back to pi as a fresh user message (queued as a follow-up if the agent is mid-turn). Closing the window without deciding dismisses the review with no message sent.
 
 ### `/plan-status`
 
@@ -93,6 +95,27 @@ Opens the last completed assistant message in the browser markup UI. Any reply o
 ```
 
 Shows the active submitted plan path, if any.
+
+## Architecture
+
+Shared plumbing lives in `extensions/_review/`:
+
+- `server.ts` — `createReviewServer<T>` owns the HTTP/lifecycle plumbing (ephemeral loopback bind, nonce, duplicate-POST handling, 1 MB body cap, focus capture/restore, browser open, 30-min timeout). Each extension injects `renderPage(nonce)`, a typed `parseDecision(raw)` validator, and an `onTimeout()` result.
+- `theme.ts` — theme color resolution + the shared `:root` CSS variable block.
+- `os.ts` — browser open, frontmost-app focus restore, clipboard.
+- `html.ts` — `escapeHtml` / `scriptJson`. `tool.ts` — the `toolText` result helper.
+
+Markdown rendering (`miniplan/markdown.ts`) and the word-level diff (`draft/diff.ts`) are co-located with their sole consumer. Pure functions are covered by vitest under `tests/`.
+
+**Security:** review pages are served over plain loopback HTTP with no CORS headers (so cross-origin sites can't read them or steal the nonce), the nonce gates `/decision`, and the server rejects any request whose `Host` isn't its loopback origin (DNS-rebinding guard).
+
+## Development
+
+```bash
+npm install      # vitest + typescript + @types/node + pi types (dev only)
+npm test         # vitest run — pure-function coverage
+npm run typecheck
+```
 
 ## Notes
 

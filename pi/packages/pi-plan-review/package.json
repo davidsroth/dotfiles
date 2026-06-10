@@ -24,7 +24,17 @@
       "./extensions/draft/index.ts"
     ]
   },
+  "scripts": {
+    "test": "vitest --run",
+    "typecheck": "tsc --noEmit"
+  },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "@types/node": "^25",
+    "typescript": "^6",
+    "vitest": "^4"
   }
 }
