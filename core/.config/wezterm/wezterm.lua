@@ -74,6 +74,13 @@ config.enable_csi_u_key_encoding = true
 config.scrollback_lines = 10000
 config.enable_scroll_bar = false
 
+-- Quick-select (Leader+Space): extra targets beyond the built-in defaults
+-- (URLs etc. stay active — these are additive).
+config.quick_select_patterns = {
+	[[\b[0-9a-f]{7,40}\b]], -- git SHAs
+	[[[A-Za-z0-9._~-]*(?:/[A-Za-z0-9._-]+)+(?::[0-9]+)?]], -- file paths, optional :line
+}
+
 -- Mouse behavior
 config.mouse_bindings = {
 	-- Right click pastes from clipboard
