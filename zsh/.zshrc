@@ -59,6 +59,15 @@ zstyle ':completion:*' matcher-list 'm:{a-zA-Z}={A-Za-z}'   # Case insensitive
 zstyle ':completion:*' use-cache on                          # Use cache
 zstyle ':completion:*' cache-path "${XDG_CACHE_HOME:-$HOME/.cache}/zsh/compcache"  # Cache location
 
+# fzf-tab: fuzzy completion menu (brew "fzf-tab"). Must load after compinit
+# and before the deferred zsh-autosuggestions/syntax-highlighting below.
+if [[ -n "$HOMEBREW_PREFIX" && -f "$HOMEBREW_PREFIX/share/fzf-tab/fzf-tab.zsh" ]]; then
+  source "$HOMEBREW_PREFIX/share/fzf-tab/fzf-tab.zsh"
+  zstyle ':completion:*' menu no  # fzf-tab owns the menu (overrides `menu select`)
+  zstyle ':fzf-tab:complete:cd:*' fzf-preview 'eza -1 --color=always $realpath'
+  zstyle ':fzf-tab:complete:__zoxide_z:*' fzf-preview 'eza -1 --color=always $realpath'
+fi
+
 # ============================================================================
 # Shell Options
 # ============================================================================

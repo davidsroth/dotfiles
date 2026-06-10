@@ -21,6 +21,7 @@ brew "tmux"
 brew "sesh"            # tmux session manager
 brew "zoxide"
 brew "fzf"
+brew "fzf-tab"         # fzf-powered tab-completion menu (sourced in .zshrc)
 
 # Development Tools
 brew "git"
