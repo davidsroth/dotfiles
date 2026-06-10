@@ -14,6 +14,15 @@ Stable facts and preferences that should influence future pi sessions.
   curating memory, the test for keeping something is "would this have prevented
   an error / footgun, or made a session easier?"
 
+### Two systematic biases David has had to correct me on (watch for both)
+1. **Overconfidence in claims** — sliding from "built it / a script passed" to "strong / de-risked / done." Counter: state what's actually verified vs. inferred; downgrade confidence words until evidence supports them.
+2. **Over-conservatism in scope — i.e. systematically choosing the EASY problem over the NORTH STAR.** This is the one to watch hardest. The failure mode is subtle: when I hit a hard/ambitious path I drift to a tractable SUBSTITUTE for it and then dress the scope-shrink up as "calibration / prudence / the bounded move." Symptom verbs: narrowing, shelving, "setting aside," "folding in lightly," "for now," "as a stretch/fallback," reaching for the convenient mechanism (e.g. a local file instead of the real end-to-end loop; reusing the inherited shape to "avoid a regen"; "probe then maybe translate" instead of the real rework). David's actual brief is almost always "build the most impressive thing we can do *well* in the time," and his read of past failures (e.g. DePuy) is "we should have invested MORE ahead of time," not "cut to be safe."
+   - **Active self-catch (run this checkpoint, don't wait to be caught):** before committing to an approach, ask *"Am I choosing this because it's RIGHT/on-vision, or because it's EASIER? Is this the north star, or a tractable stand-in I'm rationalizing?"* If the ambitious version is being demoted to "stretch/fallback," that's the tell — flip it back to the target and let David dial back, rather than pre-shrinking. Name the bigger build explicitly.
+   - **Real ≠ unbounded:** the counter to settling is NOT gold-plating everything. Distinguish *settling* (pre-shrinking something on-stage / on-vision) from *focus* (declining to gold-plate invisible plumbing). Be ambitious on what's load-bearing for the vision; be surgical on what isn't.
+   - Honesty bar still holds (don't *ship/show* half-baked things) — but that argues for building more sooner, not scoping down.
+These are distinct: be bold about SCOPE/ambition while staying calibrated/humble about CLAIMS.
+
+
 ## Environment
 
 - Primary shell: zsh.
@@ -47,12 +56,9 @@ what would have prevented the mistakes these sessions actually made.
   shared PR branches (a shared PR branch once moved under multiple sessions).
   Re-fetch and coordinate over intercom before rebasing or force-pushing.
 - **To capture what other sessions are doing, read their transcripts, not their
-  self-reports.** Ground truth: `~/.pi/agent/sessions/<encoded-cwd>/<ts>_<uuid>.jsonl`
-  (session NAME lives in `session_info` records, last one wins; a
-  `subagent-chat-XXXXXXXX` name suffix = last 8 chars of the file UUID). A
-  session's self-narrated handoff had stale commit hashes; the transcript did
-  not. Transcript-reading also reaches idle/non-responsive sessions that
-  intercom can't.
+  self-reports** — transcripts reach idle/unreachable sessions and don't drift
+  like self-narrated handoffs (which have cited stale commit hashes). See "pi
+  session transcripts" under runtime internals for the path + record format.
 
 ### Verification discipline
 - **For schema / DB / index-mutating changes, verify what actually got
@@ -80,46 +86,47 @@ what would have prevented the mistakes these sessions actually made.
   lstart`) against `git log` / file mtimes first; a 30-second check that avoids
   an hour of debugging code that's already correct.
 
+### Subagents (and same-model advisors) share my biases — orchestrator must counter-steer
+Subagents and the `advisor` are usually the SAME model as me, so they inherit BOTH systematic biases
+(overconfidence in claims; over-conservatism in scope = choosing the easy problem over the north star).
+Fanning out work does NOT dilute the rationalization — it MULTIPLIES it: each agent, on hitting friction,
+will quietly substitute the tractable version (e.g. "Orval regen is hard → cram it into the old type",
+"setup gotcha → declare the ambitious loop infeasible") and report it back as done-and-prudent. A same-model
+`advisor` verdict is NOT an independent check — it can launder my own easy-path pull through an authoritative
+veneer (caught: advisor rendered a mixed-to-favorable fact set as a confident NO-GO on the ambitious build).
+**My job as orchestrator is to keep them oriented to the north star, not to trust self-reports:**
+- Brief the AMBITIOUS target explicitly + name the easy substitutions to avoid; re-steer the instant an
+  agent drifts toward the tractable stand-in.
+- Separate VERIFIABLE FACTS from JUDGMENT in any agent/advisor output; verify the load-bearing facts in the
+  code/empirically myself; put GO/NO-GO on measured evidence, not on a same-model opinion.
+- Default burden-of-proof on "we can't"; bias toward the north star unless evidence forbids it.
+- Watch for the drift signature: agent hits a wall → picks the convenient mechanism → frames the scope-shrink
+  as calibration. That's the tell in THEIR output exactly as in mine.
+
+
 ## pi-intercom — addressing, lifecycle, broker, dispatcher
 
 ### Addressing a peer: what resolves, what fails
-The broker resolves a target by **display name** or **session UUID**, with
-behavior that changed across the @davidroth/pi-intercom Phase 1 patch
-(commit `d797a8a` on dotfiles main, 2026-05-26):
+The broker resolves a target by **display name** or **session UUID** (current,
+post-Phase-1 broker — re-verify against the running broker if behavior surprises
+you):
 
-- **Display name (unique)** — works in all broker versions. The human label
-  before the parens in `intercom list` (e.g. `app-build session`,
-  `subagent-chat-aacd6b27`).
-- **Display name (multiple match)** — returns "Multiple sessions named X are
-  connected. Use the session ID instead."
-- **Full 36-char UUID** (`ae4de195-43b9-4b97-82ab-471e2ee31d6c`) — works in all
-  versions.
-- **Short/prefix UUID** (the 8-char form shown in parens, e.g. `ac0e3789`) —
-  **pre-Phase-1 (≤2026-05-25): ALWAYS failed** with "Session not found"
-  regardless of validity (the single biggest daily UX trap). **Post-Phase-1:**
-  a *unique* prefix now works; an *ambiguous* prefix returns "Multiple sessions
-  match ID prefix X. Use the full session ID instead."
-- **Nonexistent id/name** — "Session not found" / "...not delivered: Session not found".
+- **Display name (unique)** — works. The human label before the parens in
+  `intercom list` (e.g. `app-build session`, `subagent-chat-aacd6b27`).
+- **Full 36-char UUID** — works.
+- **Unique ID prefix** (the 8-char form shown in parens) — works; an *ambiguous*
+  prefix returns "Multiple sessions match ID prefix X. Use the full session ID
+  instead."
+- **Duplicate display names** block by-name routing entirely (e.g. two sessions
+  with the same name after a fork): `to:"<name>"` errors with "Multiple sessions
+  named X... Use the session ID instead." Workarounds: have the peer `/name`
+  itself uniquely (`Twin-A`/`Twin-B`); get its full UUID via `intercom status`
+  from *its* session. Prefer unique session names from the start.
+- **Nonexistent id/name** — "Session not found".
 
-Phase 1 also added: the `send` writability gate, `socket.on("error")` registry
-cleanup, and `session_left` ask fast-fail. (Separately, on 2026-05-29 the
-*client-side* short-id reply-correlation bug was fixed via `replyResolvesWaiter`
-— addressing by full id or exact name always worked; see daily 2026-05-29.)
-
-**Duplicate display names** block by-name routing entirely (e.g. two sessions
-with the same name after a fork): `to:"<name>"` errors with the
-multiple-match message, and a prefix from `list` may not resolve either.
-Workarounds: ask the peer to `/name` itself uniquely (`Twin-A`/`Twin-B`); get
-its full UUID via `intercom status` from *its* session; or skip the
-notification. Prefer unique session names from the start.
-
-**Triage implications:**
-- "Session not found" is a *broker-side lookup* failure, NOT a peer-liveness
-  signal. If a short-ID send fails, retry the display name before concluding death.
-- "Message sent" only proves the broker had a writable socket FD to push to — it
-  does not prove the peer is alive (the broker's `send` doesn't gate on
-  `socket.writable` in older versions) — but it's a much stronger liveness
-  signal than the absence of a too-narrow `ps` match.
+"Session not found" is a *broker-side lookup* failure, NOT a peer-liveness
+signal. If a short-ID send fails, retry the display name before concluding death.
+(Liveness semantics of "Message sent" live in "Silence ≠ death" below.)
 
 ### Session identity is unstable: UUIDs cycle, display names drift
 Neither identifier is a durable key:
@@ -156,7 +163,9 @@ the TUI and waits for the user (or the agent's next tool-turn) to engage. A
 fully-live session will sit on an inbox message indefinitely if it has no reason
 to act.
 
-- "Message sent" → peer almost certainly live.
+- "Message sent" → the broker had a writable socket FD to push to; peer almost
+  certainly live (a much stronger signal than the absence of a too-narrow `ps`
+  match) — though it doesn't strictly prove the peer is alive.
 - No reply within N minutes → peer almost certainly STILL alive. The 10-minute
   `intercom ask` timeout is the *broker's* wait limit, not a peer-death signal.
 - A probe that says "no action needed / no reply required" is **self-defeating**:
@@ -166,13 +175,10 @@ to act.
   doing — I'm building a session map."
 
 **Reaper reframe:** the truly-dead-but-registered socket population is much
-smaller than first estimated. On a machine with ~22 live pi processes and ~76
-broker fd endpoints, the gap is mostly per-session multi-FD usage (register +
-tool channels + streams), not ~54 zombies. The underlying reaper-plan bugs are
-real (no PID-based liveness sweep; `send` not gating on writability; misleading
-addressing UX) but the "50+ zombies" urgency was overheated. (Discovered
-2026-05-25: of ~25 pings, 5 real replies [watched panes], 17 "Message sent" +
-silence [live, idle].)
+smaller than it looks — much of the raw broker FD count is legit per-session
+multi-FD usage (register + tool channels + streams), not zombies. The underlying
+reaper-plan bugs are real (no PID-based liveness sweep; `send` not gating on
+writability; misleading addressing UX) but the "50+ zombies" urgency was overheated.
 
 ### Send/reply reliability: narration vs. tool call, and reply routing
 - **"Report back via intercom" often gets narrated, not invoked.** A briefed
@@ -199,52 +205,22 @@ silence [live, idle].)
   specific `intercom ask`. (Observed: an ack meant for one session got routed
   to an unrelated `subagent-chat-…` via a bare `intercom reply`.)
 
-### Caveat: this week's intercom observations predate the 2026-05-29 broker cutover
-The broker that served all of 2026-05-24 → 29 started 2026-05-26 09:19 on commit
-`d797a8a` (Phase-1) but was **9 commits behind HEAD** — it lacked the
-stale-registration eviction (`a101838`), the PID reaper + backpressure
-(`f2bb1f4`), and the reachability fixes (`3d0daba`). Implications:
-- The registry stale-row bloat (~70 → 22 rows cleared instantly by the 2026-05-29
-  restart) was real **this week**, but only because the running broker lacked
-  eviction-on-reconnect + the reaper. Current code has both, so a broker on
-  current code (or any restart/cutover) self-cleans. This does NOT contradict the
-  "zombies overheated" reframe above — much of the raw FD count is legit
-  multi-FD-per-session; the genuinely-stale rows that did exist are now handled
-  structurally, so reaper urgency is *lower* going forward, not higher.
-- Behavior notes in this section were observed against that specific build. Before
-  treating any of them as a current bug, re-check against the running broker's
-  actual code (its start time vs `git log`).
+Intercom behavior notes here were observed pre/around the 2026-05-29 broker
+cutover; re-check against the running broker's actual code before relying on them.
 
-### pi-intercom-tailnet relay: virtual-session loop + broker-restart gap (2026-05-31)
-The tailnet relay exposes each remote peer session locally as a "virtual
-session" (`<name>@<host>`) by registering it on the LOCAL broker. Two
-non-obvious facts learned hardening it:
+### pi-intercom-tailnet relay: virtual-session loop + broker-restart gaps
 
-- **The broker↔broker echo loop is real**, not theoretical. Registering a
-  virtual session makes the broker broadcast `session_joined`, which the
-  relay's own control bridge hears and would re-broadcast to peers → infinite
-  circulation. It is prevented only by filtering the relay's own virtual
-  sessions out of re-broadcast by BOTH broker-assigned id (`virtualSessionIds`)
-  AND display name (`virtualSessionNames`, needed because the echo can arrive
-  before `handle.sessionId` resolves). An audit that reads the post-fix code
-  will wrongly conclude "no loop present" — the filtering is load-bearing.
-- **A local broker restart drops EVERY relay connection** (control link + all
-  per-peer virtual-session sockets), but the cross-host peer links stay up and
-  won't re-send their session lists. So reconnecting only the control link
-  leaves `<name>@<host>` sessions as zombies pointing at dead sockets. The fix
-  (`reconnectBroker` → `rebuildVirtualSessions`) re-opens all virtual sessions
-  from retained peer state; virtual-session sockets also now have an `onClose`
-  that re-opens a singly-evicted session while the control link is healthy and
-  otherwise defers to the reconnect rebuild (gated on a `brokerHealthy` flag to
-  avoid racing reopen attempts against a down broker).
-
-Security posture after the 2026-05-31 P0 pass: broker dir chmod 0700 + socket
-0600; reconnect eviction gated on matching pid (anti-spoof of `originSessionId`);
-relay binds inbound hello host to `tailscale whois` of the connecting IP
-(fail-closed) and caps frame size (16 MiB) like the broker. Three overlapping
-relay respawn watchdogs exist (in-relay bridge reconnect, spawn.ts child-exit
-respawn, index.ts 10s interval) — redundant but each covers a distinct
-parent-liveness case, so not pure duplication.
+Two durable behaviors when relaying remote peers as local virtual sessions
+(`<name>@<host>` registered on the LOCAL broker): (1) the broker↔broker echo
+loop is real — virtual sessions must be filtered from re-broadcast by BOTH
+broker-assigned id AND display name (the echo can arrive before the id
+resolves), and this filtering is load-bearing (a post-fix code audit wrongly
+reads as "no loop"). (2) A local broker restart drops all relay sockets while
+cross-host peer links stay up and don't re-send their lists, so virtual sessions
+must be rebuilt from retained peer state on reconnect, else they zombie onto
+dead sockets. (Security posture: broker dir 0700 + socket 0600; reconnect
+eviction gated on matching pid; inbound hello host bound to `tailscale whois`,
+fail-closed; frame size capped.)
 
 
 ## pi / runtime / shell internals
@@ -279,26 +255,19 @@ parent-liveness case, so not pure duplication.
 
 ### pi process detection — the binary is literally `pi`
 
-The pi-coding-agent binary's argv[0] in `ps` output is simply `pi`,
-not `pi-coding-agent` or `@earendil-works/...` or anything with the
-package name. A `ps | grep` for those package-name patterns returns
-zero hits even on a machine with 20+ live sessions. Use:
+The pi-coding-agent binary's argv[0] in `ps` output is simply `pi`, not
+`pi-coding-agent` or `@earendil-works/...`. A `ps | grep` for the package name
+returns zero hits even on a machine with 20+ live sessions. Use:
 
 ```bash
 ps -axo pid,ppid,etime,command | awk '$4=="pi" || $4 ~ /\/pi$/'
-# or, complementary signal:
+# complementary signal:
 tmux list-panes -a -F '#{pane_current_command}' | awk '$1=="node"' | wc -l
 ```
 
-Discovered 2026-05-25 during the 70-session triage. I originally
-claimed "1 live pi process / 70 zombies" based on the narrow
-package-name grep; the real count was 22 live pi processes, matching
-22 tmux panes running `node` (pi's runtime), and ~24 broker-
-addressable sessions. The "broker is all zombies" framing was
-substantially wrong, and the original recommendation to `kill 6039`
-would have wiped out every live session on the machine. Always
-sanity-check process counts with `tmux list-panes` and
-broker-side ping success rates before recommending a broker restart.
+Always sanity-check process counts with `tmux list-panes` and broker-side ping
+success before recommending a broker restart — a narrow package-name grep will
+badly undercount and could lead you to kill a PID that wipes out live sessions.
 
 ### Bash secret-redaction pitfall: `${VAR:+x}${VAR:-NO}` prints the value
 
@@ -323,108 +292,87 @@ Discovered while probing a container's env for a set/unset secret. The buggy pat
 ### tlink pi-notification (desktop notifications on pi turn-end)
 
 `tlink` (github.com/ahnopologetic/tlink) gives pi desktop notifications +
-clickable `tmux://` deeplinks back to the exact pane. Three parts:
-1. Install binary: `curl -fsSL .../install.sh | sh` → `~/.local/bin/tlink`.
-   NOTE: the installer appends `export PATH="$HOME/.local/bin:$PATH"` to
-   `~/.zshrc`; on a dotfiles-stowed `.zshrc` where `.local/bin` is already on
-   PATH (via `.zshenv`/`.zprofile`) this is a redundant tracked-file edit —
-   remove it after install.
-2. `tlink setup` — interactive TUI, compiles a Swift TmuxLink.app, registers
-   the `tmux://` URI scheme (macOS only). May trigger a macOS security dialog.
-   Must be run by the human; can't be driven headless.
-3. `tlink install pi-notification` — TUI wizard; writes pi extension to
-   `~/.pi/agent/extensions/pi-notification.ts`. Default event = `agent_end`
-   only (= "pi finished a turn / waiting for input"); other selectable events:
-   turn_end, session_start, session_shutdown, tool_execution_end. The extension
-   shells `tlink notify` via child_process.spawn with a JSON stdin payload.
-   Reload pi (`/reload`) after install.
+clickable `tmux://` deeplinks back to the exact pane. Setup: install the binary,
+run `tlink setup` (interactive TUI — compiles a Swift app + registers the
+`tmux://` URI scheme, macOS only; must be run by the human, can't be driven
+headless), then `tlink install pi-notification` (writes
+`~/.pi/agent/extensions/pi-notification.ts`; default event = `agent_end` = "pi
+finished a turn / waiting for input"). Reload pi after install.
 
-Gotchas observed 2026-06-01 (tlink 0.1.4):
-- **Released binary lags repo `main`.** The `main` extension passes `--source pi`
-  to `tlink notify`, but the 0.1.4 binary's `notify` rejects `--source`
-  (exit 2). If you hand-write the extension from `main`, drop `--source`.
-- Default `notification_method` is `osascript` (not terminal-notifier, despite
-  README). The osascript adapter does `display notification` THEN
-  `open location "tmux://..."`. Before `tlink setup` registers the scheme, the
-  open-location step throws AppleScript error `-10814` — but `notify` still
-  exits 0 and the notification banner still shows. The error is only the
-  deeplink-open failing; it disappears once `tlink setup` is done.
+Gotchas:
+- The installer appends `export PATH="$HOME/.local/bin:$PATH"` to `~/.zshrc`; on
+  a dotfiles-stowed `.zshrc` where `.local/bin` is already on PATH this is a
+  redundant tracked-file edit — remove it after install.
+- **The released binary can lag repo `main`.** If you hand-write the extension
+  from `main` but run an older binary, drop flags the binary's `notify` rejects
+  (e.g. `--source pi` → exit 2).
+- Default `notification_method` is `osascript` (not terminal-notifier). The
+  adapter does `display notification` THEN `open location "tmux://..."`; before
+  `tlink setup` registers the scheme, the open-location step throws AppleScript
+  error `-10814`, but `notify` still exits 0 and the banner still shows. The
+  error disappears once setup is done.
 
 ### Slack MCP wrapper (dotfiles `pi/.pi/agent/extensions/slack-mcp/`)
-NOTE (2026-06-04): split from the old single-file `slack-mcp.ts` into a
-directory extension — entry `slack-mcp/index.ts`, with siblings
-types/constants/config/identity/postprocess/process-tracker/mcp-client/
-registry/tool-helpers. Behavior unchanged; edit the relevant module, not a
-monolith. `just pi-check` typechecks it.
-Thin pi bridge spawning korotovsky/slack-mcp-server (Go, npm `slack-mcp-server`)
-via `~/.pi/agent/slack-mcp.json` (XOXP user token, not stowed). NOT the official
-`@modelcontextprotocol/server-slack` — symptoms like CSV output,
+
+A directory extension (entry `slack-mcp/index.ts` + sibling modules — edit the
+relevant module, not a monolith; `just pi-check` typechecks it). Thin pi bridge
+spawning korotovsky/slack-mcp-server (Go, npm `slack-mcp-server`) via
+`~/.pi/agent/slack-mcp.json` (XOXP user token, not stowed). NOT the official
+`@modelcontextprotocol/server-slack` — CSV output,
 `conversations_search_messages`, `conversations_unreads` are korotovsky-only.
-- **`from:@me` / `to:@me` silently return ZERO rows** — `@me` is not a valid Slack
-  search modifier. Use `from:<user_id>`. The wrapper now has a `slack_mcp_whoami`
-  tool (direct auth.test, cached) that returns the authenticated user_id.
-- **Config knobs added 2026-06-01** (commits 66242c3, d8fc901 on dotfiles main):
-  `requestTimeoutMs` / `requestTimeoutMsByTool` (default per-call timeout was a
-  hardcoded 60s — that's what made `conversations_unreads` over ~60 channels time
-  out); and `postProcess` (CSV cleanup: drops wide cols Permalink/AttachmentIDs/
-  HasMedia/BotName/Cursor, truncates Text at maxTextLength=2000, resolves
-  `<@U…>`→@name). Dropping `Cursor` preserves pagination via a `next_cursor:`
-  footer. `"postProcess": false` disables; omit a column from dropColumns to keep it.
-  Per-call escape hatch on conversations_history/replies/search_messages: tool
-  args `_maxTextLength` (override truncation for one call; 0=none) and `_raw`
-  (true=fully raw for one call); stripped before forwarding upstream.
-- **Reload gotcha:** pi loads this extension once at session start. Editing it does
-  NOT affect already-running sessions — they must reload/restart to pick up changes.
-  (Same long-running-process rule as the intercom broker.)
+- **`from:@me` / `to:@me` silently return ZERO rows** — `@me` is not a valid
+  Slack search modifier. Use `from:<user_id>`; the `slack_mcp_whoami` tool
+  (direct auth.test, cached) returns the authenticated user_id.
+- **Config knobs:** `requestTimeoutMs` / `requestTimeoutMsByTool` (the default
+  per-call timeout was a hardcoded 60s — what made `conversations_unreads` over
+  ~60 channels time out); and `postProcess` (CSV cleanup: drops wide cols,
+  truncates Text at maxTextLength=2000, resolves `<@U…>`→@name). Dropping
+  `Cursor` preserves pagination via a `next_cursor:` footer. `"postProcess":
+  false` disables. Per-call escape hatches on history/replies/search_messages:
+  `_maxTextLength` (0=none) and `_raw` (true=fully raw), stripped before forwarding.
+- **Reload gotcha:** pi loads this extension once at session start; editing it
+  does NOT affect running sessions (same long-running-process rule as the broker).
 
 ### pi extension loading internals + typecheck harness (dotfiles)
 
-How pi (0.78.x) loads `~/.pi/agent/extensions/`, verified by reading
-`pi-coding-agent/dist/core/extensions/loader.js` and driving
-`discoverAndLoadExtensions` directly:
+How pi loads `~/.pi/agent/extensions/`, verified by reading
+`pi-coding-agent/dist/core/extensions/loader.js`:
 
-- **Loader = `jiti`** (Node/dev mode). It sets `alias` mapping the specifiers
-  `@earendil-works/{pi-coding-agent,pi-tui,pi-ai,pi-agent-core,pi-ai/oauth}`
-  and `typebox` to pi's OWN bundled copies — applied transitively to modules the
-  extension imports. **Consequence: a local `node_modules` next to an extension
-  does NOT shadow the SDK at runtime.** Safe to add one for tooling.
-- **Discovery rules (one level, no recursion):** auto-loads top-level
-  `extensions/*.ts|*.js`, AND a subdir only if it has `index.ts`/`index.js` OR a
-  `package.json` with a `pi` manifest field. So a helper subdir like
-  `_shared/` WITHOUT an index is ignored by discovery — perfect for shared code
-  imported relatively (`import … from "./_shared/config"`). Do NOT add index.ts
-  to such a dir or it becomes an extension.
-- SDK packages live under the global install: `pi` binary → realpath →
-  `<prefix>/lib/node_modules/@earendil-works/pi-coding-agent/dist/cli.js`; its
-  nested deps (pi-tui/pi-ai/pi-agent-core/typebox) are under that pkg's
-  `node_modules`. `@earendil-works/pi-coding-agent` IS published on npm (the SDK
-  exports map has only `.` and `./hooks`; `TextContent`/`ImageContent` are NOT
-  re-exported from pi-coding-agent — import them from `@earendil-works/pi-ai`).
-- **Typecheck harness** (added 2026-06-04, commit 7c95bce): `just pi-check`
-  (alias `just pic`) → `scripts/pi-typecheck.sh` builds a gitignored
-  `extensions/node_modules/` symlink farm pointing at the installed SDK, then
-  `npx -p typescript@5.7 tsc --noEmit -p extensions/tsconfig.json` (strict).
-  Pins typecheck to the exact running pi version, no drift/download; build-time
-  only (jiti aliasing makes the farm runtime-inert). Verify changes with
-  `just pi-check` AND a runtime load probe via `discoverAndLoadExtensions([],
-  cwd, agentDir)` checking `res.errors` is empty.
-- Shared layered-config loader extracted to `extensions/_shared/config.ts`
+- **Loader = `jiti`** (Node/dev mode). It aliases the `@earendil-works/*` SDK
+  specifiers and `typebox` to pi's OWN bundled copies, transitively. So a local
+  `node_modules` next to an extension does NOT shadow the SDK at runtime — safe
+  to add one for tooling.
+- **Discovery (one level, no recursion):** auto-loads top-level
+  `extensions/*.ts|*.js`, plus a subdir only if it has `index.ts`/`index.js` OR
+  a `package.json` with a `pi` manifest field. A helper subdir like `_shared/`
+  WITHOUT an index is ignored — perfect for shared code imported relatively. Do
+  NOT add index.ts there or it becomes an extension.
+- SDK packages live under the global install (`pi` → realpath →
+  `<prefix>/lib/node_modules/@earendil-works/pi-coding-agent/dist/cli.js`).
+  `TextContent`/`ImageContent` are NOT re-exported from pi-coding-agent — import
+  them from `@earendil-works/pi-ai`.
+- **Typecheck harness:** `just pi-check` (`just pic`) → `scripts/pi-typecheck.sh`
+  builds a gitignored `extensions/node_modules/` symlink farm pointing at the
+  installed SDK, then `tsc --noEmit` (strict). Pins typecheck to the running pi
+  version, build-time only (jiti aliasing makes the farm runtime-inert). Verify
+  changes with `just pi-check` AND a runtime load probe via
+  `discoverAndLoadExtensions([], cwd, agentDir)` checking `res.errors` is empty.
+- Shared layered-config loader is `extensions/_shared/config.ts`
   (`loadLayeredConfig`: defaults < `~/.pi/agent/<file>` < `<cwd>/.pi/<file>`,
-  warn-and-ignore malformed JSON); advisor.ts + secret-guard.ts migrated onto it.
+  warn-and-ignore malformed JSON).
 
 ### dotfiles agent skills live in `.agent/skills/`, NOT the pi stow package
 
-Cross-harness agent skills in dotfiles belong in `dotfiles/.agent/skills/<name>/SKILL.md`
-(tracked in git). `install.sh` (`setup_agent_skills`) symlinks that one dir into
-`~/.pi/agent/skills`, `~/.claude/skills`, `~/.gemini/skills`, `~/.cursor/skills`,
-`~/.codex/skills` so every harness shares it.
+Cross-harness agent skills in dotfiles belong in
+`dotfiles/.agent/skills/<name>/SKILL.md` (tracked in git). `install.sh`
+(`setup_agent_skills`) symlinks that one dir into `~/.pi/agent/skills`,
+`~/.claude/skills`, `~/.gemini/skills`, etc. so every harness shares it.
 
 Footgun: do NOT put skills under `pi/.pi/agent/skills/` in the pi stow package.
-`pi/.pi/agent/skills` is `.gitignore`d (it's meant to be the install.sh symlink),
-and if you create a real dir there, `just stow` hijacks `~/.pi/agent/skills` to
-point at the pi package instead of `.agent/skills` (stow re-LINKs it). Fix:
-remove `pi/.pi/agent/skills`, recreate `~/.pi/agent/skills -> dotfiles/.agent/skills`.
-Discovered 2026-06-05 adding the `atomic-commits` skill (commit ade8d77).
+That path is `.gitignore`d (meant to be the install.sh symlink); if you create a
+real dir there, `just stow` hijacks `~/.pi/agent/skills` to point at the pi
+package instead of `.agent/skills`. Fix: remove `pi/.pi/agent/skills`, recreate
+`~/.pi/agent/skills -> dotfiles/.agent/skills`.
 
 
 
@@ -434,165 +382,70 @@ Discovered 2026-06-05 adding the `atomic-commits` skill (commit ade8d77).
 
 ### "Structural-superset wins" merge resolution can silently undo cross-file surgery
 
-When folding two long-lived branches together, the natural per-file heuristic
-"take the structurally richer side" works fine *for that file in isolation*
-but misses cross-file coupling. Specifically: if branch A made a coordinated
-refactor that **deleted** code from file X and **added** a new file Y to
-replace it, while branch B was simultaneously evolving file X into a richer
-"superset" (without ever knowing about file Y), the merge resolver will
-likely:
+When folding two long-lived branches, the per-file "take the structurally richer
+side" heuristic misses cross-file coupling: if branch A deleted code from file X
+and added a replacement file Y, while branch B evolved X into a superset (never
+seeing Y), the merge keeps B's superset X (resurrecting A's deleted code) AND
+A's Y (unconflicted) — both incompatible designs survive, with Y now orphaned
+but import-clean, so it fails only in subtle factory-shaped ways, not loudly.
 
-- Take B's version of X wholesale (it's the structural superset) →
-  resurrects the code A deleted.
-- Take A's new file Y verbatim (no conflict — B never touched it) →
-  keeps the replacement.
+Defenses when merging long-lived branches:
+- `git log -p <ancestor>..<branch> -- <file>` *both sides* before resolving;
+  watch for **deletions** on the "smaller" side — often load-bearing for
+  additions elsewhere in that branch's diff.
+- For any file new on only one side, `rg <ClassName>` (or the filename stem)
+  across the post-merge tree to confirm an importer remains. Zero importers =
+  silent orphan.
+- Run the test suite (and each side's *own* suite) on the merged tree before
+  pushing — "no conflict markers + lint passes" does not mean semantically clean.
+- If the merge agent flags an orphan as a follow-up, treat it as a yellow flag:
+  verify *why* it ended up orphaned before deciding delete vs. port.
 
-Net result: **both halves of two incompatible designs survive**, with no
-caller wiring file Y in anymore. File Y is now orphaned but `python -c
-"import Y"`-clean, so it doesn't fail loudly. Tests that imported Y
-directly still pass; tests that went through the factory in X fail in
-ways that look like config-shape mismatches, masking the real "we kept
-two designs" bug.
+### Worktree triage discipline
 
-**Concrete shape (anonymized):**
-- Branch A (a refactor landed ~1h before the merge): deleted an inline
-  `class XDataSource` stub from `data_source.py` and added a standalone
-  `x_data_source.py` + rewired the factory's `from ... import`.
-- Branch B (a feature branch): days of plumbing on top of the *original*
-  `data_source.py` with the inline stub intact. Never saw `x_data_source.py`.
-- Merge resolution: "take B (structural superset)" for `data_source.py`.
-  Resurrected the inline stub, dropped A's import-line surgery.
-  `x_data_source.py` survived unconflicted but orphaned.
-- The merge commit message itself caught this as a known follow-up — but
-  *after* resolving, not during. Cleanup took its own commit.
+Lessons from triaging multi-worktree layouts (one primary clone + N secondary
+worktrees via `git worktree add`). Read state, don't infer it:
 
-**Defensive checklist for merging two long-lived branches:**
-
-1. Before resolving each file conflict, `git log -p <ancestor>..<branch>
-   -- <file>` *both sides*. Look for **deletions** on the "smaller" side
-   — those are often load-bearing for additions elsewhere in that
-   branch's diff.
-2. For any new file that exists on only one side, `rg <ClassName>` (or
-   `<filename stem>`) across the post-merge tree to confirm at least one
-   importer remains. Zero importers = silent orphan.
-3. After resolving, before pushing, run the test suite on the merged
-   tree. Don't assume "no conflict markers + lint passes" means the
-   merge is semantically clean. Cross-file coupling lives below those
-   signals.
-4. When in doubt, run the side's *own* test suite against the merged
-   tree — failures often point at exactly the cross-file invariants the
-   merge broke.
-5. If the merge agent flags a follow-up in the commit message ("X is
-   now orphaned, decide later"), treat that as a yellow flag, not a
-   green one: at minimum verify *why* it ended up orphaned before
-   deciding delete vs. port. The provenance ("two ships passed in the
-   night" vs. "deliberately abandoned design") changes the right
-   answer.
-
-### Branch-redundancy checks — SHA scan is not enough
-
-When triaging "is this branch's work already merged into another
-branch?", comparing commit SHAs or subject lines is unreliable
-because cherry-picks produce different SHAs (and rebases / squashes
-can change subject lines). Use tree-equivalence or patch-id instead:
-
-```bash
-# Are commits tree-identical (same final state)?
-git rev-parse <sha>^{tree}             # → tree hash, compare across sides
-
-# Same patch content even after rebase / merge?
-git patch-id < <(git show <sha>)       # → stable across cherry-pick
-git cherry <upstream> <branch>         # → "+" means not in upstream, "-" means in upstream by patch-id
-```
-
-Discovered during a worktree triage: a branch was reported as having 3 net-new
-commits + 1 duplicate. Actually all 4 commits were tree-identical to the first
-4 of an already-merged PR (cherry-picks). The branch was fully redundant and
-got deleted instead of becoming a new PR. A `git rev-parse <sha>^{tree}` or
-`git cherry origin/main <branch>` comparison would have caught this at triage
-time.
-
-Symptom of the gap: a triage report listing N net-new commits when
-in fact zero are net-new because they were all cherry-picked
-elsewhere with different SHAs. Mitigation: in any "is this worktree
-salvageable?" report, run `git cherry` between the branch and its
-likely-successor + report the patch-id mismatches, don't infer from
-subject lines.
-
-Also: same dispatch had a restatement bug — branch was shown with
-`upstream=origin/...` in the survey but the handoff brief said
-"upstream=NONE". Always re-quote the original survey fields verbatim
-into briefs, don't paraphrase them.
-
-### "What does this set of commits touch?" — per-commit, not cumulative
-
-When you need the file list for a specific subset of commits (e.g.
-"the 4 unique commits on branch X compared to branch Y"), do NOT use
-`git diff --name-only Y..X`. That's a two-tip cumulative diff that
-also surfaces files where Y and X happen to differ for unrelated
-reasons (e.g. Y went forward in parallel, intermediate commits, etc.).
-
-Use per-commit stats instead:
-```bash
-for sha in <sha1> <sha2> ...; do
-  echo "=== $sha ==="
-  git show --stat --format= $sha
-done
-# or, for a contiguous range with no merges:
-git log --no-merges --stat <sha-oldest>^..<sha-newest> --format='%h %s'
-```
-
-Discovered during a worktree triage: a brief claimed "the 4 commits touch 3
-files" — actually all 4 commits only touched a single script. The 3-file list
-came from a cumulative diff between two diverging branch tips, not from the
-commits themselves.
-
-Companion lesson (subordinate of the SHA-vs-tree-hash note above):
-when judging "is this commit redundant with one already on the target
-branch?", a `git branch --contains <sha>` check is *coincidentally
-correct* if and only if the commits in question touch disjoint files
-from the prior cherry-picks. That's a fragile floor. Default to
-`git cherry` / `git patch-id --stable` instead, and treat the
-disjoint-files observation as a sanity-check rather than the primary
-test.
-
-### "PR merged → worktree safe to remove" needs a usage guard
-
-The bare criterion "PR merged → worktree safe to remove" is correct
-in the steady state — a session that has finished pushing to its
-branch and seen it merged generally has no reason to keep pinning the
-worktree. The criterion FAILS when a session is *currently using*
-the worktree for ongoing work that survived the merge: benchmarks
-of the merged path, post-merge stress testing, diffing the merged
-version against alternatives, or using it as a working dir whose
-source files have nothing to do with the merged branch's diff.
-
-Guard to add before any "PR-merged → remove" sweep:
-
-Always check before `git worktree remove`:
-```bash
-# Any process with cwd here?
-lsof +D <worktree-path> 2>/dev/null | head
-# Any tmux pane with cwd here?
-tmux list-panes -a -F '#{pane_current_path}' | grep -F "<worktree-path>"
-# Any pi session registered here?
-intercom list | grep -F "<worktree-path>"
-```
-
-Discovered during a worktree triage: a worktree was removed because its PR was
-merged ("definitively done"), but another session reported it had been running
-a perf benchmark in that dir. Post-hoc it turned out fine — the benchmark
-actually ran out of a *different* worktree and the deleted one held only
-already-pushed content — but only by luck. (The branch tip was still a dangling
-commit in the object DB, so `git branch <name> <sha> && git worktree add ...`
-could have reconstructed it if needed.) The same sweep removed two other
-merged-PR worktrees without the usage check — they happened to have no live
-sessions attached, but that was luck, not rigor.
-
-Companion rule: when the user pre-approves a batch of removals,
-**re-verify each item's "no live attachment" status immediately
-before the destructive op**, not just at proposal time. Sessions can
-become attached between proposal and execution. The check is cheap.
+- **Branch redundancy: use tree-equivalence / patch-id, not SHA or subject
+  lines.** Cherry-picks/rebases/squashes change SHAs and subjects, so a branch
+  can be fully redundant while looking net-new.
+  ```bash
+  git rev-parse <sha>^{tree}          # tree hash — compare across sides
+  git patch-id < <(git show <sha>)    # stable across cherry-pick
+  git cherry <upstream> <branch>      # "+" = not in upstream, "-" = already in (by patch-id)
+  ```
+  `git branch --contains <sha>` is only *coincidentally* correct (when commits
+  touch disjoint files from prior picks); default to `git cherry`/`git patch-id`.
+- **"What does this set of commits touch?" — per-commit, not cumulative.** A
+  two-tip `git diff --name-only Y..X` also surfaces unrelated divergence between
+  the tips. Use per-commit stats:
+  ```bash
+  for sha in <sha1> <sha2> ...; do git show --stat --format= $sha; done
+  # or, contiguous range, no merges:
+  git log --no-merges --stat <oldest>^..<newest> --format='%h %s'
+  ```
+- **Never classify uncommitted work by path/filename — read the diff.** Files
+  like `settings-dev.toml` or `deploy.yaml` often hold real bug fixes, prod
+  tuning with runbook commentary, env overrides the env literally can't run
+  without, or deliberate `.bak` safety snapshots. For each `M`: `git diff
+  <file>` (dump head -40 if >5 lines); for each `??`: `head -40` and show the
+  user what it is. Untracked tests and snapshots are not noise.
+- **The primary clone hosts side-effects from ALL its worktrees.** Uncommitted
+  state there is NOT attributable to the session whose registered cwd is the
+  primary — that field tells you where a session *launched*, not where it works.
+  Docker dev-mounts (set up against the primary path), local config/secrets, and
+  ad-hoc edits all land there from any session. Identify the real owner by diff
+  content / signature naming / mtimes / sibling worktree / asking via intercom.
+- **"PR merged → worktree safe to remove" needs a usage guard.** A session may
+  still be using a merged worktree (benchmarking the merged path, post-merge
+  stress tests, or as a working dir unrelated to the branch's diff). Re-verify
+  "no live attachment" *immediately before each destructive op*, not just at
+  proposal time — sessions can attach between proposal and execution:
+  ```bash
+  lsof +D <worktree-path> 2>/dev/null | head                                # process cwd here?
+  tmux list-panes -a -F '#{pane_current_path}' | grep -F "<worktree-path>"   # tmux pane here?
+  intercom list | grep -F "<worktree-path>"                                 # pi session here?
+  ```
 
 ### `gh pr view` PR-object cache lags fresh pushes by seconds
 
@@ -618,144 +471,24 @@ Observed twice during a cherry-pick push to a PR: push completed, the refs API
 returned the new SHA instantly, but `gh pr view` returned the old SHA for ~5s
 before catching up.
 
-### Never classify uncommitted work by path/filename — read the diff
-
-Uncommitted-files audits during a worktree triage MUST inspect the
-actual diff content, not bucket by path. Filenames like
-`config/settings-dev.toml` or `deployments/some-env.yaml` look
-like "local dev tweaks" by convention but in practice often hold:
-
-- substantive bug fixes layered into module code (e.g. a small
-  auth-token helper added to a server module that works around a
-  mock-auth placeholder — looks config-adjacent but is a real fix)
-- production deployment tuning with runbook commentary (memory
-  limits, concurrency caps, post-PR follow-ups)
-- environment-specific configuration overrides that local dev
-  literally cannot run without (e.g. service/agent IDs after a reseed)
-- safety snapshots (`.bak-before-X` files) that the user
-  deliberately created and would be unhappy to lose
-
-Practical rule for a triage report:
-- For each `M` file: `git diff <file> | wc -l` → if > 5 lines, dump
-  a head -40 into the report or at minimum mention "non-trivial,
-  inspect before any cleanup."
-- For each `??` file: `head -40 <file>` and *show the user what it
-  is*. Untracked tests and `.bak` snapshots are not noise.
-- For deployment/yaml/runbook .md files: skim for runbook-style
-  commentary. A diff comment that explains *why* a change exists
-  is a strong signal it's not just dev-machine drift.
-
-Discovered during a worktree triage: 4 uncommitted files in a primary clone
-were dismissed as "local-config-ish / local dev tweaks". Reading the actual
-diffs found a real mock-auth bug fix in a server module, production OOM-fix
-deployment tuning in a deploy yaml, genuine environment overrides in a settings
-file, plus an explicit safety snapshot — none of it disposable, and owned by
-several different sessions.
-
-### Git primary clone hosts side-effects from all its secondary worktrees
-
-In a multi-worktree git layout (one primary clone + N secondary
-worktrees via `git worktree add`), the **primary clone's working
-tree** is a shared dumping ground for any session that needs to
-write into the primary's filesystem location, regardless of which
-branch/worktree they're conceptually working on. Common reasons a
-session writes to the primary clone instead of its own worktree:
-
-- Mounting that path into a Docker dev container (the container
-  was set up with the primary clone path before secondary worktrees
-  existed; only the primary clone's path gets hot-reloads).
-- Local config / secrets files that need to be in the primary clone
-  for tool defaults.
-- Ad-hoc edits the session forgot to redirect into their secondary
-  worktree.
-
-Consequence for triage: uncommitted state in the primary clone is
-NOT automatically attributable to "the session whose registered cwd
-is here". It can come from any session. To identify the real owner:
-
-- Read the diff content and look for signature names/naming
-  conventions that identify a particular session's work.
-- Check file mtimes against known active-session windows.
-- Look for a sibling worktree dedicated to the same campaign (the
-  primary clone often carries the deployment/config piece while
-  the code piece lives in a focused secondary worktree).
-- Just ask via intercom — most sessions know if it's theirs.
-
-Discovered during a worktree triage: 4 uncommitted files in a primary clone
-belonged to at least 3 different sessions (a server-module dev-mount mirror, a
-settings file edited by multiple sessions for local reseed overrides, a deploy
-yaml parked pre-deploy-validation by another session, and a secrets `.bak`
-snapshot whose filename matched a third session's naming convention).
-
-The "registered cwd" field in `intercom list` is misleading for
-primary clones — it tells you where a session was launched, not
-where it does its work.
-
 ### `git checkout --theirs <file>` during a cherry-pick silently drops auto-merged content
 
-During a cherry-pick conflict, the temptation is `git checkout --theirs <file>`
-when you've decided "the picked commit's intent wins for this file". This is
-**not** equivalent to "accept the picked side at each conflict hunk". `--theirs`
-replaces the working-tree file with the **complete file from the picked
-commit's tree**, throwing away any auto-merged hunks outside the conflict
-region.
+`git checkout --theirs <file>` replaces the working-tree file with the COMPLETE
+file from the picked commit's tree — it is NOT "accept the picked side at each
+conflict hunk". It throws away auto-merged hunks outside the conflict region, so
+it's safe **only when** HEAD has zero post-merge-base edits outside the
+conflict. If A made non-conflicting improvements to `foo.py` and you `--theirs`
+it while cherry-picking B's small change, A's improvements silently disappear
+(tests may miss it; lint won't — the file is still valid).
 
-This is safe **only when** the file in HEAD has zero post-merge-base edits
-outside the conflicted region. If HEAD has additions/improvements in
-non-conflicted regions, `--theirs` silently drops them.
-
-**Pattern that bites:**
-- Long-lived branches A and B, both share an ancestor.
-- A made substantive non-conflicting improvements to `foo.py` (new functions,
-  new dict entries, comprehensions).
-- B makes a small targeted change to `foo.py` — say, a doc-comment swap.
-- Cherry-picking B's commit onto A. Conflict marker appears only on the
-  doc-comment hunk (the rest auto-merges, keeping A's improvements).
-- `git checkout --theirs foo.py` replaces the auto-merged file with B's
-  view of foo.py, which **doesn't have A's improvements** because B's
-  branch never had them. Net result: A's improvements silently disappear.
-- Tests may or may not catch it depending on coverage. Pyright/ruff/lint
-  rarely catch it (the file is still syntactically valid).
-
-**Right way to resolve "take the picked side at this conflict":**
-1. Open the file in an editor.
-2. For each `<<<<<<< / ||||||| / ======= / >>>>>>>` block, delete the HEAD
-   side + base side, keep the theirs side. Leave all auto-merged regions
-   untouched.
-3. `git add <file>`.
-
-Safer alternatives when only one hunk conflicts:
-- `git checkout --conflict=diff3 <file>` then hand-edit the markers (merge
-  base visible, so you see what would be lost).
-- `git mergetool` for an interactive 3-way view.
-- For a one-line conflict, just `git diff <file>` after the failed pick,
-  edit the `<<<<<<<` block directly, `git add`, then `--continue`.
-
-**Diagnosis checklist when a cherry-pick lands without conflicts but tests
-regress:**
-- Did anyone do `git checkout --theirs` or `--ours` on a file with non-conflicted
-  divergence? Run `git diff <pre-cherry-pick-commit> -- <file>` to see what
-  was actually changed and compare with the picked commit's intended diff
-  (`git show <picked-commit> -- <file>`). If they don't roughly match in
-  scope, you have a `--theirs`/`--ours` regression.
-
-**Cheap pre-flight check** before using `--theirs`:
+Right way: hand-edit the conflict markers, keeping the theirs side and leaving
+auto-merged regions untouched (`git checkout --conflict=diff3` / `git mergetool`
+make the lost base visible). Pre-flight check before using `--theirs`:
 ```bash
-# Is HEAD's view of the file diverged from the cherry-pick base outside the
-# conflicted regions? If yes, --theirs is unsafe.
-git diff <picked-commit>^ HEAD -- <file>  # ours-side drift
+git diff <picked-commit>^ HEAD -- <file>             # ours-side drift
 git diff <picked-commit>^ <picked-commit> -- <file>  # what the pick actually changes
 ```
-If the ours-side drift extends beyond what the pick touches, hand-resolve
-the conflict instead.
-
-Discovered during a branch-consolidation cherry-pick. `--theirs` on a `mocks.py`
-dropped ~100 lines of newer comprehensions + data entries that existed only on
-the HEAD side; caught by `pytest --collect-only` failing before push, fixed by
-restoring the file from HEAD~1 and surgically reapplying the 6-line doc-comment
-swap the pick actually intended. Safe on the other files `--theirs`'d in the
-same campaign because the picked branch had zero post-merge edits to them. The
-asymmetry is exactly the failure mode to watch for.
+If the ours-side drift extends beyond what the pick touches, hand-resolve instead.
 
 ### Shallow clones cause phantom "AA" conflicts during rebase
 
@@ -822,42 +555,26 @@ to be re-opened as a new PR number.
 
 ### Cherry-pick discipline: hooks-after-early-returns bug class
 
-When cherry-picking React components into a host page that has existing early-return guards (loading / error / empty states), if the cherry-picked code adds a new hook call AFTER one of those guards, the host page violates Rules of Hooks. Symptom: "Rendered more hooks than during the previous render" at runtime. `pnpm build` + `pnpm test` + `pnpm typecheck` all pass — only browser render-cycle catches it.
+When cherry-picking a React component into a host page with existing early-return
+guards (loading/error/empty), a newly-added hook call placed AFTER one of those
+guards violates Rules of Hooks. Symptom: "Rendered more hooks than during the
+previous render" at runtime — `build`/`test`/`typecheck` all pass, only the
+browser render cycle catches it. The PR diff looks innocent in isolation; the
+violation only emerges in the host context.
 
-Example (a card cherry-picked onto a host page already 14 hooks in):
+Fix: move the new hook ABOVE all early returns; handle "data not ready" via
+optional chaining (`useQuery`-backed hooks recompute their fetch on dep change):
 ```javascript
 export function WorkspacePage() {
-  // ... 14 existing hooks ...
-  if (w.isLoading) return <Loading/>;   // pre-existing early return
-  if (w.isError) return <Error/>;
-  
-  const d = w.data;
-  // ❌ NEW HOOK after conditional return:
-  const customerIdentity = useCustomerByName(d.customerName);
-  // ... render JSX using customerIdentity ...
-}
-```
-
-Fix: move the hook BEFORE the early returns; handle the "data not ready yet" case via optional chaining:
-```javascript
-export function WorkspacePage() {
-  // ... 14 existing hooks ...
-  // ✓ HOOK at top, called every render:
-  const customerIdentity = useCustomerByName(w.data?.customerName ?? '');
-  
+  // ... existing hooks ...
+  const customerIdentity = useCustomerByName(w.data?.customerName ?? ''); // ✓ top, every render
   if (w.isLoading) return <Loading/>;
   if (w.isError) return <Error/>;
-  
-  const d = w.data;
-  // ... render JSX using customerIdentity ...
+  // ... render using customerIdentity ...
 }
 ```
-
-The hook handles the lifecycle when name changes from `''` (during loading) to the real name (when w.data resolves). React Query / useQuery-backed hooks recompute their fetch on dep change.
-
-**For future cherry-picks of components that introduce a NEW hook call to a host page**: ALWAYS check that the new hook is invoked at the TOP of the host component, before any conditional returns. The PR's own diff looks innocent in isolation (it's an obviously-correct one-line insertion); the violation only emerges in the cherry-picked context where the host page already has early returns.
-
-Discovered via a browser-side React error after cherry-picking a card component onto a host page with pre-existing early returns.
+Rule: for any cherry-pick that introduces a new hook to a host page, verify the
+hook is called before any conditional return.
 
 ### Don't infer architecture / data-flow from file or directory names — read the flow
 
@@ -961,85 +678,31 @@ observation that we haven't done?"
 - "User-facing impact" without having actually run the UI against the
   failure scenario
 
-### Partial reverts of workarounds are risky without bug repro
+### Verify prior-art / repro before reverting or re-fixing a bug
 
-When proposing to "revert the workaround half of a commit but keep the
-'real fix' half", verify with the original author (or by re-running
-the repro) that the "real fix" half ACTUALLY fixes the underlying
-bug on its own. A commit can look like "two independent changes" in
-the diff but the bug it addresses can only be fixed by both halves
-in concert. Reverting just one half then leaves the bug reintroduced
-while the user assumes "we kept the fix".
+Two related rules for bug-fix work, both learned on the same frontend routing bug
+(clicking a shell sidebar link to leave a sub-app changed the outer URL but the
+sub-app UI stayed mounted; of the fixes tried, only a `window.location.assign`
+hard-nav worked — a synthetic PopStateEvent, a full useNavigate/useLocation
+conversion, and a generic anchor-intercept all did NOT):
 
-Discovered on a routing-workaround commit. The diff had two parts: (1) a
-generic sidebar anchor-click → useNavigate intercept, (2) a hard-nav escape via
-window.location.assign. I proposed partial-revert as an option ("keep the legit
-generic intercept, drop the hard-nav workaround"). The author had actually
-tested both halves and confirmed only the hard-nav escape fixes the
-stale-mounted-UI bug; the generic intercept alone is a no-op for the failure
-mode. Partial revert would silently regress the fix while creating the
-appearance of preserving it.
-
-Rule: before proposing partial-revert of a workaround, either (a)
-get the original author to confirm which sub-change actually fixes
-which sub-bug, or (b) re-run the failing scenario yourself. Don't
-infer "this looks like architecture, this looks like a hack, keep
-the first one" from the diff alone.
-
-### Survey prior-art with the bug-hitter BEFORE dispatching a fix plan
-
-When scoping a fix for a bug, the most valuable input is "what
-attempts have already been tried, by whom, with what result". This
-trumps architectural reasoning from code-reading alone, because the
-person who originally hit the bug has runtime observations that
-constrain the hypothesis space.
-
-Workflow rule: before dispatching a Plan or implementation agent to
-fix a bug, FIRST get prior-art from the session/person who hit it:
-1. What was the exact observed symptom (vs. the inferred mechanism)?
-2. What attempts have they tried? Which fixed it, which didn't?
-3. What signals did they NOT see (e.g. "I did NOT observe X")?
-
-Feed all of that to the Plan agent as "evidence to constrain the
-hypothesis space", not as background reading. The agent should
-explicitly reconcile its recommendation against the failed attempts.
-
-Discovered on a frontend routing bug. Sequence of events:
-
-1. A debugging session hit the bug: clicking a shell sidebar link to leave a
-   sub-app changed the outer URL, but the sub-app's UI stayed mounted/rendered.
-2. They tried 4 fixes locally: a synthetic PopStateEvent (no fix); a full
-   useNavigate/useLocation conversion of the sub-app (no fix); a generic shell
-   anchor-intercept + navigate (no fix); only a `window.location.assign`
-   hard-nav escape worked.
-3. They wrote up a workaround commit and dropped a note describing the intent.
-4. I dispatched a Plan agent to scope the "proper fix" from reading the code,
-   WITHOUT first asking the debugging session what they'd already tried.
-5. The Plan agent hypothesized an effect-rewrites-URL race and recommended
-   converting to useNavigate/useLocation — essentially attempt #2 from the
-   debugging session's list, which they had already verified did NOT fix it.
-6. I dispatched an implementation session to do the recommended fix; they were
-   about to start editing.
-7. The debugging session responded to a separate ping with their prior-attempt
-   history; the contradiction caught the implementation session before any edits.
-
-If the prior-art survey had come BEFORE the Plan dispatch, the plan would've
-explicitly addressed "why didn't the useNavigate conversion fix this? what's
-the actual mechanism?" and would not have recommended an already-failed fix. The
-plan's own "verify the hypothesis at runtime before committing" was a hedge, but
-a hedge isn't a substitute for incorporating known runtime evidence.
-
-Symptom-as-described matters. The reporter's exact words were roughly: "the
-address bar changed to the new route, but the old sub-app UI stayed
-mounted/rendered; I did NOT observe the URL being rewritten back." That "outer
-URL changes, rendered UI stays" — vs. the plan's hypothesized "URL gets
-rewritten back" — is a meaningfully different mechanism: a mount/unmount problem
-(likely in the shell's dynamic-app lazy()/portal/outlet wiring) rather than a
-URL desync.
-
-Rule: paraphrase every bug report into "what symptom was observed"
-+ "what mechanisms it is therefore NOT" before generating a
-hypothesis. The negative-evidence half is half the information.
+- **Survey prior-art with the bug-hitter BEFORE dispatching a fix plan.** Get the
+  exact observed symptom (vs. the inferred mechanism), what fixes were already
+  tried and which failed, and what signals they did NOT see. Feed it to the plan
+  agent as hypothesis-constraining evidence, not background reading — it should
+  explicitly reconcile its recommendation against the failed attempts. (A plan
+  agent once re-recommended the already-failed useNavigate conversion because it
+  scoped from code-reading alone.) Paraphrase every report into "what symptom was
+  observed" + "what mechanism it is therefore NOT"; the negative evidence is half
+  the information ("outer URL changes, UI stays mounted" = a mount/unmount problem,
+  NOT the hypothesized "URL gets rewritten back").
+- **Partial reverts of workarounds are risky without a repro.** Before "revert
+  the workaround half, keep the real-fix half", confirm with the author or by
+  re-running the repro that the kept half fixes the bug on its own. A diff can
+  look like two independent changes when the bug needs both halves in concert;
+  partial revert then silently regresses the fix while appearing to preserve it.
+  Don't infer "this looks like architecture, this looks like a hack" from the
+  diff alone.
 
 ## Memory curation (how to maintain this file)
 
