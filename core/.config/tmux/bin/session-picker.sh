@@ -169,6 +169,33 @@ export_active_pi_sessions() {
   export PI_SESSION_PICKER_PI_SESSIONS
 }
 
+# Compact pi-agent summary for the tmux status line (working/idle counts).
+# Emits tmux style markup; prints nothing when no pi sessions are running.
+status_summary() {
+  export_active_pi_sessions
+  python3 -c '
+import os
+
+working = idle = 0
+for line in os.environ.get("PI_SESSION_PICKER_PI_SESSIONS", "").splitlines():
+    path, sep, status = line.partition("\t")
+    if not sep:
+        continue
+    if status == "working":
+        working += 1
+    else:
+        idle += 1
+
+parts = []
+if working:
+    parts.append(f"#[fg=#a6e3a1,bg=#1e1e2e]π{working}")
+if idle:
+    parts.append(f"#[fg=#6c7086,bg=#1e1e2e]π{idle}")
+if parts:
+    print(" ".join(parts) + " ")
+'
+}
+
 sesh_lines() {
   local mode="${1:-all}"
   local args=(--json)
@@ -581,6 +608,10 @@ kill_if_tmux_session() {
 case "${1:-}" in
   --list)
     list_sessions "${2:-all}"
+    exit 0
+    ;;
+  --status)
+    status_summary
     exit 0
     ;;
   --kill)
