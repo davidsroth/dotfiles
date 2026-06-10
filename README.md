@@ -119,7 +119,6 @@ stow core zsh git-config pi
 - **WezTerm** - GPU-accelerated terminal emulator (primary)
   - Catppuccin Mocha theme, WebGPU renderer
   - Configuration documented in `.config/wezterm/README.md`
-- **Kitty** - Alternative terminal (configured in `.config/kitty/`)
 - **tmux** - Terminal multiplexer with vim-like keybindings
   - Modular configuration with separate keybindings file
   - Session management with `sesh` (TPM plugins: tmux-yank, tmux-sessionist, tmux-fzf)
@@ -169,7 +168,6 @@ dotfiles/
 ├── core/
 │   ├── .config/           # XDG config directory
 │   │   ├── git/          # Git configuration
-│   │   ├── kitty/        # Kitty terminal config
 │   │   ├── lazygit/      # Lazygit configuration
 │   │   ├── nvim/         # Neovim configuration
 │   │   ├── shell/        # Modular shell configs
@@ -201,7 +199,6 @@ Component documentation:
 - [tmux Configuration](core/.config/tmux/README.md)
 - [WezTerm Configuration](core/.config/wezterm/README.md)
 - [Shell Configuration](core/.config/shell/README.md)
-- [Kitty Configuration](core/.config/kitty/README.md)
 - [Lazygit Configuration](core/.config/lazygit/README.md)
 - [Amethyst Configuration](core/.config/amethyst/README.md)
 - [Karabiner Configuration](core/.config/karabiner/README.md)
@@ -219,7 +216,7 @@ Component documentation:
 Run a few quick commands to verify the environment:
 
 ```bash
-zsh -i -c 'echo EDITOR=$EDITOR VISUAL=$VISUAL; which nvim; tmux -V; wezterm -V || true; kitty --version || true'
+zsh -i -c 'echo EDITOR=$EDITOR VISUAL=$VISUAL; which nvim; tmux -V; wezterm -V || true'
 
 # Check tmux plugin manager (TPM) location
 test -x ~/.tmux/plugins/tpm/tpm && echo 'TPM installed at ~/.tmux/plugins/tpm'
@@ -230,10 +227,10 @@ zsh -l -c 'echo PATH=$PATH | cut -c1-200'
 
 ## Troubleshooting
 
-### Fonts (Kitty/tmux glyphs)
+### Fonts (terminal/tmux glyphs)
 
 - macOS: The Brewfile installs `font-fira-code-nerd-font` (auto-taps `homebrew/cask-fonts`).
-- Linux: The installer downloads and installs Fira Code Nerd Font to `~/.local/share/fonts/FiraCodeNerdFont` and refreshes the font cache. This enables Nerd Font icons in Kitty and tmux.
+- Linux: The installer downloads and installs Fira Code Nerd Font to `~/.local/share/fonts/FiraCodeNerdFont` and refreshes the font cache. This enables Nerd Font icons in the terminal and tmux.
 
 ### brew bundle failures
 

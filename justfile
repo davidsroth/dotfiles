@@ -159,7 +159,6 @@ doctor:
   @command -v zoxide >/dev/null 2>&1 && zoxide --version || echo "zoxide: not found"
   @command -v fzf >/dev/null 2>&1 && fzf --version || echo "fzf: not found"
   @command -v rg >/dev/null 2>&1 && rg --version | head -n1 || echo "ripgrep: not found"
-  @command -v kitty >/dev/null 2>&1 && kitty --version || true
   @command -v wezterm >/dev/null 2>&1 && wezterm -V || true
   @echo
   @echo "Configs"
