@@ -11,10 +11,10 @@ scan_timeout = 30            # ms for scanning files
 add_newline = true
 palette = "catppuccin_mocha"
 
-# Format: user@host in dir (BRANCH) status
+# Format: user@host in dir (venv) (BRANCH) status
 # Newline + character on second line.
 format = """
-$username$hostname in $directory$git_branch$git_status$line_break$character"""
+$username$hostname in $directory$python$git_branch$git_status$line_break$character"""
 
 # ============================================================================
 # Module Configurations (only modules referenced in `format`)
@@ -37,6 +37,16 @@ home_symbol = "~"
 symbol = " "
 style = "fg:mauve"
 truncation_length = 20
+
+[python]
+# Venv-only display: no $version in the format, so starship never shells out
+# to python (keeps the prompt fast). All file/extension detection is disabled —
+# the module renders only when a virtualenv is actually activated.
+format = '[(\($virtualenv\) )]($style)'
+style = "fg:yellow"
+detect_extensions = []
+detect_files = []
+detect_folders = []
 
 [git_status]
 style = "fg:red"
