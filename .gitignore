@@ -54,6 +54,8 @@ notes/
 core/.config/raycast/
 core/.config/sunsama/
 core/.config/op/
+core/.config/aetna-claims/
+core/.config/tuxedo/
 
 # Root level dotfiles that might be stow conflicts or local
 .gitconfig
