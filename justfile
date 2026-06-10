@@ -40,6 +40,23 @@ pi-check:
 
 alias pic := pi-check
 
+# Run the vitest suites: hand-written extension tests (extensions/_tests)
+# plus the vendored pi packages that ship tests.
+pi-test:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  EXT="{{justfile_directory()}}/pi/.pi/agent/extensions"
+  if [[ ! -d "$EXT/node_modules/vitest" ]]; then
+    (cd "$EXT" && npm install --silent --no-audit --no-fund)
+  fi
+  # npm install prunes the SDK symlink farm; restore it for runtime resolution.
+  bash "{{justfile_directory()}}/scripts/pi-typecheck.sh" --links-only
+  (cd "$EXT" && npx vitest --run)
+  (cd "{{justfile_directory()}}/pi/packages/pi-plan-review" && npm test)
+  (cd "{{justfile_directory()}}/pi/packages/pi-subagents" && npm test)
+
+alias pit := pi-test
+
 # Link the tracked global memory file (~/.pi/agent/memory/MEMORY.md → repo).
 # Per-machine memory (MEMORY.local.md, SCRATCHPAD.md, daily/) stays local.
 pi-memory:

@@ -52,10 +52,20 @@ if ! PI_PKG="$(resolve_pi_pkg)"; then
 fi
 echo "pi-check: SDK -> $PI_PKG"
 
+# --- Dev deps (vitest for _tests) -------------------------------------------
+# npm install prunes symlinks it doesn't know about, so install BEFORE the
+# farm is (re)built — the farm links are restored right after.
+if [[ -f "$EXT/package.json" && ! -d "$EXT/node_modules/vitest" ]]; then
+  echo "pi-check: installing dev deps (vitest) ..."
+  (cd "$EXT" && npm install --silent --no-audit --no-fund)
+fi
+
 # --- Build the gitignored symlink farm --------------------------------------
+# Remove only the farm links, not all of node_modules — it also holds the
+# npm-installed dev deps used by `just pi-test`.
 NM="$EXT/node_modules"
 SCOPE="$NM/@earendil-works"
-rm -rf "$NM"
+rm -rf "$SCOPE" "$NM/typebox"
 mkdir -p "$SCOPE"
 
 link() { # link <target> <linkpath>
@@ -73,6 +83,13 @@ link "$PI_PKG/node_modules/@earendil-works/pi-agent-core"  "$SCOPE/pi-agent-core
 link "$PI_PKG/node_modules/typebox"                        "$NM/typebox"
 
 # --- Typecheck --------------------------------------------------------------
+# --links-only: stop after the farm is built (used by `just pi-test`, which
+# needs the SDK links resolvable at runtime for vitest but not a tsc run).
+if [[ "${1:-}" == "--links-only" ]]; then
+  echo "pi-check: farm links restored (skipping tsc)."
+  exit 0
+fi
+
 echo "pi-check: running tsc --noEmit (typescript@$TS_VERSION) ..."
 cd "$EXT"
 npx -y -p "typescript@$TS_VERSION" tsc --noEmit -p tsconfig.json
