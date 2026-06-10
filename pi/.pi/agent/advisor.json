@@ -1,6 +1,6 @@
 {
-  "model": "anthropic/claude-opus-4-8",
+  "model": "anthropic/claude-fable-5",
   "thinkingLevel": "high",
-  "readOnly": true,
-  "maxTurns": 12
+  "readOnly": false,
+  "maxTurns": 50
 }
