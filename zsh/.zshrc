@@ -45,12 +45,13 @@ setopt extendedglob
 autoload -Uz compinit
 
 # Only regenerate dump once per day
-local zcompdump="${XDG_CACHE_HOME:-$HOME/.cache}/zsh/zcompdump"
-if [[ ! -f "$zcompdump" || "$zcompdump"(#qNmh+24) ]]; then
-  compinit -d "$zcompdump"
+_zcompdump="${XDG_CACHE_HOME:-$HOME/.cache}/zsh/zcompdump"
+if [[ ! -f "$_zcompdump" || "$_zcompdump"(#qNmh+24) ]]; then
+  compinit -d "$_zcompdump"
 else
-  compinit -C -d "$zcompdump"
+  compinit -C -d "$_zcompdump"
 fi
+unset _zcompdump
 
 # Completion options for better experience
 zstyle ':completion:*' menu select                           # Menu selection
@@ -78,7 +79,6 @@ stty -ixon
 
 # Zoxide - cached init for performance
 _zoxide_cache="${XDG_CACHE_HOME:-$HOME/.cache}/zsh/zoxide-init.zsh"
-local _zoxide_bin
 _zoxide_bin="$(command -v zoxide 2>/dev/null)"
 if [[ -f "$_zoxide_cache" && -n "$_zoxide_bin" && "$_zoxide_cache" -nt "$_zoxide_bin" ]]; then
     source "$_zoxide_cache"
@@ -86,7 +86,7 @@ elif command -v zoxide >/dev/null 2>&1; then
     zoxide init zsh > "$_zoxide_cache"
     source "$_zoxide_cache"
 fi
-unset _zoxide_cache
+unset _zoxide_cache _zoxide_bin
 
 # Load shell configuration (functions first — aliases depend on clipboard helpers)
 [ -f ~/.config/shell/functions.sh ] && source ~/.config/shell/functions.sh
@@ -147,8 +147,8 @@ pyenv() {
 
 # NVM - Node version management
 # Lazy load: only load when nvm, node, npm or npx is called
+# NVM_DIR is exported in .zshenv
 _load_nvm() {
-  export NVM_DIR="$HOME/.nvm"
   [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
   [ -s "$NVM_DIR/bash_completion" ] && . "$NVM_DIR/bash_completion"
 }
@@ -157,6 +157,7 @@ nvm() { unfunction nvm node npm npx 2>/dev/null; _load_nvm; nvm "$@" }
 node() { unfunction nvm node npm npx 2>/dev/null; _load_nvm; node "$@" }
 npm() { unfunction nvm node npm npx 2>/dev/null; _load_nvm; npm "$@" }
 npx() { unfunction nvm node npm npx 2>/dev/null; _load_nvm; npx "$@" }
+
 # ============================================================================
 # Editor Configuration
 # ============================================================================
@@ -164,7 +165,7 @@ npx() { unfunction nvm node npm npx 2>/dev/null; _load_nvm; npx "$@" }
 # Neovim remote support
 
 # Neovim remote support - override both when inside neovim
-if [ -n "$NVIM" ]; then
+if [ -n "$NVIM" ] && command -v nvr >/dev/null 2>&1; then
     # Use neovim-remote when inside neovim to avoid nested instances
     alias nvim='nvr -cc split --remote-wait +'"'"'set bufhidden=wipe'"'"
     export VISUAL="nvr -cc split --remote-wait +'set bufhidden=wipe'"
@@ -178,7 +179,6 @@ fi
 # Starship prompt - cached init for performance
 _starship_cache="${XDG_CACHE_HOME:-$HOME/.cache}/zsh/starship-init.zsh"
 _starship_config="${XDG_CONFIG_HOME:-$HOME/.config}/starship.toml"
-local _starship_bin
 _starship_bin="$(command -v starship 2>/dev/null)"
 if [[ -f "$_starship_cache" && -n "$_starship_bin" && "$_starship_cache" -nt "$_starship_bin" && ( ! -f "$_starship_config" || "$_starship_cache" -nt "$_starship_config" ) ]]; then
     source "$_starship_cache"
@@ -186,7 +186,7 @@ elif command -v starship >/dev/null 2>&1; then
     starship init zsh --print-full-init > "$_starship_cache"
     source "$_starship_cache"
 fi
-unset _starship_cache _starship_config
+unset _starship_cache _starship_config _starship_bin
 
 # ============================================================================
 # Plugin Loading (Deferred for Performance)

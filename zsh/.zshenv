@@ -104,8 +104,9 @@ export GIT_OPTIONAL_LOCKS=0
 # Python environment
 export PYENV_VIRTUALENV_DISABLE_PROMPT=1
 
-# Ensure XDG directories exist
-mkdir -p "$XDG_CONFIG_HOME" "$XDG_CACHE_HOME" "$XDG_DATA_HOME" "$XDG_STATE_HOME/zsh"
+# Ensure XDG directories exist (guarded — this file runs for every shell,
+# including non-interactive subshells, so skip the mkdir on the hot path)
+[[ -d "$XDG_STATE_HOME/zsh" ]] || mkdir -p "$XDG_CONFIG_HOME" "$XDG_CACHE_HOME" "$XDG_DATA_HOME" "$XDG_STATE_HOME/zsh"
 
 # FZF configuration
 # Global defaults should NOT change Enter behavior to avoid breaking widgets like Ctrl-R history
