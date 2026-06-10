@@ -30,7 +30,6 @@ CONTRIBUTING.*
 
 # Installation and setup scripts
 install.sh
-bootstrap.sh
 macos-defaults.sh
 justfile
 Justfile

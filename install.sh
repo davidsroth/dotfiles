@@ -72,7 +72,7 @@ compute_total_steps() {
 # Timeouts and constants
 readonly XCODE_TIMEOUT=300 # 5 minutes
 readonly DEFAULT_BRANCH="${DEFAULT_BRANCH:-main}"
-readonly NVM_VERSION="${NVM_VERSION:-v0.40.1}"
+readonly NVM_VERSION="${NVM_VERSION:-v0.40.5}"
 
 # Script options
 DRY_RUN=false
@@ -108,7 +108,7 @@ Environment Variables:
     GITHUB_USER     Your GitHub username (default: davidroth)
     DOTFILES_DIR    Installation directory (default: ~/dotfiles)
     DEFAULT_BRANCH  Git branch to use (default: main)
-    NVM_VERSION     NVM version to install (default: v0.40.1)
+    NVM_VERSION     NVM version to install (default: v0.40.5)
     NVIM_METHOD     Neovim method: auto|appimage|tarball|backports (default: auto→appimage on x86_64)
     NVIM_MIN_VERSION     Ensure Neovim >= this version (default: 0.9.0)
     NVIM_FORCE_UPDATE    true to force reinstall (default: false)
@@ -1084,7 +1084,8 @@ setup_pi_memory() {
   if [[ -L "$dest" ]]; then
     : # already a symlink; leave it
   elif [[ -e "$dest" ]]; then
-    local backup="$dest.pre-link-backup-$(date +%Y%m%d-%H%M%S)"
+    local backup
+    backup="$dest.pre-link-backup-$(date +%Y%m%d-%H%M%S)"
     warning "Existing $dest is a real file; backing up to $backup before linking"
     mv "$dest" "$backup"
   fi
