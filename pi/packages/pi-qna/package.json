@@ -22,6 +22,10 @@
       "./extensions/qna.ts"
     ]
   },
+  "scripts": {
+    "test": "vitest --run",
+    "typecheck": "tsc --noEmit"
+  },
   "peerDependencies": {
     "@earendil-works/pi-ai": "*",
     "@earendil-works/pi-coding-agent": "*",
@@ -33,5 +37,11 @@
     "pi-vim": {
       "optional": true
     }
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "@types/node": "^25",
+    "typescript": "^6",
+    "vitest": "^4"
   }
 }

@@ -78,7 +78,7 @@ const QNA_STATUS_KEY = "pi-vim";
 // Stash for `/qna --resume`. Held both in module-scope (fast path, survives
 // within the process) and on disk (survives `/reload`). Disk file is wiped on
 // successful submit. Stash older than STASH_TTL_MS is treated as stale.
-interface QnaStash {
+export interface QnaStash {
 	questions: string[];
 	answers: string[];
 	sourceText: string;
@@ -91,12 +91,17 @@ interface QnaStash {
 	completed?: boolean;
 }
 
-const STASH_PATH = join(homedir(), ".cache", "pi-qna", "stash.json");
-const STASH_TTL_MS = 24 * 60 * 60 * 1000; // 24h
+export const STASH_PATH = join(homedir(), ".cache", "pi-qna", "stash.json");
+export const STASH_TTL_MS = 24 * 60 * 60 * 1000; // 24h
 
 let lastStash: QnaStash | undefined;
 
-function writeStashToDisk(stash: QnaStash): void {
+/** Reset module-level stash state. For testing only. */
+export function _resetLastStash(): void {
+	lastStash = undefined;
+}
+
+export function writeStashToDisk(stash: QnaStash): void {
 	try {
 		mkdirSync(dirname(STASH_PATH), { recursive: true });
 		writeFileSync(STASH_PATH, JSON.stringify(stash), "utf8");
@@ -105,7 +110,7 @@ function writeStashToDisk(stash: QnaStash): void {
 	}
 }
 
-function readStashFromDisk(): QnaStash | undefined {
+export function readStashFromDisk(): QnaStash | undefined {
 	try {
 		const raw = readFileSync(STASH_PATH, "utf8");
 		const parsed = JSON.parse(raw) as Partial<QnaStash>;
@@ -128,19 +133,35 @@ function readStashFromDisk(): QnaStash | undefined {
 // Return the index of the first card whose answer is blank, or the last card
 // if all are filled. Used to land the cursor where the user would naturally
 // continue typing on resume.
-function firstUnansweredIndex(answers: string[]): number {
+export function firstUnansweredIndex(answers: string[]): number {
 	for (let i = 0; i < answers.length; i++) {
 		if (!(answers[i] ?? "").trim()) return i;
 	}
 	return Math.max(0, answers.length - 1);
 }
 
-function saveStash(stash: QnaStash): void {
+/**
+ * Determine the start index for resuming a stash. Uses stash.lastIndex if it
+ * is a valid index within [0, questions.length), otherwise falls back to
+ * firstUnansweredIndex(stash.answers).
+ */
+export function resolveStartIndex(stash: QnaStash): number {
+	if (
+		typeof stash.lastIndex === "number" &&
+		stash.lastIndex >= 0 &&
+		stash.lastIndex < stash.questions.length
+	) {
+		return stash.lastIndex;
+	}
+	return firstUnansweredIndex(stash.answers);
+}
+
+export function saveStash(stash: QnaStash): void {
 	lastStash = stash;
 	writeStashToDisk(stash);
 }
 
-function loadStash(): QnaStash | undefined {
+export function loadStash(): QnaStash | undefined {
 	return lastStash ?? readStashFromDisk();
 }
 
@@ -163,7 +184,7 @@ interface ExtractedQuestions {
 	questions: string[];
 }
 
-function parseExtractorResponse(text: string): string[] {
+export function parseExtractorResponse(text: string): string[] {
 	const trimmed = text.trim();
 	// Tolerate ```json fences
 	const stripped = trimmed
@@ -195,7 +216,7 @@ interface AssistantTextResult {
 	incompleteReason?: string;
 }
 
-function findLastAssistantText(branchEntries: readonly unknown[]): AssistantTextResult | null {
+export function findLastAssistantText(branchEntries: readonly unknown[]): AssistantTextResult | null {
 	for (let i = branchEntries.length - 1; i >= 0; i--) {
 		const entry = branchEntries[i] as { type?: string; message?: unknown } | null | undefined;
 		if (!entry || entry.type !== "message") continue;
@@ -220,7 +241,7 @@ function findLastAssistantText(branchEntries: readonly unknown[]): AssistantText
 	return null;
 }
 
-function buildQAFromAnswers(questions: string[], answers: string[]): string {
+export function buildQAFromAnswers(questions: string[], answers: string[]): string {
 	const blocks: string[] = [];
 	for (let i = 0; i < questions.length; i++) {
 		const q = questions[i] ?? "";
@@ -233,7 +254,7 @@ function buildQAFromAnswers(questions: string[], answers: string[]): string {
 }
 
 // Word-wrap a piece of text to a max width using simple word boundaries.
-function wrapText(text: string, width: number): string[] {
+export function wrapText(text: string, width: number): string[] {
 	if (width <= 0) return [text];
 	const out: string[] = [];
 	for (const rawLine of text.split("\n")) {
@@ -271,7 +292,7 @@ interface CardFrame {
 	innerWidth: number;
 }
 
-function buildFrame(width: number, color: (s: string) => string): CardFrame {
+export function buildFrame(width: number, color: (s: string) => string): CardFrame {
 	const innerWidth = Math.max(20, width - 2);
 	return {
 		top: color(`╭${"─".repeat(innerWidth)}╮`),
