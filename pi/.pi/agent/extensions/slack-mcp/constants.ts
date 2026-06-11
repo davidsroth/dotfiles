@@ -44,7 +44,8 @@ export const DISCONNECT_HARD_TIMEOUT_MS = 2_000;
 // This keeps ANTHROPIC_API_KEY, CLAUDE_PERSONAL_ACCESS_TOKEN, etc. out of
 // the child's `environ` (still visible to that user via `pgrep -fl` on macOS,
 // which scans KERN_PROCARGS2 — argv + environ concatenated).
-const ENV_ALLOWLIST: readonly string[] = [
+/** @internal exported for tests */
+export const ENV_ALLOWLIST: readonly string[] = [
   // Core unix
   "PATH", "HOME", "USER", "USERNAME", "LOGNAME", "SHELL",
   "TMPDIR", "TMP", "TEMP", "TERM",
@@ -52,7 +53,8 @@ const ENV_ALLOWLIST: readonly string[] = [
   // Node / nvm
   "NODE_PATH", "NODE_OPTIONS", "NVM_DIR", "NVM_BIN", "NVM_INC",
 ];
-const ENV_ALLOWLIST_PREFIXES: readonly string[] = ["NPM_", "npm_", "SLACK_"];
+/** @internal exported for tests */
+export const ENV_ALLOWLIST_PREFIXES: readonly string[] = ["NPM_", "npm_", "SLACK_"];
 
 export function buildChildEnv(cfgEnv: Record<string, string>): Record<string, string> {
   const out: Record<string, string> = {};

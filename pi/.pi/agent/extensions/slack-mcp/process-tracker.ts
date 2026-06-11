@@ -54,11 +54,27 @@ export function installExitHookOnce(): void {
 }
 
 /**
+ * @internal Reset globalThis tracker state between tests. Do NOT call in
+ * production code.
+ */
+export function _resetForTesting(): void {
+  const g = globalThis as Record<string, unknown>;
+  (g[TRACKED_CHILDREN_KEY] as Set<number> | undefined)?.clear();
+  delete g[TRACKED_CHILDREN_KEY];
+  delete g[EXIT_HOOK_KEY];
+}
+
+/**
  * Collect descendant PIDs (any depth) of a given root PID via `ps`.
  * Used by killProcessTree as a fallback in case some grandchild has
  * escaped the parent's process group (e.g. via setsid). Best-effort:
  * returns [] on any ps error.
  */
+/** @internal — exported for tests only */
+export function _collectDescendants(rootPid: number): number[] {
+  return collectDescendants(rootPid);
+}
+
 function collectDescendants(rootPid: number): number[] {
   try {
     const out = execSync("ps -A -o pid=,ppid=", { encoding: "utf-8", timeout: 1000 });

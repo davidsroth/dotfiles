@@ -32,6 +32,11 @@ export class StdioMCPClient {
     return this.connected;
   }
 
+  /** @internal test-only: number of in-flight pending requests */
+  get pendingCount(): number {
+    return this.pending.size;
+  }
+
   getTools(): MCPTool[] {
     return this.tools;
   }
@@ -49,7 +54,7 @@ export class StdioMCPClient {
     trackedChildren().delete(childPid);
   }
 
-  async connect(cfg: ResolvedConfig): Promise<void> {
+  async connect(cfg: ResolvedConfig, _spawn?: typeof spawn): Promise<void> {
     if (this.connected) return;
     this.requestTimeoutMs = cfg.requestTimeoutMs;
     this.requestTimeoutMsByTool = cfg.requestTimeoutMsByTool;
@@ -59,8 +64,9 @@ export class StdioMCPClient {
     // Ensure the at-exit reaper is registered before we spawn anything.
     installExitHookOnce();
 
+    const spawnFn = _spawn ?? spawn;
     const env = buildChildEnv(cfg.env);
-    const child = spawn(cfg.command, cfg.args, {
+    const child = spawnFn(cfg.command, cfg.args, {
       env,
       stdio: ["pipe", "pipe", "pipe"],
       // Put the child in its own process group so we can SIGTERM/SIGKILL the

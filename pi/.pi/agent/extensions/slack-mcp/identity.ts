@@ -18,7 +18,7 @@ export interface SlackIdentity {
   error?: string;
 }
 
-const identityCache = new Map<string, SlackIdentity>();
+export const identityCache = new Map<string, SlackIdentity>();
 
 export function resolveSlackToken(env: Record<string, string>): { token: string; cookie?: string } | null {
   const xoxp = env.SLACK_MCP_XOXP_TOKEN || process.env.SLACK_MCP_XOXP_TOKEN;

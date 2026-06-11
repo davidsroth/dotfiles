@@ -68,6 +68,11 @@ interface SharedEntry {
   pending: Promise<void> | null;
 }
 
+/** @internal — exported for tests only */
+export function _getSharedRegistry(): Map<string, SharedEntry> {
+  return getSharedRegistry();
+}
+
 function getSharedRegistry(): Map<string, SharedEntry> {
   const g = globalThis as Record<string, unknown>;
   let reg = g[SHARED_REGISTRY_KEY] as Map<string, SharedEntry> | undefined;
@@ -84,6 +89,11 @@ function getSharedRegistry(): Map<string, SharedEntry> {
  * excluded so two sessions with different pi-side prefixes can still share
  * the same upstream server.
  */
+/** @internal — exported for tests only */
+export function _configKey(cfg: ResolvedConfig): string {
+  return configKey(cfg);
+}
+
 function configKey(cfg: ResolvedConfig): string {
   const envEntries = Object.entries(cfg.env).sort(([a], [b]) => a.localeCompare(b));
   return JSON.stringify({ command: cfg.command, args: cfg.args, env: envEntries });

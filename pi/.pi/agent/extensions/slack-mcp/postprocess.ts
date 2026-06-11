@@ -15,9 +15,9 @@ import type { ResolvedPostProcess } from "./types";
 
 // id -> display name, accumulated across calls (seeded from CSV rows for free,
 // topped up via bounded users.info lookups).
-const userNameCache = new Map<string, string>();
+export const userNameCache = new Map<string, string>();
 
-function parseCSV(text: string): string[][] | null {
+export function parseCSV(text: string): string[][] | null {
   const rows: string[][] = [];
   let field = "";
   let row: string[] = [];
@@ -54,7 +54,7 @@ function serializeCSV(rows: string[][]): string {
 // Resolve Slack mention tokens to readable names. Inline-name forms
 // (`<@U123|name>`, `<#C123|name>`) are free; bare `<@U123>` are resolved via
 // the shared cache, then via up to `budget.n` users.info lookups.
-async function resolveMentions(text: string, env: Record<string, string>, budget: { n: number }): Promise<string> {
+export async function resolveMentions(text: string, env: Record<string, string>, budget: { n: number }): Promise<string> {
   let out = text.replace(/<@([UW][A-Z0-9]+)\|([^>]+)>/g, (_m, id: string, nm: string) => {
     if (!userNameCache.has(id)) userNameCache.set(id, nm);
     return `@${nm}`;
