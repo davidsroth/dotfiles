@@ -57,6 +57,8 @@ pi-test:
   (cd "{{justfile_directory()}}/pi/packages/pi-intercom" && npm test)
   (cd "{{justfile_directory()}}/pi/packages/pi-intercom-tailnet" && npm test)
   (cd "{{justfile_directory()}}/pi/packages/pi-btw" && npm test)
+  (cd "{{justfile_directory()}}/pi/packages/pi-memory" && npm test)
+  (cd "{{justfile_directory()}}/pi/packages/pi-qna" && npm test)
 
 alias pit := pi-test
 

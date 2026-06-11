@@ -24,6 +24,8 @@ jobs:
             pi/packages/pi-subagents/package-lock.json
             pi/packages/pi-intercom/package-lock.json
             pi/packages/pi-intercom-tailnet/package-lock.json
+            pi/packages/pi-memory/package-lock.json
+            pi/packages/pi-qna/package-lock.json
 
       - name: Install just
         uses: extractions/setup-just@v3
@@ -55,6 +57,14 @@ jobs:
       - name: Install pi-btw deps
         working-directory: pi/packages/pi-btw
         run: npm install --no-audit --no-fund
+
+      - name: Install pi-memory deps
+        working-directory: pi/packages/pi-memory
+        run: npm ci --no-audit --no-fund
+
+      - name: Install pi-qna deps
+        working-directory: pi/packages/pi-qna
+        run: npm ci --no-audit --no-fund
 
       - name: Typecheck extensions (just pi-check)
         run: just pi-check
