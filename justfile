@@ -54,6 +54,9 @@ pi-test:
   (cd "$EXT" && npx vitest --run)
   (cd "{{justfile_directory()}}/pi/packages/pi-plan-review" && npm test)
   (cd "{{justfile_directory()}}/pi/packages/pi-subagents" && npm test)
+  (cd "{{justfile_directory()}}/pi/packages/pi-intercom" && npm test)
+  (cd "{{justfile_directory()}}/pi/packages/pi-intercom-tailnet" && npm test)
+  (cd "{{justfile_directory()}}/pi/packages/pi-btw" && npm test)
 
 alias pit := pi-test
 
