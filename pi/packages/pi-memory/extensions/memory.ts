@@ -107,14 +107,14 @@ Checklist of possible follow-ups, unresolved issues, and candidate memories.
 - [ ] Review and prune this scratchpad periodically.
 `;
 
-const todayString = (date = new Date()): string => {
+export const todayString = (date = new Date()): string => {
 	const year = date.getFullYear();
 	const month = String(date.getMonth() + 1).padStart(2, "0");
 	const day = String(date.getDate()).padStart(2, "0");
 	return `${year}-${month}-${day}`;
 };
 
-const timeString = (date = new Date()): string => {
+export const timeString = (date = new Date()): string => {
 	const hours = String(date.getHours()).padStart(2, "0");
 	const minutes = String(date.getMinutes()).padStart(2, "0");
 	return `${hours}:${minutes}`;
@@ -125,7 +125,7 @@ const getAgentDir = (): string => process.env.PI_CODING_AGENT_DIR ?? join(homedi
 // Walk up from cwd to the nearest ancestor containing a `.git` entry (the
 // project root). Falls back to cwd when not inside a work tree. Pure filesystem,
 // so no git dependency and matches pi's `<cwd>/.pi/agents/` project convention.
-const findProjectRoot = (cwd: string): string => {
+export const findProjectRoot = (cwd: string): string => {
 	let dir = cwd;
 	// eslint-disable-next-line no-constant-condition
 	while (true) {
@@ -157,7 +157,7 @@ const getStorePaths = (cwd: string = process.cwd()): StorePaths => {
 
 // Resolve the MEMORY file for a scope. Global (default) syncs across machines;
 // local stays on this machine; project lives in the current repo's .pi/memory/.
-const memoryPathForScope = (paths: StorePaths, scope: Scope | undefined): string =>
+export const memoryPathForScope = (paths: StorePaths, scope: Scope | undefined): string =>
 	scope === "local" ? paths.memoryLocal : scope === "project" ? paths.project : paths.memory;
 
 const writeFileIfMissing = async (path: string, content: string): Promise<void> => {
@@ -172,7 +172,7 @@ const writeFileIfMissing = async (path: string, content: string): Promise<void> 
 
 // NOTE: deliberately does NOT create the project file — that would litter every
 // repo the user opens. Project memory is created lazily on first scope=project write.
-const ensureStore = async (cwd?: string): Promise<StorePaths> => {
+export const ensureStore = async (cwd?: string): Promise<StorePaths> => {
 	const paths = getStorePaths(cwd);
 	await mkdir(paths.dailyDir, { recursive: true });
 	await writeFileIfMissing(paths.memory, defaultMemoryTemplate);
@@ -188,7 +188,7 @@ const ensureDailyFile = async (paths: StorePaths): Promise<void> => {
 
 const readTextFile = async (path: string): Promise<string> => readFile(path, "utf8");
 
-const truncateText = (text: string, maxChars: number): { text: string; truncated: boolean } => {
+export const truncateText = (text: string, maxChars: number): { text: string; truncated: boolean } => {
 	if (text.length <= maxChars) return { text, truncated: false };
 	return {
 		text: `${text.slice(0, maxChars)}\n\n[Truncated ${text.length - maxChars} character(s). Use memory search/read more specifically if needed.]`,
@@ -196,16 +196,16 @@ const truncateText = (text: string, maxChars: number): { text: string; truncated
 	};
 };
 
-const headingLevel = (line: string): number => {
+export const headingLevel = (line: string): number => {
 	const match = /^(#{1,6})\s/.exec(line);
 	return match ? (match[1] as string).length : 0;
 };
 
-const headingText = (line: string): string => line.replace(/^#{1,6}\s+/, "").trim();
+export const headingText = (line: string): string => line.replace(/^#{1,6}\s+/, "").trim();
 
 // Parse ATX headings, skipping lines inside ``` / ~~~ fenced code blocks so a
 // "# comment" in a shell example isn't mistaken for a section heading.
-const parseHeadings = (lines: string[]): { index: number; level: number; title: string }[] => {
+export const parseHeadings = (lines: string[]): { index: number; level: number; title: string }[] => {
 	const out: { index: number; level: number; title: string }[] = [];
 	let fence: string | null = null;
 	for (let i = 0; i < lines.length; i++) {
@@ -224,7 +224,7 @@ const parseHeadings = (lines: string[]): { index: number; level: number; title: 
 };
 
 // Range of a Markdown section: [heading line, next heading of same-or-higher level).
-const findSectionRange = (lines: string[], section: string): { start: number; end: number; level: number } | null => {
+export const findSectionRange = (lines: string[], section: string): { start: number; end: number; level: number } | null => {
 	const heads = parseHeadings(lines);
 	const needle = section.trim().toLowerCase();
 	for (let k = 0; k < heads.length; k++) {
@@ -243,7 +243,7 @@ const findSectionRange = (lines: string[], section: string): { start: number; en
 };
 
 // Compact outline of the '##' / '###' headings, for orienting in a large file.
-const buildOutline = (content: string): string =>
+export const buildOutline = (content: string): string =>
 	parseHeadings(content.split("\n"))
 		.filter((head) => head.level === 2 || head.level === 3)
 		.map((head) => (head.level === 2 ? `- ${head.title}` : `  - ${head.title}`))
@@ -307,7 +307,7 @@ const readTarget = async (target: Target | undefined, scope?: Scope, cwd?: strin
 	return { text: await readTextFile(path), files: [path] };
 };
 
-const readSection = async (
+export const readSection = async (
 	target: Target | undefined,
 	section: string,
 	scope?: Scope,
@@ -329,7 +329,7 @@ const readSection = async (
 	return { text: lines.slice(range.start, range.end).join("\n").trimEnd(), files: [path] };
 };
 
-const searchMemory = async (params: MemoryParams, cwd?: string): Promise<{ text: string; files: string[]; count: number }> => {
+export const searchMemory = async (params: MemoryParams, cwd?: string): Promise<{ text: string; files: string[]; count: number }> => {
 	const query = params.query?.trim() || params.text?.trim();
 	if (!query) return { text: "Error: query is required for memory search.", files: [], count: 0 };
 
@@ -376,7 +376,7 @@ const searchMemory = async (params: MemoryParams, cwd?: string): Promise<{ text:
 	};
 };
 
-const appendToTarget = async (params: MemoryParams, cwd?: string): Promise<{ text: string; files: string[] }> => {
+export const appendToTarget = async (params: MemoryParams, cwd?: string): Promise<{ text: string; files: string[] }> => {
 	const target = params.target;
 	const text = params.text?.trim();
 	if (!text) return { text: "Error: text is required for append.", files: [] };
@@ -437,7 +437,7 @@ const appendToTarget = async (params: MemoryParams, cwd?: string): Promise<{ tex
 	return { text: resultText, files: [path] };
 };
 
-const replaceInTarget = async (params: MemoryParams, cwd?: string): Promise<{ text: string; files: string[] }> => {
+export const replaceInTarget = async (params: MemoryParams, cwd?: string): Promise<{ text: string; files: string[] }> => {
 	const target = params.target ?? "memory";
 	if (target === "daily" || target === "all") {
 		return { text: "Error: replace is only allowed for memory or scratchpad. Daily logs are append-only.", files: [] };
@@ -467,7 +467,7 @@ const replaceInTarget = async (params: MemoryParams, cwd?: string): Promise<{ te
 	return { text: `Replaced one occurrence in ${displayPath(paths, path)}.`, files: [path] };
 };
 
-const markScratchDone = async (params: MemoryParams): Promise<{ text: string; files: string[] }> => {
+export const markScratchDone = async (params: MemoryParams): Promise<{ text: string; files: string[] }> => {
 	const query = params.query?.trim() || params.text?.trim();
 	if (!query) return { text: "Error: query or text is required for scratch_done.", files: [] };
 
