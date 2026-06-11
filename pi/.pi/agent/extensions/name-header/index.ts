@@ -29,6 +29,7 @@ import { renderLines } from "./render";
 import { type DashboardState, PR_VIEWS, type PrListState, type PrView } from "./types";
 
 export default function dashboardWidget(pi: ExtensionAPI) {
+	let disposed = false;
 	let enabled = true;
 	let visible = true;
 	let prFocused = false;
@@ -145,10 +146,12 @@ export default function dashboardWidget(pi: ExtensionAPI) {
 			} catch (error) {
 				state.weatherError = error instanceof Error ? error.message : String(error);
 			} finally {
-				state.weatherFetchedAt = Date.now();
-				state.weatherLoading = false;
 				weatherPromise = undefined;
-				requestRender();
+				if (!disposed) {
+					state.weatherFetchedAt = Date.now();
+					state.weatherLoading = false;
+					requestRender();
+				}
 			}
 		})();
 		return weatherPromise;
@@ -167,10 +170,12 @@ export default function dashboardWidget(pi: ExtensionAPI) {
 			} catch (error) {
 				state.agendaError = error instanceof Error ? error.message : String(error);
 			} finally {
-				state.agendaFetchedAt = Date.now();
-				state.agendaLoading = false;
 				agendaPromise = undefined;
-				requestRender();
+				if (!disposed) {
+					state.agendaFetchedAt = Date.now();
+					state.agendaLoading = false;
+					requestRender();
+				}
 			}
 		})();
 		return agendaPromise;
@@ -190,10 +195,12 @@ export default function dashboardWidget(pi: ExtensionAPI) {
 			} catch (error) {
 				listState.prsError = error instanceof Error ? error.message : String(error);
 			} finally {
-				listState.prsFetchedAt = Date.now();
-				listState.prsLoading = false;
 				prsPromises[view] = undefined;
-				requestRender();
+				if (!disposed) {
+					listState.prsFetchedAt = Date.now();
+					listState.prsLoading = false;
+					requestRender();
+				}
 			}
 		})();
 		return prsPromises[view];
@@ -252,6 +259,7 @@ export default function dashboardWidget(pi: ExtensionAPI) {
 	});
 
 	pi.on("session_shutdown", () => {
+		disposed = true;
 		stopRefreshTimer();
 		activeRequestRender = undefined;
 		activePickerRender = undefined;
