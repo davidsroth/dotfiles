@@ -1,0 +1,63 @@
+name: pi-checks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  pi-check:
+    name: Typecheck and test pi extensions
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: |
+            pi/.pi/agent/extensions/package-lock.json
+            pi/packages/pi-plan-review/package-lock.json
+            pi/packages/pi-subagents/package-lock.json
+            pi/packages/pi-intercom/package-lock.json
+            pi/packages/pi-intercom-tailnet/package-lock.json
+
+      - name: Install just
+        uses: extractions/setup-just@v3
+
+      - name: Install pi coding agent globally
+        run: npm install -g @earendil-works/pi-coding-agent@0
+
+      - name: Install pi extension dev deps
+        working-directory: pi/.pi/agent/extensions
+        run: npm ci --no-audit --no-fund
+
+      - name: Install pi-plan-review deps
+        working-directory: pi/packages/pi-plan-review
+        run: npm ci --no-audit --no-fund
+
+      - name: Install pi-subagents deps
+        working-directory: pi/packages/pi-subagents
+        run: npm ci --no-audit --no-fund
+
+      - name: Install pi-intercom deps
+        working-directory: pi/packages/pi-intercom
+        run: npm ci --no-audit --no-fund
+
+      - name: Install pi-intercom-tailnet deps
+        working-directory: pi/packages/pi-intercom-tailnet
+        run: npm ci --no-audit --no-fund
+
+      # pi-btw ships no lockfile; plain install
+      - name: Install pi-btw deps
+        working-directory: pi/packages/pi-btw
+        run: npm install --no-audit --no-fund
+
+      - name: Typecheck extensions (just pi-check)
+        run: just pi-check
+
+      - name: Run extension and package tests (just pi-test)
+        run: just pi-test
