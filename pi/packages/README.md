@@ -13,10 +13,10 @@ Current packages (wired into Pi via `settings.base.json`):
 - `pi-qna`
 - `pi-plan-review`
 
-Also vendored, but **not** wired into the active Pi config:
-
-- `rpiv-mono` — a third-party Pi pipeline monorepo (upstream: `juicesharp/rpiv-mono`),
-  kept here for reference. Not referenced by `settings.base.json`.
+Previously this directory also held `rpiv-mono` (a third-party Pi pipeline
+monorepo, upstream: `juicesharp/rpiv-mono`, fork: `davidroth-distyl/rpiv-mono`).
+It is its own git repo and was never wired into the Pi config, so it now lives
+at `~/src/rpiv-mono` instead of nested untracked inside dotfiles.
 
 These packages are loaded by Pi via relative paths declared in the tracked
 `pi/.pi/agent/settings.base.json`. On install, `install.sh` (or `just pi-settings`)
