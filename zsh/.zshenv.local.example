@@ -1,0 +1,38 @@
+# Copy this file to ~/.zshenv.local and fill in real values.
+# ~/.zshenv sources ~/.zshenv.local on every shell invocation (interactive and
+# non-interactive), so variables set here are visible to pi and all subshells.
+# This file is not tracked in git — never commit real tokens.
+
+# ---------------------------------------------------------------------------
+# pi coding agent — provider API keys
+# ---------------------------------------------------------------------------
+
+# OpenRouter (used by extensions/openrouter.ts)
+# Obtain from: https://openrouter.ai/keys
+export OPENROUTER_API_KEY="your-openrouter-api-key-here"
+
+# Azure AI Foundry / Azure Inference (used by extensions/azure-foundry.ts)
+# Set the endpoint URL for your Foundry project; the extension accepts either
+# variable name. AZURE_INFERENCE_CREDENTIAL is the API key for that endpoint.
+export AZURE_INFERENCE_ENDPOINT="https://your-project.services.ai.azure.com/models"
+# export AZURE_FOUNDRY_ENDPOINT="https://your-project.services.ai.azure.com/models"  # alias
+export AZURE_INFERENCE_CREDENTIAL="your-azure-api-key-here"
+
+# ---------------------------------------------------------------------------
+# pi coding agent — Slack MCP extension (extensions/slack-mcp/)
+# ---------------------------------------------------------------------------
+# The slack-mcp extension reads auth from ~/.pi/agent/slack-mcp.json (env
+# block inside that file) OR from the variables below, which the extension
+# passes directly to the spawned MCP server process.
+#
+# Token type — pick one:
+#
+#   xoxp-*  User token (most permissive; needed for private channel reads)
+export SLACK_MCP_XOXP_TOKEN="xoxp-your-user-token-here"
+#
+#   xoxb-*  Bot token (for bot-only workspaces)
+# export SLACK_MCP_XOXB_TOKEN="xoxb-your-bot-token-here"
+#
+#   xoxc + xoxd  Cookie-based pair (client token + session cookie)
+# export SLACK_MCP_XOXC_TOKEN="xoxc-your-client-token-here"
+# export SLACK_MCP_XOXD_TOKEN="xoxd-your-session-cookie-here"

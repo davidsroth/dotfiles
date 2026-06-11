@@ -142,24 +142,73 @@ stow core zsh git-config pi
   - Delta for diffs
 - **Lazygit** - Terminal UI for Git
   - See `core/.config/lazygit/README.md`
-- **Pi coding agent**
-  - Agent config is stowed from `pi/.pi/agent/`
-  - Local Pi packages are vendored in `pi/packages/` and loaded via `pi/.pi/agent/settings.json`
-  - Desktop notifications on turn-end via [`tlink`](https://github.com/ahnopologetic/tlink):
-    the customized `pi/.pi/agent/extensions/pi-notification.ts` fires a
-    `terminal-notifier` banner (project, git branch, tmux location, response
-    time, and a markdown-stripped preview) when pi finishes a turn; clicking it
-    jumps back to the originating tmux pane. `install.sh` installs the `tlink`
-    binary; run `tlink setup` once (macOS, interactive) to register the
-    `tmux://` scheme. Do **not** run `tlink install pi-notification` — the
-    stowed extension is the maintained version.
-  - See `pi/packages/README.md`
+- **Pi coding agent** — see [Pi (coding agent)](#pi-coding-agent) section below
 - **Opencode** - AI coding assistant integration
   - Neovim plugin
   - Shell aliases and tools
 - **Zen Browser** - Primary browser
 - Python management with **pyenv**
 - Node.js management with **nvm** (lazy-loaded)
+
+## Pi (coding agent)
+
+Pi is a terminal-based AI coding agent. Its configuration is stowed from `pi/.pi/agent/` into `~/.pi/agent/`.
+
+### Settings layering
+
+Settings are assembled from three sources, in increasing precedence:
+
+1. **`pi/.pi/agent/settings.base.json`** (tracked) — global defaults: theme, package list, UI options.
+2. **`~/.pi/agent/settings.local.json`** (per-machine, gitignored) — provider and model selection.
+3. **Existing `~/.pi/agent/settings.json`** — pi's own runtime writes (e.g. `lastChangelogVersion`) are preserved across regenerations.
+
+The final `~/.pi/agent/settings.json` is produced by merging all three with `jq`. The script that does the merge is `scripts/gen-pi-settings.sh`; run it via:
+
+```bash
+just pi-settings
+```
+
+Git hooks (`post-merge` and `post-checkout`) call the same script automatically after a `git pull`, so settings stay current without manual intervention.
+
+**Hard assumption**: the package paths in `settings.base.json` are relative (e.g. `../../dotfiles/pi/packages/pi-vim`), resolved from `~/.pi/agent/`. This means the repo must live at `~/dotfiles`. Moving it elsewhere breaks package loading.
+
+### Fresh-machine steps `install.sh` does NOT do
+
+After running `install.sh` on a new machine, three manual steps are required before pi is fully operational:
+
+1. **Copy the settings example and edit it:**
+   ```bash
+   cp ~/dotfiles/pi/.pi/agent/settings.local.json.example ~/.pi/agent/settings.local.json
+   # Edit ~/.pi/agent/settings.local.json — set defaultProvider and defaultModel
+   just pi-settings   # regenerate settings.json from base + local
+   ```
+
+2. **Export API-key environment variables.** Copy the example env file and fill in real values:
+   ```bash
+   cp ~/dotfiles/zsh/.zshenv.local.example ~/.zshenv.local
+   # Edit ~/.zshenv.local — add OPENROUTER_API_KEY, AZURE_INFERENCE_CREDENTIAL, etc.
+   ```
+   `~/.zshenv` sources `~/.zshenv.local` automatically on every shell start.
+
+3. **Register the `tmux://` URI scheme for desktop notifications (macOS, interactive):**
+   ```bash
+   tlink setup
+   ```
+   `install.sh` installs the `tlink` binary. Run `tlink setup` once to register the scheme, then enable `terminal-notifier` in System Settings > Notifications. Do **not** run `tlink install pi-notification` — the stowed extension at `pi/.pi/agent/extensions/pi-notification.ts` is the maintained version.
+
+### Secret guard
+
+The `secret-guard` extension redacts secret-shaped strings (API keys, tokens, private keys, `KEY = value` credential pairs) from tool output before it reaches the LLM transcript or the TUI. It covers text content blocks in tool results; `user_bash` output (`!`/`!!`) is not covered. Configuration lives in `~/.pi/agent/secret-guard.json` (tracked in dotfiles); a per-project override can be placed at `<cwd>/.pi/secret-guard.json`. The default mode is `redact` (masks the secret in place); set `"mode": "block"` on any tool listed in `blockTools` to suppress the entire output instead.
+
+### Troubleshooting
+
+- **Packages not loading** — check that the repo is at `~/dotfiles` (package paths in `settings.base.json` are relative), then run `just pi-settings` to regenerate `settings.json`.
+- **Provider missing / model not found** — check that the relevant env var is exported (`OPENROUTER_API_KEY`, `AZURE_INFERENCE_ENDPOINT`, etc.) and that `~/.pi/agent/settings.local.json` names the correct `defaultProvider`.
+- **Stale settings after a pull** — run `just pi-settings`. If the git hook is set up correctly (via `install.sh` or `setup_git_hooks` in the script), this should happen automatically.
+
+### Related documentation
+
+- [Vendored Pi Packages](pi/packages/README.md)
 
 ## Directory Structure
 
