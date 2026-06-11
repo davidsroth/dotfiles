@@ -202,6 +202,8 @@ The `secret-guard` extension redacts secret-shaped strings (API keys, tokens, pr
 
 ### Troubleshooting
 
+Start with `just pi-doctor` (alias `pid`): it checks settings drift, package path resolution, git hooks, the memory symlink, stow health, the toolchain, and which provider env vars are set.
+
 - **Packages not loading** — check that the repo is at `~/dotfiles` (package paths in `settings.base.json` are relative), then run `just pi-settings` to regenerate `settings.json`.
 - **Provider missing / model not found** — check that the relevant env var is exported (`OPENROUTER_API_KEY`, `AZURE_INFERENCE_ENDPOINT`, etc.) and that `~/.pi/agent/settings.local.json` names the correct `defaultProvider`.
 - **Stale settings after a pull** — run `just pi-settings`. If the git hook is set up correctly (via `install.sh` or `setup_git_hooks` in the script), this should happen automatically.

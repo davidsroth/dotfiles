@@ -83,6 +83,12 @@ pi-memory:
     echo "Linked global memory: $DEST"
   fi
 
+# Run pi health-checks: settings drift, package paths, hooks, memory link, stow, toolchain, secrets.
+pi-doctor:
+  bash {{justfile_directory()}}/scripts/pi-doctor.sh
+
+alias pid := pi-doctor
+
 # Update repo and restow changes.
 update:
   git pull --rebase --autostash || true
