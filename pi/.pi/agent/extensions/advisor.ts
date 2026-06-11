@@ -60,7 +60,7 @@ const DEFAULTS = {
 // Config loading
 // ---------------------------------------------------------------------------
 
-function sanitize(raw: unknown): AdvisorConfig {
+export function sanitize(raw: unknown): AdvisorConfig {
   if (!raw || typeof raw !== "object") return {};
   const r = raw as Record<string, unknown>;
   const out: AdvisorConfig = {};
@@ -94,7 +94,7 @@ interface ModelLike {
   provider: string;
 }
 
-function resolveModel(
+export function resolveModel(
   input: string | undefined,
   registry: {
     find(provider: string, modelId: string): Model<any> | undefined;
@@ -144,7 +144,7 @@ function resolveModel(
 // System prompt for the advisor subagent
 // ---------------------------------------------------------------------------
 
-function buildAdvisorPrompt(cwd: string, readOnly: boolean): string {
+export function buildAdvisorPrompt(cwd: string, readOnly: boolean): string {
   return [
     "You are an expert technical advisor consulted by another AI coding agent.",
     "You are running a strong reasoning model and have been asked for a second opinion,",
@@ -169,7 +169,7 @@ function buildAdvisorPrompt(cwd: string, readOnly: boolean): string {
 // Subagent runner
 // ---------------------------------------------------------------------------
 
-function getLastAssistantText(session: AgentSession): string {
+export function getLastAssistantText(session: AgentSession): string {
   for (let i = session.messages.length - 1; i >= 0; i--) {
     const msg = session.messages[i];
     if (msg.role !== "assistant") continue;
