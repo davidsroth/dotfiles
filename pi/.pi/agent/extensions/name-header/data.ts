@@ -30,7 +30,7 @@ function execFileText(file: string, args: string[], timeout: number): Promise<st
 	});
 }
 
-function preferredWeatherUnit(): "F" | "C" {
+export function preferredWeatherUnit(): "F" | "C" {
 	if (WEATHER_UNIT === "F" || WEATHER_UNIT === "C") return WEATHER_UNIT;
 	const locale = Intl.DateTimeFormat().resolvedOptions().locale;
 	return locale.endsWith("-US") ? "F" : "C";
@@ -42,7 +42,7 @@ function sanitizeText(value: unknown, fallback: string): string {
 	return trimmed.length > 0 ? trimmed : fallback;
 }
 
-function parseAgendaJson(payload: string): AgendaEvent[] {
+export function parseAgendaJson(payload: string): AgendaEvent[] {
 	const parsed = JSON.parse(payload) as unknown;
 	if (!Array.isArray(parsed)) return [];
 
@@ -121,7 +121,7 @@ export async function fetchAgenda(): Promise<AgendaEvent[]> {
 	return parseAgendaJson(stdout);
 }
 
-function parsePrsJson(payload: string): PullRequest[] {
+export function parsePrsJson(payload: string): PullRequest[] {
 	const parsed = JSON.parse(payload) as unknown;
 	if (!Array.isArray(parsed)) return [];
 
