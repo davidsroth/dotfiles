@@ -20,7 +20,7 @@ Modular tmux configuration with vim-like keybindings and session management.
 - `C-g` - Main prefix key (instead of default `C-b`)
 
 ### Session Management
-- `C-g s` - Sesh session picker (tmux + zoxide + cached git worktrees; `ctrl-t` tmux only, `ctrl-z` zoxide only, `ctrl-w` worktrees only; grey/green `π` marks idle/working pi sessions at that root)
+- `C-g s` - Sesh session picker (tmux + zoxide + cached git worktrees; `ctrl-t` tmux only, `ctrl-z` zoxide only, `ctrl-w` worktrees only; grey/green `π` and `✻` mark idle/working pi and Claude Code sessions at that root)
 - `C-g C-f` - tmux-fzf picker
 - `C-g C-c` - Create new session
 - `C-s` / `C-g S` - Switch to last session
@@ -96,10 +96,11 @@ and connect/kill actions, while `bin/session-picker.py` produces the rows
 (sesh sessions, zoxide dirs, git worktrees) and dedupes entries that resolve
 to the same directory (sessions beat worktree rows beat plain zoxide rows).
 Expensive git worktree discovery is cached under `~/.cache/tmux-session-picker/`
-and refreshed in the background, so the popup opens immediately. Pi
-working/idle markers are read from heartbeat files under `~/.cache/pi-status/`,
-written by the `pi-status` pi extension and normalized to git/worktree roots.
-Tests live in `scripts/tests/` (run with `just picker-test`).
+and refreshed in the background, so the popup opens immediately. Working/idle
+markers are read from heartbeat files — `~/.cache/pi-status/` written by the
+`pi-status` pi extension (`π`), `~/.cache/claude-status/` written by the
+`claude-status-hook` Claude Code hook (`✻`) — and normalized to git/worktree
+roots. Tests live in `scripts/tests/` (run with `just picker-test`).
 
 ## Mouse Support
 

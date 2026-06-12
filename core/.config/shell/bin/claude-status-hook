@@ -1,0 +1,130 @@
+#!/usr/bin/env python3
+"""Claude Code hook: heartbeat files for the tmux session picker.
+
+Mirrors the pi-status extension: writes
+${XDG_CACHE_HOME:-~/.cache}/claude-status/<pid>.json on lifecycle events so
+session-picker.py can mark repos with a working/idle Claude session. The
+file is removed on SessionEnd; the picker deletes files whose pid is gone.
+
+Wired up in ~/.claude/settings.json hooks (SessionStart, UserPromptSubmit,
+PostToolUse, Stop, Notification, SessionEnd). The file is keyed by the
+claude process pid — not session_id — so /clear and /resume replace the
+record instead of leaking one file per session id.
+
+Status semantics: working from prompt submit until Stop; a Notification
+(permission prompt / waiting for input) counts as idle, and the next
+PostToolUse flips back to working once the tool actually runs.
+"""
+
+import json
+import os
+import subprocess
+import sys
+
+# Hook event -> status. SessionEnd removes the file instead.
+EVENT_STATUS = {
+    "SessionStart": "idle",
+    "UserPromptSubmit": "working",
+    "PostToolUse": "working",
+    "Stop": "idle",
+    "Notification": "idle",
+}
+
+
+def status_dir(env=os.environ):
+    base = env.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache")
+    return os.path.join(base, "claude-status")
+
+
+def ps_line(pid):
+    try:
+        out = subprocess.check_output(
+            ["ps", "-o", "ppid=,tty=,command=", "-p", str(pid)],
+            stderr=subprocess.DEVNULL,
+            text=True,
+            timeout=2,
+        ).strip()
+    except Exception:
+        return None
+    parts = out.split(None, 2)
+    if len(parts) < 3:
+        return None
+    ppid, tty, command = parts
+    try:
+        return int(ppid), tty, command
+    except ValueError:
+        return None
+
+
+def find_claude(start_pid, lookup=ps_line):
+    """Walk up the process tree to the claude process.
+
+    Returns (pid, interactive) or (None, False). The hook itself runs as a
+    descendant of claude (usually claude -> sh -> this script), so the
+    nearest ancestor whose command mentions claude — excluding this hook's
+    own command line — is the session process.
+    """
+    pid = start_pid
+    for _ in range(12):
+        info = lookup(pid)
+        if info is None:
+            return None, False
+        ppid, tty, command = info
+        if "claude" in command and "claude-status-hook" not in command:
+            return pid, tty != "??"
+        if ppid <= 1:
+            return None, False
+        pid = ppid
+    return None, False
+
+
+def handle(event, directory, pid, interactive):
+    """Apply one hook event to the heartbeat file. Returns True if handled."""
+    name = event.get("hook_event_name", "")
+    path = os.path.join(directory, f"{pid}.json")
+
+    if name == "SessionEnd":
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+        return True
+
+    status = EVENT_STATUS.get(name)
+    if status is None:
+        return False
+
+    os.makedirs(directory, exist_ok=True)
+    record = {
+        "pid": pid,
+        "cwd": event.get("cwd") or os.getcwd(),
+        "interactive": interactive,
+        "status": status,
+    }
+    # Write-then-rename so the picker never reads a partial file.
+    tmp = f"{path}.tmp.{os.getpid()}"
+    with open(tmp, "w") as fh:
+        json.dump(record, fh)
+    os.replace(tmp, path)
+    return True
+
+
+def main():
+    try:
+        event = json.load(sys.stdin)
+    except Exception:
+        return 0
+    pid, interactive = find_claude(os.getppid())
+    if pid is None:
+        # Cannot tie the heartbeat to a live process the picker can verify;
+        # better no marker than a phantom one.
+        return 0
+    try:
+        handle(event, status_dir(), pid, interactive)
+    except Exception:
+        pass  # never break the session over a status file
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

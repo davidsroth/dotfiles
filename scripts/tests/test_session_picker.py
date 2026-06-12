@@ -54,8 +54,8 @@ class TestSeshRows(unittest.TestCase):
         )
         self.assertEqual([r.target for r in rows], ["other"])
 
-    def test_marker_slot_is_always_two_chars(self):
-        roots = {os.path.realpath("/r/working"): "working"}
+    def test_marker_slot_is_always_fixed_width(self):
+        roots = {"pi": {os.path.realpath("/r/working"): "working"}}
         working, idle = sp.build_sesh_rows(
             [
                 {"Src": "zoxide", "Name": "/r/working", "Path": "/r/working"},
@@ -72,6 +72,14 @@ class TestSeshRows(unittest.TestCase):
         )
         self.assertIn("π", strip_ansi(working.display))
         self.assertNotIn("π", strip_ansi(idle.display))
+
+    def test_each_agent_gets_its_own_marker_slot(self):
+        real = os.path.realpath("/r/both")
+        roots = {"pi": {real: "working"}, "claude": {real: "idle"}}
+        marker = strip_ansi(sp.agent_markers("/r/both", roots))
+        self.assertEqual(marker, "π ✻ ")
+        self.assertEqual(strip_ansi(sp.agent_markers("/r/none", roots)), "    ")
+        self.assertEqual(strip_ansi(sp.agent_markers("/r/both", {"claude": {real: "working"}})), "  ✻ ")
 
 
 class TestWorktreeRows(unittest.TestCase):
@@ -156,7 +164,7 @@ class TestPiHeartbeats(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             self.write_record(tmp, 1111)
             self.write_record(tmp, 2222)
-            records = sp.read_pi_records(status_dir=tmp, alive=lambda pid: pid == 2222)
+            records = sp.read_agent_records(status_dir=tmp, alive=lambda pid: pid == 2222)
             self.assertEqual([r["pid"] for r in records], [2222])
             self.assertEqual(os.listdir(tmp), ["2222.json"])
 
@@ -164,28 +172,39 @@ class TestPiHeartbeats(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             with open(os.path.join(tmp, "bad.json"), "w") as fh:
                 fh.write("{not json")
-            self.assertEqual(sp.read_pi_records(status_dir=tmp, alive=lambda pid: True), [])
+            self.assertEqual(sp.read_agent_records(status_dir=tmp, alive=lambda pid: True), [])
 
     def test_working_wins_per_root(self):
         records = [
             {"pid": 1, "cwd": "/r/sub", "status": "idle", "interactive": True},
             {"pid": 2, "cwd": "/r", "status": "working", "interactive": True},
         ]
-        roots = sp.pi_roots(records, root_of=lambda cwd: "/r")
+        roots = sp.agent_roots(records, root_of=lambda cwd: "/r")
         self.assertEqual(roots, {os.path.realpath("/r"): "working"})
 
     def test_status_summary_counts_interactive_roots_only(self):
-        records = [
-            {"pid": 1, "cwd": "/a", "status": "working", "interactive": True},
-            {"pid": 2, "cwd": "/b", "status": "idle", "interactive": True},
-            {"pid": 3, "cwd": "/c", "status": "working", "interactive": False},
-        ]
+        records = {
+            "pi": [
+                {"pid": 1, "cwd": "/a", "status": "working", "interactive": True},
+                {"pid": 2, "cwd": "/b", "status": "idle", "interactive": True},
+                {"pid": 3, "cwd": "/c", "status": "working", "interactive": False},
+            ]
+        }
         summary = sp.status_summary(records)
         self.assertIn("π1", summary)  # one working interactive root
         self.assertEqual(summary.count("π"), 2)  # …and one idle; subagent excluded
 
+    def test_status_summary_includes_claude_sessions(self):
+        records = {
+            "pi": [{"pid": 1, "cwd": "/a", "status": "working", "interactive": True}],
+            "claude": [{"pid": 2, "cwd": "/b", "status": "idle", "interactive": True}],
+        }
+        summary = sp.status_summary(records)
+        self.assertIn("π1", summary)
+        self.assertIn("✻1", summary)
+
     def test_status_summary_empty_when_nothing_runs(self):
-        self.assertEqual(sp.status_summary([]), "")
+        self.assertEqual(sp.status_summary({}), "")
 
 
 class TestGitRoot(unittest.TestCase):

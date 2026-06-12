@@ -6,12 +6,13 @@ Commands:
   status                            tmux status-line pi summary
   refresh-worktrees                 rebuild the worktree cache (internal)
 
-Row contract: "<icon> <marker><name>  <detail>\\t<target>\\t<src>"
+Row contract: "<icon> <markers><name>  <detail>\\t<target>\\t<src>"
 
 fzf matches against the rendered first field (since fzf 0.52, --nth cannot
 reach fields hidden by --with-nth), so the display doubles as the search
 corpus and ranking depends on its shape. Every renderer must keep the
-contract: a one-char icon + space + 2-char marker slot, then the
+contract: a one-char icon + space + fixed-width marker slot (two chars per
+entry in AGENTS: "π " pi, "✻ " Claude Code, spaces when absent), then the
 session/repo name, then detail (path, branch). With names starting at the
 same column on every row, the begin tiebreak is even across sources and the
 length tiebreak ranks shorter rows -- sessions and parent repos -- above
@@ -22,9 +23,10 @@ tmux/config sessions beat worktree rows, which beat plain zoxide rows. The
 winning row is emitted at the position of the duplicate seen first, so
 zoxide frecency still decides where a repo appears in the unfiltered list.
 
-Pi working/idle markers come from heartbeat files written by the pi-status
-extension (one JSON file per pi process under ~/.cache/pi-status/); files
-whose pid is gone are treated as stale and removed.
+Working/idle markers come from heartbeat files (one JSON file per agent
+process): ~/.cache/pi-status/ written by the pi-status pi extension and
+~/.cache/claude-status/ written by the claude-status-hook Claude Code hook.
+Files whose pid is gone are treated as stale and removed.
 """
 
 import json
@@ -41,7 +43,12 @@ CACHE_DIR = os.path.join(XDG_CACHE, "tmux-session-picker")
 WORKTREE_CACHE = os.path.join(CACHE_DIR, "worktrees.tsv")
 WORKTREE_LOCK = os.path.join(CACHE_DIR, "worktrees.lock")
 WORKTREE_TTL = 60
-PI_STATUS_DIR = os.path.join(XDG_CACHE, "pi-status")
+
+# Heartbeat sources in marker-slot order: (key, status dir, marker char).
+AGENTS = (
+    ("pi", os.path.join(XDG_CACHE, "pi-status"), "π"),
+    ("claude", os.path.join(XDG_CACHE, "claude-status"), "✻"),
+)
 
 GREEN = "\033[32m"
 GREY = "\033[90m"
@@ -88,8 +95,8 @@ def pid_alive(pid):
     return True
 
 
-def read_pi_records(status_dir=PI_STATUS_DIR, alive=pid_alive):
-    """Heartbeat records for live pi processes; stale files are removed."""
+def read_agent_records(status_dir, alive=pid_alive):
+    """Heartbeat records for live agent processes; stale files are removed."""
     records = []
     try:
         names = os.listdir(status_dir)
@@ -134,7 +141,7 @@ def git_root(path):
     return os.path.realpath(path)
 
 
-def pi_roots(records, root_of=git_root):
+def agent_roots(records, root_of=git_root):
     """Map realpath(git root) -> status. Working wins over idle per root."""
     roots = {}
     for record in records:
@@ -144,32 +151,42 @@ def pi_roots(records, root_of=git_root):
     return roots
 
 
-def pi_marker(path, roots):
-    # Always two visible chars so names start at the same column on every
-    # row; the begin tiebreak counts the marker slot either way.
-    if path:
-        status = roots.get(os.path.realpath(path))
+def read_all_agents(agents=AGENTS, alive=pid_alive):
+    """Map agent key -> heartbeat records."""
+    return {key: read_agent_records(status_dir, alive) for key, status_dir, _ in agents}
+
+
+def agent_markers(path, roots_by_agent, agents=AGENTS):
+    """One fixed-width sub-slot per agent so names start at the same column
+    on every row; the begin tiebreak counts the marker slot either way."""
+    real = os.path.realpath(path) if path else None
+    slots = []
+    for key, _, char in agents:
+        status = roots_by_agent.get(key, {}).get(real) if real else None
         if status == "working":
-            return f"{GREEN}π{RESET} "
-        if status:
-            return f"{GREY}π{RESET} "
-    return "  "
+            slots.append(f"{GREEN}{char}{RESET} ")
+        elif status:
+            slots.append(f"{GREY}{char}{RESET} ")
+        else:
+            slots.append("  ")
+    return "".join(slots)
 
 
-def status_summary(records):
-    """Compact pi summary for the tmux status line (tmux style markup).
+def status_summary(records_by_agent, agents=AGENTS):
+    """Compact agent summary for the tmux status line (tmux style markup).
 
     Counts interactive sessions only (one per git root) so headless
     subagent runs do not inflate the numbers. Returns "" when nothing runs.
     """
-    roots = pi_roots([r for r in records if r["interactive"]])
-    working = sum(1 for status in roots.values() if status == "working")
-    idle = len(roots) - working
     parts = []
-    if working:
-        parts.append(f"#[fg=#a6e3a1,bg=#1e1e2e]π{working}")
-    if idle:
-        parts.append(f"#[fg=#6c7086,bg=#1e1e2e]π{idle}")
+    for key, _, char in agents:
+        roots = agent_roots([r for r in records_by_agent.get(key, []) if r["interactive"]])
+        working = sum(1 for status in roots.values() if status == "working")
+        idle = len(roots) - working
+        if working:
+            parts.append(f"#[fg=#a6e3a1,bg=#1e1e2e]{char}{working}")
+        if idle:
+            parts.append(f"#[fg=#6c7086,bg=#1e1e2e]{char}{idle}")
     return " ".join(parts) + " " if parts else ""
 
 
@@ -191,7 +208,7 @@ def sesh_json(mode):
         return []
 
 
-def build_sesh_rows(sessions, roots, current_session):
+def build_sesh_rows(sessions, roots_by_agent, current_session):
     rows = []
     for session in sessions:
         src = session.get("Src", "")
@@ -209,7 +226,7 @@ def build_sesh_rows(sessions, roots, current_session):
             # matchable.
             base = os.path.basename(target.rstrip(os.sep))
             label = f"{base}  {name}" if base and base != name else name
-        marker = pi_marker(path or target, roots)
+        marker = agent_markers(path or target, roots_by_agent)
         display = f"{ICONS.get(src, DEFAULT_ICON)} {marker}{label}"
         key = os.path.realpath(path) if path else None
         rows.append(Row(display, target, src, key, PRIORITY.get(src, DEFAULT_PRIORITY)))
@@ -343,7 +360,7 @@ def discover_worktree_lines(roots):
     return lines
 
 
-def build_worktree_rows(cache_lines, roots, isdir=os.path.isdir):
+def build_worktree_rows(cache_lines, roots_by_agent, isdir=os.path.isdir):
     rows = []
     seen_paths = set()
     for line in cache_lines:
@@ -351,7 +368,7 @@ def build_worktree_rows(cache_lines, roots, isdir=os.path.isdir):
         if not path or path in seen_paths or not isdir(path):
             continue
         seen_paths.add(path)
-        marker = pi_marker(path, roots)
+        marker = agent_markers(path, roots_by_agent)
         display = f"{ICONS['worktree']} {marker}{label}:{branch}{locked}  {path}"
         rows.append(Row(display, path, "worktree", os.path.realpath(path), PRIORITY["worktree"]))
     return rows
@@ -460,18 +477,18 @@ def emit(rows):
 
 
 def cmd_list(mode):
-    roots = pi_roots(read_pi_records())
+    roots_by_agent = {key: agent_roots(records) for key, records in read_all_agents().items()}
     if mode == "worktree":
-        emit(build_worktree_rows(cached_worktree_lines("sync"), roots))
+        emit(build_worktree_rows(cached_worktree_lines("sync"), roots_by_agent))
         return 0
     if mode in ("tmux", "zoxide"):
-        emit(build_sesh_rows(sesh_json(mode), roots, current_tmux_session()))
+        emit(build_sesh_rows(sesh_json(mode), roots_by_agent, current_tmux_session()))
         return 0
     if mode != "all":
         print(f"Unknown session list mode: {mode}", file=sys.stderr)
         return 2
-    rows = build_sesh_rows(sesh_json("all"), roots, current_tmux_session())
-    rows += build_worktree_rows(cached_worktree_lines("async"), roots)
+    rows = build_sesh_rows(sesh_json("all"), roots_by_agent, current_tmux_session())
+    rows += build_worktree_rows(cached_worktree_lines("async"), roots_by_agent)
     emit(dedupe(rows))
     return 0
 
@@ -482,7 +499,7 @@ def main(argv):
     if cmd == "list":
         return cmd_list(argv[2] if len(argv) > 2 else "all")
     if cmd == "status":
-        summary = status_summary(read_pi_records())
+        summary = status_summary(read_all_agents())
         if summary:
             sys.stdout.write(summary + "\n")
         return 0

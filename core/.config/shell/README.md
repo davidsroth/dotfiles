@@ -6,7 +6,9 @@ Modular shell config (XDG Base Directory). Sourced from `.zshrc`.
 
 - `aliases.sh` — command aliases
 - `functions.sh` — shell functions
-- `bin/` — user scripts on $PATH
+- `bin/` — user scripts on $PATH (incl. `claude-status-hook`, a Claude Code
+  hook that writes `~/.cache/claude-status/` heartbeats for the tmux
+  session picker; wired up in `~/.claude/settings.json`)
 
 ## Categories
 
