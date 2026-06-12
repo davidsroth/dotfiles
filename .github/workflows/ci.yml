@@ -71,3 +71,13 @@ jobs:
 
       - name: Run extension and package tests (just pi-test)
         run: just pi-test
+
+  picker-test:
+    name: Test tmux session picker
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run session-picker tests
+        run: python3 -m unittest discover -s scripts/tests -v

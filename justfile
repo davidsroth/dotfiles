@@ -89,6 +89,10 @@ pi-doctor:
 
 alias pid := pi-doctor
 
+# Run the tmux session-picker unit tests (stdlib unittest).
+picker-test:
+  python3 -m unittest discover -s {{justfile_directory()}}/scripts/tests -v
+
 # Update repo and restow changes.
 update:
   git pull --rebase --autostash || true
