@@ -91,7 +91,15 @@ Uses `sesh` for enhanced session management. Install with:
 brew install sesh
 ```
 
-The custom picker caches expensive git worktree discovery under `~/.cache/tmux-session-picker/` and refreshes it in the background, so the popup opens from tmux/zoxide data immediately. Pi-session markers are also cached briefly and normalized to git/worktree roots.
+The custom picker is split in two: `bin/session-picker.sh` owns the fzf popup
+and connect/kill actions, while `bin/session-picker.py` produces the rows
+(sesh sessions, zoxide dirs, git worktrees) and dedupes entries that resolve
+to the same directory (sessions beat worktree rows beat plain zoxide rows).
+Expensive git worktree discovery is cached under `~/.cache/tmux-session-picker/`
+and refreshed in the background, so the popup opens immediately. Pi
+working/idle markers are read from heartbeat files under `~/.cache/pi-status/`,
+written by the `pi-status` pi extension and normalized to git/worktree roots.
+Tests live in `scripts/tests/` (run with `just picker-test`).
 
 ## Mouse Support
 
