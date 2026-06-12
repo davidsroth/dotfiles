@@ -12,6 +12,12 @@ import { createMessageReader, writeMessage } from "./broker/framing.ts";
 import { getBrokerSocketPath } from "./broker/paths.ts";
 
 const repoDir = process.cwd();
+// Spawn the broker as a direct child (node + local tsx cli) rather than via
+// `npx tsx`: on Linux npx stays alive as a wrapper process, so killing the
+// spawned pid orphans the actual broker and the next test's broker sees
+// "already running" and never becomes ready.
+const tsxCliPath = path.join(repoDir, "node_modules", "tsx", "dist", "cli.mjs");
+const brokerSpawnArgs = [tsxCliPath, path.join(repoDir, "broker", "broker.ts")];
 const childEnvKeys = [
   "PI_SUBAGENT_ORCHESTRATOR_TARGET",
   "PI_SUBAGENT_RUN_ID",
@@ -189,7 +195,7 @@ function createExtensionHarness(sessionName = "child-worker", options: {
 }
 
 async function setupClients() {
-  const broker = spawn("npx", ["--no-install", "tsx", path.join(repoDir, "broker", "broker.ts")], {
+  const broker = spawn(process.execPath, brokerSpawnArgs, {
     cwd: repoDir,
     env: { ...process.env, HOME: sharedHomeDir, USERPROFILE: sharedHomeDir },
     stdio: ["ignore", "pipe", "pipe"],
@@ -418,7 +424,7 @@ test("broker returns delivery_failed for an ambiguous name", { concurrency: fals
 });
 
 test("broker reaps a session whose owning process is gone", { concurrency: false }, async () => {
-  const broker = spawn("npx", ["--no-install", "tsx", path.join(repoDir, "broker", "broker.ts")], {
+  const broker = spawn(process.execPath, brokerSpawnArgs, {
     cwd: repoDir,
     env: { ...process.env, HOME: sharedHomeDir, USERPROFILE: sharedHomeDir, PI_INTERCOM_REAPER_INTERVAL_MS: "150" },
     stdio: ["ignore", "pipe", "pipe"],
@@ -529,7 +535,7 @@ test("broker rejects an oversized re-framed message without evicting the recipie
   // survive, and the sender must get a "Message too large" failure rather than
   // a misleading "Session disconnected".
   const FRAME_CAP = 9000;
-  const broker = spawn("npx", ["--no-install", "tsx", path.join(repoDir, "broker", "broker.ts")], {
+  const broker = spawn(process.execPath, brokerSpawnArgs, {
     cwd: repoDir,
     env: { ...process.env, HOME: sharedHomeDir, USERPROFILE: sharedHomeDir, PI_INTERCOM_MAX_FRAME_BYTES: String(FRAME_CAP) },
     stdio: ["ignore", "pipe", "pipe"],
