@@ -7,7 +7,7 @@ A [pi](https://pi.dev) package for lightweight human review flows:
 - `/markup` command: opens the last assistant message in the same browser markup UI.
 - `/plan-status` command: shows the active plan path.
 
-The plan/markup UI supports highlighting text, adding inline comments, writing general feedback, approving, and sending replies back to pi. The draft UI is a focused single-textarea editor with two distinct outcomes (copy to clipboard vs. approve for the agent to post).
+The plan/markup UI supports highlighting text, adding inline comments, writing general feedback, approving, sending replies back to pi, and rendering Mermaid fenced diagrams. The draft UI is a focused single-textarea editor with two distinct outcomes (copy to clipboard vs. approve for the agent to post).
 
 ## Install
 
@@ -105,7 +105,7 @@ Shared plumbing lives in `extensions/_review/`:
 - `os.ts` — browser open, frontmost-app focus restore, clipboard.
 - `html.ts` — `escapeHtml` / `scriptJson`. `tool.ts` — the `toolText` result helper.
 
-Markdown rendering (`miniplan/markdown.ts`) and the word-level diff (`draft/diff.ts`) are co-located with their sole consumer. Pure functions are covered by vitest under `tests/`.
+Markdown rendering (`miniplan/markdown.ts`) and the word-level diff (`draft/diff.ts`) are co-located with their sole consumer. Fenced diagrams with `mermaid` or `mmd` language tags render in the plan/markup browser page via Mermaid's browser ESM bundle, with the escaped source available in a collapsible fallback. Pure functions are covered by vitest under `tests/`.
 
 **Security:** review pages are served over plain loopback HTTP with no CORS headers (so cross-origin sites can't read them or steal the nonce), the nonce gates `/decision`, and the server rejects any request whose `Host` isn't its loopback origin (DNS-rebinding guard).
 

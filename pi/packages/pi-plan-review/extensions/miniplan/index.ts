@@ -148,6 +148,13 @@ main code { font-family: inherit; font-size: .92em; background: var(--code-bg); 
 main pre { background: var(--code-bg); padding: .9em; border-radius: 2px; overflow-x: auto; max-width: 100%; line-height: 1.5; margin: .7em 0; border: 1px solid var(--border); }
 main pre code { padding: 0; background: none; white-space: pre; }
 main pre[data-lang]::before { content: attr(data-lang); display: block; color: var(--text-muted); font-size: .76rem; margin-bottom: .4em; text-transform: uppercase; letter-spacing: .04em; }
+main .mermaid-diagram { background: var(--code-bg); border: 1px solid var(--border); border-radius: 2px; margin: .8em 0; padding: .9em; overflow-x: auto; }
+main .mermaid-diagram .mermaid { display: flex; justify-content: center; min-width: min-content; }
+main .mermaid-diagram .mermaid svg { max-width: 100%; height: auto; }
+main .mermaid-diagram details { margin-top: .65em; color: var(--text-muted); }
+main .mermaid-diagram summary { cursor: pointer; font-size: .78rem; text-transform: uppercase; letter-spacing: .04em; }
+main .mermaid-diagram details pre { margin-bottom: 0; }
+main .mermaid-error { color: var(--danger); margin-bottom: .6em; font-size: .86rem; }
 main ul, main ol { margin: .55em 0 .75em 1.45em; padding: 0; }
 main li { margin: .25em 0; padding-left: .15em; }
 main li > ul, main li > ol { margin-top: .2em; margin-bottom: .25em; margin-left: 1.25em; }
@@ -299,8 +306,77 @@ export function parseReviewDecision(data: Record<string, unknown>): ReviewResult
 
 // ── Page rendering ───────────────────────────────────────────────────────
 
+const MERMAID_CDN_URL = "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+
+function mermaidHex(value: string, fallback: string): string {
+	const raw = value.trim();
+	const short = raw.match(/^#([0-9a-f])([0-9a-f])([0-9a-f])$/i);
+	if (short) return `#${short[1]}${short[1]}${short[2]}${short[2]}${short[3]}${short[3]}`.toLowerCase();
+	const long = raw.match(/^#[0-9a-f]{6}/i);
+	return long ? long[0].toLowerCase() : fallback;
+}
+
+function buildMermaidThemeVariables(palette: Palette): Record<string, string> {
+	const background = mermaidHex(palette.pageBg, palette.isLight ? "#faf9f7" : "#1a1a1a");
+	const surface = mermaidHex(palette.codeBg, palette.isLight ? "#f3f3f3" : "#2a2a2a");
+	const text = mermaidHex(palette.pageFg, palette.isLight ? "#1a1a1a" : "#e8e6e3");
+	const border = mermaidHex(palette.border, palette.isLight ? "#dddddd" : "#444444");
+	const muted = mermaidHex(palette.muted, palette.isLight ? "#666666" : "#999999");
+	return {
+		background,
+		primaryColor: surface,
+		primaryTextColor: text,
+		primaryBorderColor: border,
+		lineColor: muted,
+		secondaryColor: background,
+		tertiaryColor: surface,
+		noteBkgColor: surface,
+		noteTextColor: text,
+		actorBkg: surface,
+		actorBorder: border,
+		actorTextColor: text,
+	};
+}
+
+function buildMermaidScript(body: string, palette: Palette): string {
+	if (!body.includes('class="mermaid"')) return "";
+	const mermaidUrl = scriptJson(MERMAID_CDN_URL);
+	const themeVariables = scriptJson(buildMermaidThemeVariables(palette));
+	return `<script type="module">
+const diagrams = Array.from(document.querySelectorAll('.mermaid-diagram .mermaid'));
+if (diagrams.length) {
+  try {
+    const { default: mermaid } = await import(${mermaidUrl});
+    mermaid.initialize({
+      startOnLoad: false,
+      securityLevel: 'strict',
+      theme: 'base',
+      themeVariables: {
+        ...${themeVariables},
+        fontFamily: getComputedStyle(document.body).fontFamily,
+      },
+      flowchart: { htmlLabels: false },
+      sequence: { useMaxWidth: true },
+    });
+    await mermaid.run({ nodes: diagrams });
+  } catch (err) {
+    console.error('[Review] Mermaid render failed', err);
+    for (const diagram of diagrams) {
+      const figure = diagram.closest('.mermaid-diagram');
+      if (!figure || figure.querySelector('.mermaid-error')) continue;
+      const error = document.createElement('div');
+      error.className = 'mermaid-error';
+      error.textContent = 'Mermaid render failed: ' + (err && err.message ? err.message : String(err)) + '. Source is shown below.';
+      figure.insertBefore(error, figure.firstChild);
+    }
+  }
+}
+</script>`;
+}
+
 function buildPage(content: string, options: ReviewPageOptions, palette: Palette, nonce: string): string {
 	const body = mdToHtml(content);
+	const mermaidScript = buildMermaidScript(body, palette);
 	const css = buildCss(palette);
 	const buttons = options.buttons.map((button) => (
 		`<button class="${button.variant}" data-action="${escapeHtml(button.action)}" data-approved="${button.approved ? "true" : "false"}" data-done="${escapeHtml(button.doneText)}">[ ${escapeHtml(button.label)} ]</button>`
@@ -428,7 +504,7 @@ document.addEventListener('mousedown',e=>{
 });
 
 document.addEventListener('mouseup',e=>{
-  if(e.target.closest('.float'))return;
+  if(e.target.closest('.float,.mermaid-diagram'))return;
   const sel=window.getSelection();
   const txt=sel.toString().trim();
   if(!txt){cancelDraft();return;}
@@ -630,6 +706,7 @@ window.addEventListener('beforeunload',()=>{
   }catch(e){}
 });
 </script>
+${mermaidScript}
 </body>
 </html>`;
 }

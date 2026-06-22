@@ -60,6 +60,18 @@ describe("mdToHtml", () => {
 		expect(html).toBe('<pre data-lang="ts"><code>const x = 1 &lt; 2;</code></pre>');
 	});
 
+	it("renders Mermaid fenced diagrams", () => {
+		const html = mdToHtml("```mermaid\ngraph TD\n  A[Start <now>] --> B[End]\n```");
+		expect(html).toContain('<figure class="mermaid-diagram">');
+		expect(html).toContain('<div class="mermaid" role="img" aria-label="Mermaid diagram">graph TD');
+		expect(html).toContain('A[Start &lt;now&gt;] --&gt; B[End]');
+		expect(html).toContain('<summary>Mermaid source</summary>');
+	});
+
+	it("renders mmd fenced diagrams as Mermaid", () => {
+		expect(mdToHtml("```mmd\ngraph LR\n  A --> B\n```")).toContain('class="mermaid-diagram"');
+	});
+
 	it("renders blockquotes", () => {
 		expect(mdToHtml("> quoted")).toBe("<blockquote><p>quoted</p></blockquote>");
 	});

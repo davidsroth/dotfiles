@@ -2,9 +2,10 @@
  * Minimal Markdown → HTML renderer for the plan/markup review page.
  *
  * Supports headings, paragraphs, inline emphasis/code/links/strikethrough,
- * fenced + inline code, blockquotes, ordered/unordered/nested/task lists,
- * tables, and horizontal rules. Not a full CommonMark implementation — just
- * enough to render agent-authored plans faithfully.
+ * fenced + inline code, Mermaid fenced diagrams, blockquotes,
+ * ordered/unordered/nested/task lists, tables, and horizontal rules. Not a full
+ * CommonMark implementation — just enough to render agent-authored plans
+ * faithfully.
  */
 
 import { escapeHtml } from "../_review/html";
@@ -43,6 +44,24 @@ function isHr(line: string): boolean {
 
 function isFenceStart(line: string): RegExpMatchArray | null {
 	return line.match(/^\s{0,3}(`{3,}|~{3,})\s*([^`]*)\s*$/);
+}
+
+function isMermaidLang(lang: string): boolean {
+	const normalized = lang.trim().toLowerCase();
+	return normalized === "mermaid" || normalized === "mmd";
+}
+
+function renderMermaidBlock(source: string): string {
+	const escaped = escapeHtml(source);
+	return [
+		'<figure class="mermaid-diagram">',
+		`<div class="mermaid" role="img" aria-label="Mermaid diagram">${escaped}</div>`,
+		"<details>",
+		"<summary>Mermaid source</summary>",
+		`<pre data-lang="mermaid"><code>${escaped}</code></pre>`,
+		"</details>",
+		"</figure>",
+	].join("");
 }
 
 function isTableSeparator(line: string): boolean {
@@ -162,8 +181,13 @@ export function mdToHtml(md: string): string {
 				code.push(candidate);
 				i++;
 			}
-			const langAttr = lang ? ` data-lang="${escapeHtml(lang)}"` : "";
-			out.push(`<pre${langAttr}><code>${escapeHtml(code.join("\n"))}</code></pre>`);
+			const source = code.join("\n");
+			if (isMermaidLang(lang)) {
+				out.push(renderMermaidBlock(source));
+			} else {
+				const langAttr = lang ? ` data-lang="${escapeHtml(lang)}"` : "";
+				out.push(`<pre${langAttr}><code>${escapeHtml(source)}</code></pre>`);
+			}
 			continue;
 		}
 
