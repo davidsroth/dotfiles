@@ -87,6 +87,39 @@ success "Set fast key repeat"
 defaults write NSGlobalDomain ApplePressAndHoldEnabled -bool false
 success "Disabled press-and-hold"
 
+# Install the "US-NoOption" keyboard layout: a U.S. ANSI layout with the
+# Option modifier plane stripped, so Option never composes glyphs (ç/ƒ/µ)
+# or arms dead-key accents. This makes Option a pure modifier system-wide,
+# which is why Hammerspoon/Karabiner can bind ⌥<key> without the keystroke
+# leaking a character (and why no per-key dead-key bypass is needed).
+# macOS does not reliably read *symlinked* keylayouts, so we copy the file
+# rather than rely on stow.
+LAYOUT_NAME="US-NoOption"
+LAYOUT_ID="-19341"  # must match the id= in the .keylayout (referenced below)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LAYOUT_SRC="$SCRIPT_DIR/macos/keyboard-layouts/$LAYOUT_NAME.keylayout"
+LAYOUT_DEST_DIR="$HOME/Library/Keyboard Layouts"
+if [[ -f "$LAYOUT_SRC" ]]; then
+    mkdir -p "$LAYOUT_DEST_DIR"
+    cp -f "$LAYOUT_SRC" "$LAYOUT_DEST_DIR/$LAYOUT_NAME.keylayout"
+    success "Installed $LAYOUT_NAME keyboard layout"
+    # Enable it in the input-source list (idempotent). It is only *enabled*,
+    # not selected as default — U.S. stays active so you can verify the new
+    # layout and roll back instantly from the input-source menu. HIToolbox
+    # only rescans ~/Library/Keyboard Layouts at login, so this takes effect
+    # after the next logout/login.
+    if ! defaults read com.apple.HIToolbox AppleEnabledInputSources 2>/dev/null \
+         | grep -q "$LAYOUT_NAME"; then
+        defaults write com.apple.HIToolbox AppleEnabledInputSources -array-add \
+            "{ 'InputSourceKind' = 'Keyboard Layout'; 'KeyboardLayout ID' = $LAYOUT_ID; 'KeyboardLayout Name' = '$LAYOUT_NAME'; }"
+        success "Enabled $LAYOUT_NAME input source (select it after logout/login)"
+    else
+        info "$LAYOUT_NAME input source already enabled"
+    fi
+else
+    warning "Keyboard layout source not found at $LAYOUT_SRC; skipping"
+fi
+
 # =============================================================================
 # Finder
 # =============================================================================
@@ -269,3 +302,6 @@ echo "  • Dock auto-hides"
 echo "  • Screenshots save to ~/Pictures/Screenshots"
 echo "  • Fast key repeat is enabled"
 echo "  • Auto-correct and smart substitutions are disabled"
+echo "  • 'US-NoOption' keyboard layout installed + enabled (Option = pure modifier,"
+echo "    no glyphs/accents). Select it in System Settings → Keyboard → Input Sources"
+echo "    after the next logout/login; keep 'U.S.' enabled as a fallback until verified."

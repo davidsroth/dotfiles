@@ -75,7 +75,6 @@ for key, app in pairs(alts) do
     end)
 end
 
--- Bind F-keys produced by Karabiner for Option+i/u
--- This avoids macOS dead-key composition while keeping Option-based muscle memory
-hs.hotkey.bind({}, "f18", function() launchOrFocusOrRotate(launchKeys.i) end)
-hs.hotkey.bind({}, "f19", function() launchOrFocusOrRotate(launchKeys.u) end)
+-- Note: ⌥i / ⌥u are bound directly via the launchKeys loop above. They no
+-- longer need a Karabiner dead-key bypass because the "US-NoOption" keyboard
+-- layout (installed by macos-defaults.sh) strips Option's glyph/dead-key plane.
