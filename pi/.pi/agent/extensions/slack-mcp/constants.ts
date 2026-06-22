@@ -26,6 +26,21 @@ export const MESSAGE_TEXT_TOOLS = new Set([
   "conversations_replies",
   "conversations_search_messages",
 ]);
+// Per-upstream-tool notes appended to the registered pi tool description.
+// These warn about Slack-search blind spots that bite every agent (not just a
+// particular skill), so they belong on the tool itself rather than in any one
+// workflow's prompt. Keyed by UPSTREAM tool name (without toolPrefix).
+export const TOOL_DESCRIPTION_NOTES: Record<string, string> = {
+  conversations_search_messages:
+    "Resolution caveat: `from:<id>` and `\"<@id>\"` searches reliably surface a " +
+    "person's own question, but frequently MISS the reply that resolved it — " +
+    "answers often don't @-mention the asker, and in DMs/mpDMs replies are usually " +
+    "top-level (un-threaded) messages. To confirm whether a question was actually " +
+    "answered, call conversations_history on that channel_id and read the messages " +
+    "after it (conversations_replies only sees threaded replies, so it misses " +
+    "un-threaded DM/mpDM answers).",
+};
+
 // Max NEW users.info lookups per tool call when resolving bare <@U…> mentions.
 // Inline `<@U…|name>` forms and already-cached IDs are free and uncapped.
 export const MENTION_LOOKUP_CAP = 25;

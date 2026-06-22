@@ -72,7 +72,7 @@
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { AUTH_FILE } from "./constants";
+import { AUTH_FILE, TOOL_DESCRIPTION_NOTES } from "./constants";
 import { hasAuthEnv, loadConfig, resolveConfig } from "./config";
 import { slackAuthTest } from "./identity";
 import type { StdioMCPClient } from "./mcp-client";
@@ -150,9 +150,11 @@ export default async function slackMCPExtension(pi: ExtensionAPI): Promise<void>
       const piName = `${prefix}${tool.name}`;
       if (known.has(piName) || registeredToolNames.has(piName)) continue;
 
-      const description = tool.description
+      const baseDescription = tool.description
         ? `[Slack MCP] ${tool.description}`
         : `[Slack MCP] Slack tool: ${tool.name}`;
+      const note = TOOL_DESCRIPTION_NOTES[tool.name];
+      const description = note ? `${baseDescription}\n\n${note}` : baseDescription;
 
       pi.registerTool({
         name: piName,
