@@ -36,6 +36,7 @@ local launchKeys = {
 	f = "Finder",
 	u = "Zen",
 	v = "Antigravity",
+	o = "Obsidian",
 }
 
 local alts = {
