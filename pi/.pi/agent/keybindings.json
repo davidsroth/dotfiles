@@ -5,7 +5,7 @@
   "tui.editor.cursorLineStart": ["home"],
   "app.message.followUp": ["alt+enter", "ctrl+alt+enter"],
   "app.session.toggleSort": ["ctrl+alt+s"],
-  "app.models.save": ["ctrl+alt+m"],
+  "app.models.save": ["ctrl+alt+d"],
   "app.thinking.cycle": ["shift+tab", "ctrl+alt+t"],
   "app.tree.filter.all": ["ctrl+a"],
   "app.models.enableAll": ["ctrl+alt+y"]
