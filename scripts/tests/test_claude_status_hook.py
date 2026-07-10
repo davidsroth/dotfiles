@@ -2,7 +2,7 @@
 the tmux session picker). Hermetic: the claude-pid walk uses an injected ps
 lookup, and files are written to tempdirs.
 
-Run via `just picker-test` or `python3 -m unittest discover -s scripts/tests`.
+Run via `just script-test` (or its `picker-test` alias).
 """
 
 import importlib.util

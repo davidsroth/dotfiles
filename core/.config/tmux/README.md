@@ -100,7 +100,8 @@ and refreshed in the background, so the popup opens immediately. Working/idle
 markers are read from heartbeat files — `~/.cache/pi-status/` written by the
 `pi-status` pi extension (`π`), `~/.cache/claude-status/` written by the
 `claude-status-hook` Claude Code hook (`✻`) — and normalized to git/worktree
-roots. Tests live in `scripts/tests/` (run with `just picker-test`).
+roots. Tests live in `scripts/tests/` (run with `just script-test`; the legacy
+`just picker-test` name remains an alias).
 
 ## Mouse Support
 

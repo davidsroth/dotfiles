@@ -23,32 +23,88 @@ DEST="$HOME/.pi/agent/settings.json"
 
 [[ -f "$BASE" ]] || { log "No settings.base.json at $BASE; skipping."; exit 0; }
 
-if ! command -v jq >/dev/null 2>&1; then
-  # No jq: fall back to a plain copy so the theme/packages at least load.
-  log "jq not found; copying base settings only (install jq for local merging)."
-  [[ -L "$DEST" ]] && rm "$DEST"
-  mkdir -p "$(dirname "$DEST")"
-  cp "$BASE" "$DEST"
-  exit 0
-fi
-
 mkdir -p "$(dirname "$DEST")"
-# Drop a stale stow symlink so we write a real, locally-mutable file.
-[[ -L "$DEST" ]] && rm "$DEST"
-
-# Sources in increasing precedence. Use {} for any that are missing.
-existing="$DEST";        [[ -f "$existing" ]] || existing=/dev/null
+local_package_prefix='../../dotfiles/'
 local_overrides="$LOCAL"; [[ -f "$local_overrides" ]] || local_overrides=/dev/null
 
+# Snapshot the live file before replacing DEST. This also preserves runtime
+# keys when DEST is a stale stow symlink; the final mv replaces the link rather
+# than writing through it.
+existing="$(mktemp)"
 tmp="$(mktemp)"
-jq -s '
-  (.[0] // {}) * (.[1] // {}) * (.[2] // {})
-' \
-  <(cat "$existing" 2>/dev/null || echo '{}') \
-  "$BASE" \
-  <(cat "$local_overrides" 2>/dev/null || echo '{}') \
-  > "$tmp"
+trap 'rm -f "$existing" "$tmp"' EXIT
+if [[ -f "$DEST" ]]; then
+  cat "$DEST" > "$existing"
+else
+  printf '{}\n' > "$existing"
+fi
+
+if command -v jq >/dev/null 2>&1; then
+  jq -s --arg repo_root "$REPO_ROOT" --arg prefix "$local_package_prefix" '
+    ((.[0] // {}) * (.[1] // {}) * (.[2] // {}))
+    | if (.packages | type) == "array" then
+        .packages |= map(
+          if type == "string" and startswith($prefix)
+          then $repo_root + "/" + ltrimstr($prefix)
+          else .
+          end
+        )
+      else .
+      end
+  ' \
+    "$existing" \
+    "$BASE" \
+    <(cat "$local_overrides" 2>/dev/null || printf '{}') \
+    > "$tmp"
+else
+  command -v python3 >/dev/null 2>&1 || {
+    log "jq and python3 not found; cannot generate settings safely."
+    exit 1
+  }
+  log "jq not found; using python3 fallback for settings merge."
+  python3 - "$existing" "$BASE" "$local_overrides" "$tmp" "$REPO_ROOT" "$local_package_prefix" <<'PY'
+import json
+import os
+import sys
+
+existing_path, base_path, local_path, destination, repo_root, prefix = sys.argv[1:]
+
+
+def load(path):
+    if path == "/dev/null":
+        return {}
+    with open(path, encoding="utf-8") as handle:
+        return json.load(handle)
+
+
+def merge(left, right):
+    if isinstance(left, dict) and isinstance(right, dict):
+        result = dict(left)
+        for key, value in right.items():
+            result[key] = merge(result[key], value) if key in result else value
+        return result
+    return right
+
+
+settings = merge(merge(load(existing_path), load(base_path)), load(local_path))
+packages = settings.get("packages")
+if isinstance(packages, list):
+    settings["packages"] = [
+        os.path.join(repo_root, package[len(prefix):])
+        if isinstance(package, str) and package.startswith(prefix)
+        else package
+        for package in packages
+    ]
+
+with open(destination, "w", encoding="utf-8") as handle:
+    json.dump(settings, handle, indent=2)
+    handle.write("\n")
+PY
+fi
+
 mv "$tmp" "$DEST"
+rm -f "$existing"
+trap - EXIT
 
 if [[ "$local_overrides" == /dev/null ]]; then
   log "Generated $DEST from settings.base.json (no settings.local.json found)."

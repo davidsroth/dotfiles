@@ -63,7 +63,7 @@ The installer will:
 
 ### Symlinking (GNU Stow)
 
-This repo uses GNU Stow to create symlinks into your home directory. A `.stowrc` is provided that sets the target to `$HOME`, so you can run Stow commands from the repository root:
+This repo uses GNU Stow to create symlinks into your home directory. A `.stowrc` sets the target to `$HOME` and disables directory tree folding so nested runtime/auth ignore rules cannot be bypassed by a parent symlink. Run Stow commands from the repository root:
 
 ```bash
 # macOS: stow core, zsh, git-config, pi
@@ -77,7 +77,7 @@ stow -R core zsh git-config pi linux
 Or use `just stow` / `just stow-restow`, which picks the right package set based on OS
 (the canonical list lives in `justfile`'s `stow_packages`).
 
-Files and directories that should not be linked (e.g., scripts, docs) are excluded via `.stow-local-ignore`.
+Files and directories that should not be linked (including runtime/auth state) are excluded via `.stow-local-ignore`; `core/.stow-local-ignore` links to the shared rules so they apply to the `core` package.
 
 ### Manual Installation
 
@@ -162,7 +162,7 @@ Settings are assembled from three sources, in increasing precedence:
 2. **`~/.pi/agent/settings.local.json`** (per-machine, gitignored) — provider and model selection.
 3. **Existing `~/.pi/agent/settings.json`** — pi's own runtime writes (e.g. `lastChangelogVersion`) are preserved across regenerations.
 
-The final `~/.pi/agent/settings.json` is produced by merging all three with `jq`. The script that does the merge is `scripts/gen-pi-settings.sh`; run it via:
+The final `~/.pi/agent/settings.json` is produced by `scripts/gen-pi-settings.sh` using `jq` (or a Python fallback). Tracked local package specs are rewritten to absolute paths rooted at the actual checkout, so the repository can live anywhere. Run it via:
 
 ```bash
 just pi-settings
@@ -170,7 +170,7 @@ just pi-settings
 
 Git hooks (`post-merge` and `post-checkout`) call the same script automatically after a `git pull`, so settings stay current without manual intervention.
 
-**Hard assumption**: the package paths in `settings.base.json` are relative (e.g. `../../dotfiles/pi/packages/pi-vim`), resolved from `~/.pi/agent/`. This means the repo must live at `~/dotfiles`. Moving it elsewhere breaks package loading.
+The relative local package specs in `settings.base.json` (for example `../../dotfiles/pi/packages/pi-vim`) are portable source values. The generator rewrites them in the live file; do not hand-edit generated paths in `~/.pi/agent/settings.json`.
 
 ### Fresh-machine steps `install.sh` does NOT do
 
@@ -204,7 +204,7 @@ The `secret-guard` extension redacts secret-shaped strings (API keys, tokens, pr
 
 Start with `just pi-doctor` (alias `pid`): it checks settings drift, package path resolution, git hooks, the memory symlink, stow health, the toolchain, and which provider env vars are set.
 
-- **Packages not loading** — check that the repo is at `~/dotfiles` (package paths in `settings.base.json` are relative), then run `just pi-settings` to regenerate `settings.json`.
+- **Packages not loading** — run `just pi-settings` to regenerate checkout-relative absolute package paths, then use `just pi-doctor` to verify them.
 - **Provider missing / model not found** — check that the relevant env var is exported (`OPENROUTER_API_KEY`, `AZURE_INFERENCE_ENDPOINT`, etc.) and that `~/.pi/agent/settings.local.json` names the correct `defaultProvider`.
 - **Stale settings after a pull** — run `just pi-settings`. If the git hook is set up correctly (via `install.sh` or `setup_git_hooks` in the script), this should happen automatically.
 
@@ -290,12 +290,9 @@ zsh -l -c 'echo PATH=$PATH | cut -c1-200'
 ## Maintenance
 
 - Health check: run `just doctor` to print OS, tool versions, and a Stow dry-run preview.
-- Audit: run `just audit` for syntax checks, JSON validation, and conflict scan.
-  - Optional checks included when tools are present:
-    - `shellcheck` for shell script linting
-    - `markdownlint` for Markdown style
-    - `lychee` for link checking (network)
-    - PATH sanity from a login shell
+- Audit: run `just audit` for deterministic offline syntax and configuration checks over Git-tracked files. Real shell, JSON, Lua, TOML, and YAML parse errors fail the recipe; unavailable optional parsers are reported as skipped.
+- Links: run `just audit-links` for the separate, network-dependent Markdown link report. Link/network failures are intentionally non-gating.
+- Script tests: run `just script-test` (`just picker-test` remains an alias).
 - Dry-run links: `just doctor` (or `stow -n -v core zsh git-config`) to preview symlinks without changing files.
 - Packages: `brew bundle check --no-upgrade` to verify Brewfile status; `brew bundle install --no-upgrade` to install missing items.
 - Cleanup: `just clean` to remove `.DS_Store` and editor backup files.

@@ -2,7 +2,7 @@
 pi heartbeat handling, worktree parsing). Hermetic: no tmux, sesh, or git
 subprocesses — only the pure row/parse layer plus tempdir file IO.
 
-Run via `just picker-test` or `python3 -m unittest discover -s scripts/tests`.
+Run via `just script-test` (or its `picker-test` alias).
 """
 
 import importlib.util

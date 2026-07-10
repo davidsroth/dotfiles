@@ -72,12 +72,21 @@ jobs:
       - name: Run extension and package tests (just pi-test)
         run: just pi-test
 
-  picker-test:
-    name: Test tmux session picker
+  config-check:
+    name: Validate scripts and tracked configs
     runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Run session-picker tests
-        run: python3 -m unittest discover -s scripts/tests -v
+      - name: Install lightweight validators
+        run: sudo apt-get update && sudo apt-get install -y jq lua5.4 ruby stow zsh
+
+      - name: Install just
+        uses: extractions/setup-just@v3
+
+      - name: Run script and config tests
+        run: just script-test
+
+      - name: Audit tracked configuration
+        run: just audit

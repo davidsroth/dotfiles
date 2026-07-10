@@ -41,6 +41,24 @@ Brewfile.lock.json
 # Repo-level automation and reports (do not stow into $HOME)
 ^\.codex$
 
+# Core runtime/auth state ignored by Git must never be linked into $HOME.
+# .stowrc disables tree folding so these nested rules cannot be bypassed by a
+# parent-directory symlink, while tracked neighboring configs remain stowable.
+^/\.claude$
+^/\.codex$
+^/\.config/(gcloud|gws|sunsama|op|raycast|aetna-claims|tuxedo)$
+^/\.config/gh/(config|hosts)\.yml$
+^/\.config/gh-dash/(config|config\.local)\.yml$
+^/\.config/espanso/(config|match)/local\.yml$
+^/\.config/espanso/\.local_(email|address)$
+^/\.config/nvim/\.luarc\.json$
+^/\.config/k9s/config\.yaml$
+^/\.config/opencode/node_modules$
+^/\.config/karabiner/automatic_backups$
+^/\.config/tmux/plugins$
+^/\.config/systemd/user/default\.target\.wants$
+^/\.hammerspoon/(bin|Spoons)$
+
 # Logs and transient files that should never be stowed
 ^.nvimlog$
 
@@ -54,8 +72,8 @@ Brewfile.lock.json
 # Local, host-specific configs that should never be stowed.
 # Covers the canonical path plus any nested ".claude/.claude/" subtree that
 # can accumulate when Claude Code runs inside a stowed .claude dir.
-^\.claude/settings\.local\.json$
-\.claude/\.claude/
-^\.config/gh-dash/config\.local\.yml$
-^\.config/gh-dash/config\.local\.example\.yml$
+^/\.claude/settings\.local\.json$
+^/\.claude/\.claude$
+^/\.config/gh-dash/config\.local\.yml$
+^/\.config/gh-dash/config\.local\.example\.yml$
 .*\.local\.lua$

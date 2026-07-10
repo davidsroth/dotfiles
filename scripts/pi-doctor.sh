@@ -42,8 +42,7 @@ check_settings_drift() {
   local tmp
   tmp="$(mktemp)"
 
-  # Mirror exactly what gen-pi-settings.sh does:
-  # (existing // {}) * (base // {}) * (local // {})
+  # Mirror gen-pi-settings.sh's merge and generated package-path rewrite.
   local existing_src="$live"
   local local_src
   if [[ -f "$local_overrides" ]]; then
@@ -52,7 +51,18 @@ check_settings_drift() {
     local_src=/dev/null
   fi
 
-  jq -s '(.[0]//{}) * (.[1]//{}) * (.[2]//{})' \
+  jq -s --arg repo_root "$REPO_ROOT" --arg prefix '../../dotfiles/' '
+    ((.[0] // {}) * (.[1] // {}) * (.[2] // {}))
+    | if (.packages | type) == "array" then
+        .packages |= map(
+          if type == "string" and startswith($prefix)
+          then $repo_root + "/" + ltrimstr($prefix)
+          else .
+          end
+        )
+      else .
+      end
+  ' \
     <(cat "$existing_src" 2>/dev/null || printf '{}') \
     "$base" \
     <(cat "$local_src" 2>/dev/null || printf '{}') \
@@ -88,8 +98,11 @@ check_package_paths() {
     # Skip npm: specifiers
     [[ "$pkg" == npm:* ]] && continue
 
-    # Resolve relative to ~/.pi/agent
-    dir="$PI_AGENT/$pkg"
+    if [[ "$pkg" == /* ]]; then
+      dir="$pkg"
+    else
+      dir="$PI_AGENT/$pkg"
+    fi
 
     if [[ ! -d "$dir" ]]; then
       FAIL "PACKAGE PATHS: directory missing for package '$pkg' (resolved: $dir)"

@@ -89,13 +89,16 @@ pi-doctor:
 
 alias pid := pi-doctor
 
-# Run the tmux session-picker unit tests (stdlib unittest).
-picker-test:
+# Run the repository's lightweight script/config unit tests (stdlib unittest).
+script-test:
   python3 -m unittest discover -s {{justfile_directory()}}/scripts/tests -v
+
+# Backward-compatible name for the original session-picker-only test recipe.
+alias picker-test := script-test
 
 # Update repo and restow changes.
 update:
-  git pull --rebase --autostash || true
+  git pull --rebase --autostash
   stow -R -v {{stow_packages}}
 
 # Run full system maintenance (Brew, plugins, system updates)
@@ -213,64 +216,28 @@ doctor:
   @echo "Stow dry-run preview"
   @stow -n -v {{stow_packages}} 2>&1 | grep -E "LINK:|directory" || true
 
-# Run static checks and quick repo audit
+# Run deterministic offline syntax/config checks over tracked files only.
 audit:
-  @echo "Syntax checks (bash/zsh)"
-  @bash -n install.sh && echo "✓ install.sh syntax OK" || echo "✗ install.sh syntax error"
-  @bash -n macos-defaults.sh && echo "✓ macos-defaults.sh syntax OK" || echo "✗ macos-defaults.sh syntax error"
-  @zsh -n zsh/.zshrc && echo "✓ .zshrc syntax OK" || echo "✗ .zshrc syntax error"
-  @zsh -n zsh/.zshenv && echo "✓ .zshenv syntax OK" || echo "✗ .zshenv syntax error"
-  @zsh -n zsh/.zprofile && echo "✓ .zprofile syntax OK" || echo "✗ .zprofile syntax error"
-  @zsh -n core/.config/shell/aliases.sh && echo "✓ aliases.sh syntax OK" || echo "✗ aliases.sh syntax error"
-  @zsh -n core/.config/shell/functions.sh && echo "✓ functions.sh syntax OK" || echo "✗ functions.sh syntax error"
-  @echo
-  @echo "Lua syntax check (luac)"
-  @if command -v luac >/dev/null 2>&1; then \
-    if find core -name "*.lua" -print -quit | grep -q .; then \
-      find core -name "*.lua" -print0 | xargs -0 luac -p && echo "✓ Lua files syntax OK" || echo "✗ Lua syntax errors found"; \
-    else \
-      echo "No Lua files found"; \
-    fi; \
-  else \
-    echo "luac: not found (skipping Lua check)"; \
+  bash {{justfile_directory()}}/scripts/audit.sh
+
+# Check links in tracked Markdown. Network failures are reported but non-gating.
+audit-links:
+  #!/usr/bin/env bash
+  set -u
+  if ! command -v lychee >/dev/null 2>&1; then
+    echo "lychee: not found (skipping link check)"
+    exit 0
   fi
-  @echo
-  @echo "ShellCheck (optional)"
-  @if command -v shellcheck >/dev/null 2>&1; then \
-    shellcheck -x install.sh macos-defaults.sh || true; \
-  else \
-    echo "shellcheck: not found"; \
+  files=()
+  while IFS= read -r -d '' file; do
+    case "$file" in node_modules/*|*/node_modules/*) continue ;; esac
+    files+=("$file")
+  done < <(git -C "{{justfile_directory()}}" ls-files -z -- '*.md')
+  if ((${#files[@]} == 0)); then
+    echo "No tracked Markdown files."
+    exit 0
   fi
-  @echo
-  @echo "JSON validation (jq)"
-  @if command -v jq >/dev/null 2>&1; then \
-    rg -uu --files -g "*.json" -g '!**/.claude/**' -g '!**/.codex/**' -g '!**/.config/tmux/plugins/**' | while IFS= read -r f; do jq -e . "$f" >/dev/null 2>&1 && echo "OK  $f" || echo "ERR $f"; done; \
-  else \
-    echo "jq: not found"; \
-  fi
-  @echo
-  @echo "Markdown lint (optional)"
-  @if command -v markdownlint >/dev/null 2>&1; then \
-    FILES=$(rg -uu --files -g '!**/.git/**' -g '!**/.config/tmux/plugins/**' -g '!**/.claude/**' -g '!**/.codex/**' -g '!**/node_modules/**' -g '*.md' | tr '\n' ' '); \
-    if [ -n "$FILES" ]; then markdownlint -q $FILES || true; else echo "no markdown files"; fi; \
-  else \
-    echo "markdownlint: not found"; \
-  fi
-  @echo
-  @echo "Link check (optional)"
-  @if command -v lychee >/dev/null 2>&1; then \
-    FILES=$(rg -uu --files -g '!**/.git/**' -g '!**/.config/tmux/plugins/**' -g '!**/.claude/**' -g '!**/.codex/**' -g '!**/node_modules/**' -g '*.md' | tr '\n' ' '); \
-    if [ -n "$FILES" ]; then lychee --no-progress --quiet $FILES || true; else echo "no markdown files"; fi; \
-  else \
-    echo "lychee: not found"; \
-  fi
-  @echo
-  @echo "Broken symlinks"
-  @find . -name ".git" -prune -o -name ".claude" -prune -o -name ".codex" -prune -o -path "*/.config/tmux/plugins" -prune -o \( -type l ! -exec test -e {} \; -print \) | sed -n '1,200p' || true
-  @echo
-  @echo "Stow conflicts"
-  @stow -n -v {{stow_packages}} 2>&1 | grep -E "existing target is" || true
-  @echo
-  @echo "PATH sanity (login shell)"
-  @zsh -l -c 'echo PATH=$PATH' | cut -c1-200
-  @zsh -l -c 'command -v brew >/dev/null 2>&1 && echo "brew in PATH: $(command -v brew)" || echo "brew not in PATH"'
+  lychee --no-progress "${files[@]}" || {
+    echo "Link check reported failures (non-gating)." >&2
+    exit 0
+  }
