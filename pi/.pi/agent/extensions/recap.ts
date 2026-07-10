@@ -1,4 +1,4 @@
-import { complete } from "@earendil-works/pi-ai";
+import { completeSimple } from "@earendil-works/pi-ai/compat";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 type ContentBlock = {
@@ -106,7 +106,7 @@ export default function (pi: ExtensionAPI) {
 			ctx.ui.notify("Generating recap…", "info");
 
 			try {
-				const response = await complete(
+				const response = await completeSimple(
 					ctx.model,
 					{
 						messages: [
@@ -120,7 +120,8 @@ export default function (pi: ExtensionAPI) {
 					{
 						apiKey: auth.apiKey,
 						headers: auth.headers,
-						reasoningEffort: "low",
+						env: auth.env,
+						reasoning: "low",
 					},
 				);
 
