@@ -46,14 +46,14 @@ Brewfile.lock.json
 # parent-directory symlink, while tracked neighboring configs remain stowable.
 ^/\.claude$
 ^/\.codex$
-^/\.config/(gcloud|gws|sunsama|op|raycast|aetna-claims|tuxedo)$
+^/\.config/(gcloud|gws|herdr|sunsama|op|raycast|aetna-claims|tuxedo)$
 ^/\.config/gh/(config|hosts)\.yml$
 ^/\.config/gh-dash/(config|config\.local)\.yml$
 ^/\.config/espanso/(config|match)/local\.yml$
 ^/\.config/espanso/\.local_(email|address)$
 ^/\.config/nvim/\.luarc\.json$
 ^/\.config/k9s/config\.yaml$
-^/\.config/opencode/node_modules$
+^/\.config/opencode/(node_modules|bun\.lock|package-lock\.json)$
 ^/\.config/karabiner/automatic_backups$
 ^/\.config/tmux/plugins$
 ^/\.config/systemd/user/default\.target\.wants$
@@ -61,6 +61,8 @@ Brewfile.lock.json
 
 # Logs and transient files that should never be stowed
 ^.nvimlog$
+^/.*__pycache__$
+.*\.py[co]$
 
 # Repo-level files that should not be stowed into $HOME
 .*\.bundle$

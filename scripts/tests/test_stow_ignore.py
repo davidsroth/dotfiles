@@ -31,6 +31,7 @@ class StowIgnoreTest(unittest.TestCase):
                 ".codex/auth.json",
                 ".config/gcloud/credentials.db",
                 ".config/gws/auth.json",
+                ".config/herdr/session.json",
                 ".config/sunsama/session.json",
                 ".config/op/token",
                 ".config/raycast/state.db",
@@ -38,6 +39,7 @@ class StowIgnoreTest(unittest.TestCase):
                 ".config/tuxedo/state.json",
                 ".config/gh/hosts.yml",
                 ".config/gh-dash/config.local.yml",
+                ".config/shell/bin/__pycache__/helper.pyc",
             ]
             for relative in sensitive:
                 path = package / relative
@@ -85,6 +87,29 @@ class StowIgnoreTest(unittest.TestCase):
                 self.assertFalse((target / relative).exists(), relative)
             for relative in tracked_configs:
                 self.assertTrue((target / relative).exists(), relative)
+
+    def test_every_stow_package_uses_shared_ignore_rules(self):
+        for package in ("core", "zsh", "git-config"):
+            ignore = REPO_ROOT / package / ".stow-local-ignore"
+            self.assertTrue(ignore.is_symlink(), package)
+            self.assertEqual(ignore.resolve(), IGNORE_FILE.resolve(), package)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp)
+            result = subprocess.run(
+                ["stow", "--no", "--verbose", "--target", str(target), "zsh", "git-config", "pi"],
+                cwd=REPO_ROOT,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            output = result.stdout + result.stderr
+            self.assertNotIn(".zshenv.local.example", output)
+            self.assertNotIn(".gitconfig.local.example", output)
+            self.assertNotIn("settings.local.json.example", output)
+            self.assertNotIn("slack-mcp.example.json", output)
+            self.assertNotIn("extensions/node_modules", output)
 
 
 if __name__ == "__main__":

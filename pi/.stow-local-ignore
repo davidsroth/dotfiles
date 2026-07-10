@@ -11,6 +11,12 @@ _darcs
 # Generated per-machine file — managed by `just pi-settings`, not stowed
 ^\.pi/agent/settings\.json$
 
+# Generated dependencies and local templates are repository-side only.
+node_modules
+package-lock\.json$
+.*\.example$
+.*\.example\..*$
+
 # Don't stow pi/packages into ~/packages. gen-pi-settings.sh rewrites the
 # tracked relative specs to checkout-rooted absolute paths in settings.json, so
 # no ~/packages symlink is needed. Stowing it would
