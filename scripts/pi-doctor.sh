@@ -184,21 +184,24 @@ check_memory_link() {
 # 5. STOW HEALTH
 # ---------------------------------------------------------------------------
 check_stow_health() {
-  local ext_link="$PI_AGENT/extensions"
-  local expected="$REPO_ROOT/pi/.pi/agent/extensions"
+  # Stow runs with --no-folding, so parent directories are real and each
+  # tracked file is linked individually. Check a stable sentinel rather than
+  # requiring the extensions directory itself to be a symlink.
+  local sentinel="$PI_AGENT/extensions/recap.ts"
+  local expected="$REPO_ROOT/pi/.pi/agent/extensions/recap.ts"
 
-  if [[ ! -e "$ext_link" ]]; then
-    FAIL "STOW HEALTH: $ext_link does not exist — run: just stow"
+  if [[ ! -e "$sentinel" ]]; then
+    FAIL "STOW HEALTH: $sentinel does not exist — run: just stow"
     return
   fi
 
   local resolved
-  resolved="$(readlink -f "$ext_link" 2>/dev/null || echo '')"
+  resolved="$(readlink -f "$sentinel" 2>/dev/null || echo '')"
 
-  if [[ "$resolved" == "$expected" ]]; then
-    PASS "STOW HEALTH: extensions symlink resolves into repo correctly"
+  if [[ -L "$sentinel" && "$resolved" == "$expected" ]]; then
+    PASS "STOW HEALTH: tracked extension links resolve into repo correctly"
   else
-    FAIL "STOW HEALTH: $ext_link resolves to '$resolved', expected '$expected' — run: just stow"
+    FAIL "STOW HEALTH: $sentinel resolves to '$resolved', expected symlink to '$expected' — run: just stow"
   fi
 }
 
