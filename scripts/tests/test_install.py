@@ -1,0 +1,308 @@
+"""Hermetic tests for install.sh bootstrap behavior.
+
+The installer is sourced in short-lived Bash processes so these tests exercise
+its real functions without changing the developer machine.
+"""
+
+import os
+from pathlib import Path
+import shlex
+import stat
+import subprocess
+import tempfile
+import unittest
+
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+INSTALL_SH = REPO_ROOT / "install.sh"
+
+
+class InstallScriptTests(unittest.TestCase):
+    def run_bash(self, body, *, env=None, check=False):
+        merged_env = os.environ.copy()
+        if env:
+            merged_env.update({key: str(value) for key, value in env.items()})
+        result = subprocess.run(
+            ["bash", "-c", f"source {shlex.quote(str(INSTALL_SH))}\n{body}"],
+            cwd=REPO_ROOT,
+            env=merged_env,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        if check and result.returncode:
+            self.fail(
+                f"bash failed ({result.returncode})\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+            )
+        return result
+
+    @staticmethod
+    def write_executable(path, content):
+        path.write_text("#!/usr/bin/env bash\n" + content)
+        path.chmod(path.stat().st_mode | stat.S_IXUSR)
+
+    def test_sourcing_does_not_run_main(self):
+        result = self.run_bash('declare -F main >/dev/null && printf "sourced\\n"', check=True)
+        self.assertEqual(result.stdout, "sourced\n")
+        self.assertEqual(result.stderr, "")
+
+    def test_current_neovim_release_assets_are_arch_specific(self):
+        result = self.run_bash(
+            """
+            nvim_release_asset tarball x86_64
+            nvim_release_asset tarball arm64
+            nvim_release_asset appimage amd64
+            nvim_release_asset appimage aarch64
+            """,
+            check=True,
+        )
+        self.assertEqual(
+            result.stdout.splitlines(),
+            [
+                "nvim-linux-x86_64.tar.gz",
+                "nvim-linux-arm64.tar.gz",
+                "nvim-linux-x86_64.appimage",
+                "nvim-linux-arm64.appimage",
+            ],
+        )
+
+    def test_neovim_asset_rejects_unsupported_arch_and_method(self):
+        result = self.run_bash(
+            "nvim_release_asset tarball riscv64 || nvim_release_asset zip x86_64"
+        )
+        self.assertNotEqual(result.returncode, 0)
+
+    def test_neovim_config_and_binary_versions_are_validated(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            fake_nvim = Path(tempdir) / "nvim"
+            self.write_executable(fake_nvim, 'echo "NVIM v0.10.3"\n')
+            good = self.run_bash(
+                f"validate_nvim_config && validate_nvim_binary {shlex.quote(str(fake_nvim))}",
+                env={"NVIM_MIN_VERSION": "0.10.0", "NVIM_VERSION_TAG": "v0.10.3"},
+            )
+            self.assertEqual(good.returncode, 0, good.stderr)
+            self.assertEqual(good.stdout.strip(), "0.10.3")
+
+            too_old = self.run_bash(
+                f"validate_nvim_binary {shlex.quote(str(fake_nvim))}",
+                env={"NVIM_MIN_VERSION": "0.11.0"},
+            )
+            self.assertNotEqual(too_old.returncode, 0)
+            self.assertIn("older than required", too_old.stderr)
+
+            wrong_tag = self.run_bash(
+                f"validate_nvim_binary {shlex.quote(str(fake_nvim))}",
+                env={"NVIM_VERSION_TAG": "v0.10.4"},
+            )
+            self.assertNotEqual(wrong_tag.returncode, 0)
+            self.assertIn("does not match requested", wrong_tag.stderr)
+
+            bad_method = self.run_bash(
+                "validate_nvim_config", env={"NVIM_METHOD": "zip"}
+            )
+            self.assertNotEqual(bad_method.returncode, 0)
+            self.assertIn("Unsupported NVIM_METHOD", bad_method.stderr)
+
+    def test_dry_run_is_non_mutating_on_linux_and_macos(self):
+        for ostype in ("linux-gnu", "darwin23"):
+            with self.subTest(ostype=ostype), tempfile.TemporaryDirectory() as tempdir:
+                root = Path(tempdir)
+                home = root / "home"
+                tmp = root / "tmp"
+                bin_dir = root / "bin"
+                home.mkdir()
+                tmp.mkdir()
+                bin_dir.mkdir()
+                mutation_log = root / "mutations"
+                forbidden = """printf '%s %s\\n' "$0" "$*" >> "$MUTATION_LOG"
+exit 97
+"""
+                for command in ("sudo", "curl", "brew", "apt-get", "git", "stow", "npm", "defaults"):
+                    self.write_executable(bin_dir / command, forbidden)
+                # Platform probing may read xcode-select -p; only installation is forbidden.
+                self.write_executable(
+                    bin_dir / "xcode-select",
+                    """if [[ "${1:-}" == "-p" ]]; then exit 0; fi
+printf '%s %s\\n' "$0" "$*" >> "$MUTATION_LOG"
+exit 97
+""",
+                )
+                env = os.environ.copy()
+                env.update(
+                    {
+                        "OSTYPE": ostype,
+                        "DOTFILES_DIR": str(root / "not-cloned-yet"),
+                        "HOME": str(home),
+                        "TMPDIR": str(tmp),
+                        "MUTATION_LOG": str(mutation_log),
+                        "PATH": f"{bin_dir}{os.pathsep}{env['PATH']}",
+                        "SHELL": "/bin/bash",
+                        "TERM": "dumb",
+                    }
+                )
+                result = subprocess.run(
+                    ["bash", str(INSTALL_SH), "--dry-run"],
+                    cwd=REPO_ROOT,
+                    env=env,
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                )
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertFalse(mutation_log.exists(), mutation_log.read_text() if mutation_log.exists() else "")
+                self.assertEqual(list(home.iterdir()), [])
+                self.assertEqual(list(tmp.iterdir()), [])
+                self.assertIn("no log file or system changes", result.stdout)
+
+    def test_linux_package_set_includes_fontconfig(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            apt_log = Path(tempdir) / "apt.log"
+            result = self.run_bash(
+                """
+                OS_FAMILY=linux
+                LINUX_PKG_MGR=apt
+                step() { :; }
+                sudo() { "$@"; }
+                apt-get() { printf '%s\\n' "$*" >> "$APT_LOG"; }
+                apt-cache() { return 1; }
+                ensure_user_local_bin_path() { :; }
+                install_modern_neovim_linux() { :; }
+                install_linux_packages
+                """,
+                env={"APT_LOG": apt_log, "HOME": tempdir},
+                check=True,
+            )
+            self.assertIn("fontconfig", apt_log.read_text())
+            self.assertIn("Apt package installation completed", result.stdout)
+
+    def test_selected_neovim_failure_propagates_from_linux_package_install(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            result = self.run_bash(
+                """
+                OS_FAMILY=linux
+                LINUX_PKG_MGR=apt
+                step() { :; }
+                sudo() { "$@"; }
+                apt-get() { :; }
+                apt-cache() { return 1; }
+                ensure_user_local_bin_path() { :; }
+                install_modern_neovim_linux() { return 29; }
+                install_linux_packages
+                """,
+                env={"HOME": tempdir},
+            )
+            self.assertNotEqual(result.returncode, 0)
+
+    def test_font_install_refreshes_and_validates_font_cache(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            root = Path(tempdir)
+            bin_dir = root / "bin"
+            home = root / "home"
+            bin_dir.mkdir()
+            home.mkdir()
+            state = root / "fc-list-count"
+            cache_log = root / "cache-log"
+            self.write_executable(
+                bin_dir / "fc-list",
+                """count=0
+[[ -f "$FC_STATE" ]] && count=$(cat "$FC_STATE")
+count=$((count + 1)); printf '%s' "$count" > "$FC_STATE"
+[[ $count -gt 1 ]] && echo 'FiraCode Nerd Font'
+""",
+            )
+            self.write_executable(bin_dir / "fc-cache", 'echo "$*" >> "$CACHE_LOG"\n')
+            self.write_executable(
+                bin_dir / "curl",
+                """while [[ $# -gt 0 ]]; do
+  if [[ "$1" == "-o" ]]; then shift; : > "$1"; fi
+  shift
+done
+""",
+            )
+            self.write_executable(bin_dir / "unzip", 'mkdir -p "${@: -1}"\n')
+            result = self.run_bash(
+                "OS_FAMILY=linux; step() { :; }; install_fira_code_nerd_font",
+                env={
+                    "HOME": home,
+                    "TMPDIR": root,
+                    "FC_STATE": state,
+                    "CACHE_LOG": cache_log,
+                    "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
+                },
+            )
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertTrue(cache_log.exists())
+            self.assertIn("installed and font cache validated", result.stdout)
+
+    def test_pi_runtime_dependencies_reconcile_with_lockfile_policy_every_run(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            repo = Path(tempdir) / "repo"
+            packages = repo / "pi" / "packages"
+            tracked = packages / "tracked"
+            unlocked = packages / "unlocked"
+            tracked.mkdir(parents=True)
+            unlocked.mkdir()
+            manifest = '{"dependencies":{"example":"1.0.0"}}\n'
+            (tracked / "package.json").write_text(manifest)
+            (unlocked / "package.json").write_text(manifest)
+            (tracked / "package-lock.json").write_text("{}\n")
+            (unlocked / "package-lock.json").write_text("{}\n")
+            subprocess.run(["git", "init", "-q", repo], check=True)
+            subprocess.run(
+                ["git", "-C", repo, "add", "pi/packages/tracked/package-lock.json"],
+                check=True,
+            )
+            bin_dir = Path(tempdir) / "bin"
+            bin_dir.mkdir()
+            npm_log = Path(tempdir) / "npm.log"
+            self.write_executable(bin_dir / "npm", 'printf "%s|%s\\n" "$PWD" "$*" >> "$NPM_LOG"\n')
+            result = self.run_bash(
+                "install_pi_package_deps; install_pi_package_deps",
+                env={
+                    "DOTFILES_DIR": repo,
+                    "NPM_LOG": npm_log,
+                    "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
+                },
+            )
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            calls = npm_log.read_text().splitlines()
+            self.assertEqual(len(calls), 4)
+            tracked_calls = [line for line in calls if "/tracked|" in line]
+            unlocked_calls = [line for line in calls if "/unlocked|" in line]
+            self.assertEqual(len(tracked_calls), 2)
+            self.assertTrue(all("|ci " in line for line in tracked_calls))
+            self.assertEqual(len(unlocked_calls), 2)
+            self.assertTrue(all("install --package-lock=false" in line for line in unlocked_calls))
+
+    def test_required_pi_failures_are_not_suppressed(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            repo = Path(tempdir) / "repo"
+            package = repo / "pi" / "packages" / "broken"
+            package.mkdir(parents=True)
+            (package / "package.json").write_text('{"dependencies":{"example":"1"}}\n')
+            bin_dir = Path(tempdir) / "bin"
+            bin_dir.mkdir()
+            self.write_executable(bin_dir / "npm", "exit 23\n")
+            npm_failure = self.run_bash(
+                "install_pi_package_deps",
+                env={
+                    "DOTFILES_DIR": repo,
+                    "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
+                },
+            )
+            self.assertNotEqual(npm_failure.returncode, 0)
+            self.assertIn("failed for required Pi package", npm_failure.stderr)
+
+            for function, expected in (
+                ("setup_pi_settings", "settings generator is missing"),
+                ("setup_pi_memory", "memory file is missing"),
+                ("setup_git_hooks", "hooks directory is missing"),
+            ):
+                with self.subTest(function=function):
+                    result = self.run_bash(f"{function}", env={"DOTFILES_DIR": repo})
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn(expected, result.stderr)
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -19,7 +19,7 @@ SCRIPT_NAME="$(basename "${BASH_SOURCE[0]:-$0}")"; readonly SCRIPT_NAME
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"; readonly SCRIPT_DIR
 readonly DOTFILES_DIR="${DOTFILES_DIR:-$HOME/dotfiles}"
 BACKUP_DIR="$HOME/.dotfiles-backup/$(date +%Y%m%d-%H%M%S)"; readonly BACKUP_DIR
-LOG_FILE="/tmp/dotfiles-install-$(date +%Y%m%d-%H%M%S).log"; readonly LOG_FILE
+LOG_FILE="${TMPDIR:-/tmp}/dotfiles-install-$(date +%Y%m%d-%H%M%S).log"; readonly LOG_FILE
 
 # GitHub repository (update this with your username)
 readonly GITHUB_USER="${GITHUB_USER:-davidroth}"
@@ -83,7 +83,7 @@ QUIET=false
 # - NVIM_METHOD: auto|tarball|backports|appimage (default: auto → appimage on x86_64, tarball elsewhere)
 # - NVIM_MIN_VERSION: semantic minimum version to ensure (default: 0.9.0)
 # - NVIM_FORCE_UPDATE: if "true", reinstall even when >= min version (default: false)
-# - NVIM_VERSION_TAG: explicit tag like "v0.10.4" (default: empty → latest)
+# - NVIM_VERSION_TAG: explicit tag like "v0.10.4" (default: empty → stable)
 NVIM_METHOD="${NVIM_METHOD:-${NVIM_INSTALL_METHOD:-auto}}"
 NVIM_MIN_VERSION="${NVIM_MIN_VERSION:-0.9.0}"
 NVIM_FORCE_UPDATE="${NVIM_FORCE_UPDATE:-false}"
@@ -164,33 +164,53 @@ parse_args() {
 # Log a message with timestamp
 # Arguments: message to log
 log() {
-  echo "[$(date +'%Y-%m-%d %H:%M:%S')] $*" | tee -a "$LOG_FILE"
+  if [[ "$DRY_RUN" == "true" ]]; then
+    echo "[$(date +'%Y-%m-%d %H:%M:%S')] $*"
+  else
+    echo "[$(date +'%Y-%m-%d %H:%M:%S')] $*" | tee -a "$LOG_FILE"
+  fi
 }
 
 # Display info message
 # Arguments: message to display
 info() {
   [[ "$QUIET" == "true" ]] && return
-  echo -e "${BLUE}[INFO]${NC} $1" | tee -a "$LOG_FILE"
+  if [[ "$DRY_RUN" == "true" ]]; then
+    echo -e "${BLUE}[INFO]${NC} $1"
+  else
+    echo -e "${BLUE}[INFO]${NC} $1" | tee -a "$LOG_FILE"
+  fi
 }
 
 # Display success message
 # Arguments: message to display
 success() {
   [[ "$QUIET" == "true" ]] && return
-  echo -e "${GREEN}[✓]${NC} $1" | tee -a "$LOG_FILE"
+  if [[ "$DRY_RUN" == "true" ]]; then
+    echo -e "${GREEN}[✓]${NC} $1"
+  else
+    echo -e "${GREEN}[✓]${NC} $1" | tee -a "$LOG_FILE"
+  fi
 }
 
 # Display warning message
 # Arguments: message to display
 warning() {
-  echo -e "${YELLOW}[WARNING]${NC} $1" | tee -a "$LOG_FILE"
+  if [[ "$DRY_RUN" == "true" ]]; then
+    echo -e "${YELLOW}[WARNING]${NC} $1"
+  else
+    echo -e "${YELLOW}[WARNING]${NC} $1" | tee -a "$LOG_FILE"
+  fi
 }
 
 # Display error message
 # Arguments: message to display
 error() {
-  echo -e "${RED}[ERROR]${NC} $1" | tee -a "$LOG_FILE" >&2
+  if [[ "$DRY_RUN" == "true" ]]; then
+    echo -e "${RED}[ERROR]${NC} $1" >&2
+  else
+    echo -e "${RED}[ERROR]${NC} $1" | tee -a "$LOG_FILE" >&2
+  fi
 }
 
 # Display progress step
@@ -199,7 +219,11 @@ step() {
   [[ "$QUIET" == "true" ]] && return
   # Use pre-increment so arithmetic exit status is success under set -e
   ((++CURRENT_STEP))
-  echo -e "\n${MAGENTA}[$CURRENT_STEP/$TOTAL_STEPS]${NC} $1" | tee -a "$LOG_FILE"
+  if [[ "$DRY_RUN" == "true" ]]; then
+    echo -e "\n${MAGENTA}[$CURRENT_STEP/$TOTAL_STEPS]${NC} $1"
+  else
+    echo -e "\n${MAGENTA}[$CURRENT_STEP/$TOTAL_STEPS]${NC} $1" | tee -a "$LOG_FILE"
+  fi
 }
 
 # Check if a command exists
@@ -221,38 +245,112 @@ ensure_user_local_bin_path() {
   esac
 }
 
-# Compare two semantic versions using dpkg if available, otherwise sort -V
+# Compare numeric semantic versions without GNU-only tools (works on macOS too).
 # Usage: version_ge A B  -> returns 0 if A >= B
-version_ge() {
-  local a="$1" b="$2"
-  if check_command dpkg; then
-    dpkg --compare-versions "$a" ge "$b"
-    return $?
-  fi
-  # Fallback with sort -V
-  [[ "$(printf '%s\n%s\n' "$b" "$a" | sort -V | tail -n1)" == "$a" ]]
+semver_is_valid() {
+  [[ "$1" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
 }
 
-# Get NVIM version (e.g., 0.9.5) or empty
-get_nvim_version() {
-  if check_command nvim; then
-    nvim --version 2>/dev/null | head -n1 | sed -E 's/^NVIM v?([0-9.]+).*/\1/'
+version_ge() {
+  local a="$1" b="$2" a_major a_minor a_patch b_major b_minor b_patch
+  semver_is_valid "$a" && semver_is_valid "$b" || return 2
+  IFS=. read -r a_major a_minor a_patch <<<"$a"
+  IFS=. read -r b_major b_minor b_patch <<<"$b"
+  ((10#$a_major > 10#$b_major)) ||
+    { ((10#$a_major == 10#$b_major)) && ((10#$a_minor > 10#$b_minor)); } ||
+    { ((10#$a_major == 10#$b_major)) && ((10#$a_minor == 10#$b_minor)) && ((10#$a_patch >= 10#$b_patch)); }
+}
+
+# Print the architecture-specific release asset used by current Neovim stable
+# releases. Unsupported method/architecture pairs are an error, never an
+# implicit x86_64 fallback.
+nvim_release_asset() {
+  local method="$1" arch="$2" normalized_arch
+  case "$arch" in
+    x86_64 | amd64) normalized_arch="x86_64" ;;
+    aarch64 | arm64) normalized_arch="arm64" ;;
+    *) return 1 ;;
+  esac
+
+  case "$method" in
+    tarball) printf 'nvim-linux-%s.tar.gz\n' "$normalized_arch" ;;
+    appimage) printf 'nvim-linux-%s.appimage\n' "$normalized_arch" ;;
+    *) return 1 ;;
+  esac
+}
+
+validate_nvim_config() {
+  case "$NVIM_METHOD" in
+    auto | tarball | appimage | backports) ;;
+    *) error "Unsupported NVIM_METHOD: $NVIM_METHOD"; return 1 ;;
+  esac
+  if ! semver_is_valid "$NVIM_MIN_VERSION"; then
+    error "NVIM_MIN_VERSION must be a numeric semantic version (got: $NVIM_MIN_VERSION)"
+    return 1
   fi
+  if [[ -n "$NVIM_VERSION_TAG" && ! "$NVIM_VERSION_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    error "NVIM_VERSION_TAG must look like v0.10.4 (got: $NVIM_VERSION_TAG)"
+    return 1
+  fi
+}
+
+nvim_version_from_binary() {
+  local binary="$1" output first_line version
+  [[ -x "$binary" ]] || return 1
+  output="$("$binary" --version 2>/dev/null)" || return 1
+  first_line="${output%%$'\n'*}"
+  if [[ "$first_line" =~ ^NVIM[[:space:]]v?([0-9]+\.[0-9]+\.[0-9]+) ]]; then
+    version="${BASH_REMATCH[1]}"
+    printf '%s\n' "$version"
+  else
+    return 1
+  fi
+}
+
+validate_nvim_binary() {
+  local binary="$1" version expected
+  version="$(nvim_version_from_binary "$binary")" || {
+    error "Could not run $binary to validate the Neovim version"
+    return 1
+  }
+  if ! version_ge "$version" "$NVIM_MIN_VERSION"; then
+    error "Neovim $version is older than required $NVIM_MIN_VERSION"
+    return 1
+  fi
+  if [[ -n "$NVIM_VERSION_TAG" ]]; then
+    expected="${NVIM_VERSION_TAG#v}"
+    if [[ "$version" != "$expected" ]]; then
+      error "Neovim $version does not match requested $NVIM_VERSION_TAG"
+      return 1
+    fi
+  fi
+  printf '%s\n' "$version"
+}
+
+# Get NVIM version (e.g., 0.9.5) or empty.
+get_nvim_version() {
+  local binary
+  binary="$(command -v nvim 2>/dev/null || true)"
+  [[ -n "$binary" ]] && nvim_version_from_binary "$binary"
 }
 
 # Ensure Debian backports repo is present for given codename
 ensure_debian_backports() {
   local codename="$1"
   local sources_file="/etc/apt/sources.list.d/${codename}-backports.list"
+  if [[ "$DRY_RUN" == "true" ]]; then
+    info "[DRY RUN] Would ensure the ${codename}-backports repository exists"
+    return 0
+  fi
   if ! grep -Rqs "${codename}-backports" /etc/apt/sources.list /etc/apt/sources.list.d 2>/dev/null; then
     info "Adding ${codename}-backports repository"
     local line="deb http://deb.debian.org/debian ${codename}-backports main contrib non-free non-free-firmware"
     if command -v sudo >/dev/null 2>&1; then
-      echo "$line" | sudo tee "$sources_file" >/dev/null || warning "Failed to write backports list"
-      sudo apt-get update -y || warning "apt update failed after adding backports"
+      echo "$line" | sudo tee "$sources_file" >/dev/null || return 1
+      sudo apt-get update -y || return 1
     else
-      echo "$line" | tee "$sources_file" >/dev/null || warning "Failed to write backports list"
-      apt-get update -y || warning "apt update failed after adding backports"
+      echo "$line" | tee "$sources_file" >/dev/null || return 1
+      apt-get update -y || return 1
     fi
   fi
 }
@@ -261,149 +359,172 @@ ensure_debian_backports() {
 
 # Install a modern Neovim on Debian/Ubuntu systems
 install_modern_neovim_linux() {
-  local min_ver="$NVIM_MIN_VERSION"
-  local current_ver
-  current_ver="$(get_nvim_version || true)"
-  if [[ "$NVIM_FORCE_UPDATE" != "true" ]]; then
-    if [[ -n "$current_ver" ]] && version_ge "$current_ver" "$min_ver"; then
-      [[ "$VERBOSE" == "true" ]] && success "Neovim $current_ver already >= $min_ver" || true
-      return 0
-    fi
-  else
-    info "Forcing Neovim reinstall (NVIM_FORCE_UPDATE=true)"
+  validate_nvim_config || return 1
+
+  local arch method="$NVIM_METHOD"
+  arch="$(uname -m)"
+  if [[ "$method" == "auto" ]]; then
+    case "$arch" in
+      x86_64 | amd64) method="appimage" ;;
+      aarch64 | arm64) method="tarball" ;;
+      *) error "Unsupported architecture for Neovim portable install: $arch"; return 1 ;;
+    esac
+  fi
+  if [[ "$method" == "tarball" || "$method" == "appimage" ]]; then
+    nvim_release_asset "$method" "$arch" >/dev/null || {
+      error "Unsupported Neovim $method architecture: $arch"
+      return 1
+    }
   fi
 
-  # Detect Debian codename if present
-  local id codename
+  local id="" codename=""
   if [[ -r /etc/os-release ]]; then
     # shellcheck disable=SC1091
     . /etc/os-release
     id="${ID:-}"
     codename="${VERSION_CODENAME:-}"
   fi
-
-  # Decide method (default to AppImage on x86_64 Linux to avoid tarball name drift)
-  local method="$NVIM_METHOD"
-  if [[ "$method" == "auto" ]]; then
-    case "$(uname -m)" in
-      x86_64|amd64)
-        method="appimage";;
-      *)
-        method="tarball";;
-    esac
+  if [[ "$method" == "backports" && ( "$id" != "debian" || -z "$codename" ) ]]; then
+    error "NVIM_METHOD=backports is supported only on Debian with a release codename"
+    return 1
   fi
+
+  if [[ "$DRY_RUN" == "true" ]]; then
+    info "[DRY RUN] Would ensure Neovim >= $NVIM_MIN_VERSION using $method"
+    return 0
+  fi
+
+  local min_ver="$NVIM_MIN_VERSION" current_ver
+  current_ver="$(get_nvim_version || true)"
+  if [[ "$NVIM_FORCE_UPDATE" != "true" && -n "$current_ver" ]] && version_ge "$current_ver" "$min_ver"; then
+    if [[ -z "$NVIM_VERSION_TAG" || "$current_ver" == "${NVIM_VERSION_TAG#v}" ]]; then
+      [[ "$VERBOSE" == "true" ]] && success "Neovim $current_ver already satisfies the requested version" || true
+      return 0
+    fi
+    info "Installed Neovim $current_ver does not match requested $NVIM_VERSION_TAG; reinstalling"
+  fi
+  [[ "$NVIM_FORCE_UPDATE" == "true" ]] && info "Forcing Neovim reinstall (NVIM_FORCE_UPDATE=true)"
 
   if [[ "$method" == "backports" ]]; then
-    if [[ "$id" == "debian" && -n "$codename" ]]; then
-      info "Installing Neovim from ${codename}-backports"
-      ensure_debian_backports "$codename"
-      if command -v sudo >/dev/null 2>&1; then
-        sudo apt-get install -y -t "${codename}-backports" neovim || warning "Failed to install neovim from backports"
-      else
-        apt-get install -y -t "${codename}-backports" neovim || warning "Failed to install neovim from backports"
-      fi
-      current_ver="$(get_nvim_version || true)"
-      if [[ -n "$current_ver" ]] && version_ge "$current_ver" "$min_ver"; then
-        success "Neovim $current_ver installed from backports"
-        return 0
-      else
-        if [[ "$NVIM_METHOD" == "backports" ]]; then
-          warning "Backports did not yield >= $min_ver (got: ${current_ver:-none})."
-        else
-          warning "Backports did not yield >= $min_ver (got: ${current_ver:-none}). Falling back to portable build."
-        fi
-      fi
+    info "Installing Neovim from ${codename}-backports"
+    ensure_debian_backports "$codename" || return 1
+    local apt_install=(apt-get install -y -t "${codename}-backports" neovim)
+    if command -v sudo >/dev/null 2>&1; then
+      sudo "${apt_install[@]}" || return 1
     else
-      warning "Backports method selected but this is not a Debian system; falling back to portable."
+      "${apt_install[@]}" || return 1
     fi
-  fi
-
-  if [[ "$method" == "tarball" ]]; then
-    info "Installing Neovim tarball to ~/.local"
-    local tmp_tar="/tmp/nvim.tar.gz"
-    ensure_user_local_bin_path
-    # Determine asset by arch
-    local arch asset tag_path
-    arch="$(uname -m)"
-    case "$arch" in
-      x86_64|amd64) asset="nvim-linux64.tar.gz" ;;
-      aarch64|arm64) asset="nvim-linux-arm64.tar.gz" ;;
-      *) asset="nvim-linux64.tar.gz" ;;
-    esac
-    if [[ -n "$NVIM_VERSION_TAG" ]]; then
-      tag_path="download/${NVIM_VERSION_TAG}"
-      info "Using NVIM_VERSION_TAG=$NVIM_VERSION_TAG"
-    else
-      # Use the stable tag by default to avoid occasional 404s on latest
-      tag_path="download/stable"
-    fi
-    local url="https://github.com/neovim/neovim/releases/${tag_path}/${asset}"
-    if curl -fL --retry 3 --retry-delay 1 -o "$tmp_tar" "$url"; then
-      rm -rf "$HOME/.local/nvim-linux64.new"
-      if [[ "$NVIM_FORCE_UPDATE" == "true" ]]; then
-        rm -rf "$HOME/.local/nvim-linux64"
-      fi
-      mkdir -p "$HOME/.local"
-      local top
-      top="$(tar -tzf "$tmp_tar" 2>/dev/null | head -n1 | cut -d/ -f1)"
-      tar -C "$HOME/.local" -xzf "$tmp_tar" || {
-        warning "Failed to extract Neovim tarball"
-        rm -f "$tmp_tar"
-        return 1
-      }
-      rm -f "$tmp_tar"
-      local bindir
-      if [[ -n "$top" && -d "$HOME/.local/$top/bin" ]]; then
-        bindir="$HOME/.local/$top/bin"
-      else
-        bindir="$HOME/.local/nvim-linux64/bin"
-      fi
-      ln -sfn "$bindir/nvim" "$HOME/.local/bin/nvim"
-      ensure_user_local_bin_path
-      current_ver="$(get_nvim_version || true)"
-      if [[ -n "$current_ver" ]]; then
-        success "Neovim $current_ver installed to ~/.local/bin/nvim"
-        if [[ "$(command -v nvim || true)" != "$HOME/.local/bin/nvim" ]]; then
-          warning "Another nvim is ahead of ~/.local/bin in PATH ($(command -v nvim 2>/dev/null || echo unknown))"
-          info "Open a new shell or run: source ~/.zprofile 2>/dev/null || true; source ~/.profile 2>/dev/null || true"
-        fi
-      else
-        warning "Neovim installation finished but version check failed"
-      fi
-    else
-      warning "Failed to download Neovim tarball from $url"
+    current_ver="$(get_nvim_version || true)"
+    if [[ -z "$current_ver" ]] || ! version_ge "$current_ver" "$min_ver"; then
+      error "Debian backports did not provide Neovim >= $min_ver (got: ${current_ver:-none})"
       return 1
     fi
+    success "Neovim $current_ver installed from backports"
+    return 0
+  fi
+
+  local asset tag_path url
+  asset="$(nvim_release_asset "$method" "$arch")" || {
+    error "Unsupported Neovim $method architecture: $arch"
+    return 1
+  }
+  if [[ -n "$NVIM_VERSION_TAG" ]]; then
+    tag_path="download/${NVIM_VERSION_TAG}"
+    info "Using NVIM_VERSION_TAG=$NVIM_VERSION_TAG"
+  else
+    tag_path="download/stable"
+  fi
+  url="https://github.com/neovim/neovim/releases/${tag_path}/${asset}"
+
+  ensure_user_local_bin_path
+  if [[ "$method" == "tarball" ]]; then
+    info "Installing Neovim tarball to ~/.local"
+    local tmp_tar extract_dir top candidate install_dir installed_version
+    tmp_tar="$(mktemp "${TMPDIR:-/tmp}/nvim.XXXXXX.tar.gz")" || return 1
+    extract_dir="$(mktemp -d "$HOME/.local/.nvim-install.XXXXXX")" || {
+      rm -f "$tmp_tar"
+      return 1
+    }
+    if ! curl -fL --retry 3 --retry-delay 1 -o "$tmp_tar" "$url"; then
+      error "Failed to download Neovim tarball from $url"
+      rm -f "$tmp_tar"
+      rm -rf "$extract_dir"
+      return 1
+    fi
+    top="$(tar -tzf "$tmp_tar" | awk -F/ 'NR == 1 { print $1 }')" || true
+    if [[ -z "$top" || "$top" == "." || "$top" == ".." ]] ||
+      ! tar -C "$extract_dir" -xzf "$tmp_tar"; then
+      error "Failed to extract a valid Neovim tarball"
+      rm -f "$tmp_tar"
+      rm -rf "$extract_dir"
+      return 1
+    fi
+    candidate="$extract_dir/$top/bin/nvim"
+    installed_version="$(validate_nvim_binary "$candidate")" || {
+      rm -f "$tmp_tar"
+      rm -rf "$extract_dir"
+      return 1
+    }
+    install_dir="$HOME/.local/$top"
+    rm -rf "$install_dir"
+    mv "$extract_dir/$top" "$install_dir" || {
+      rm -f "$tmp_tar"
+      rm -rf "$extract_dir"
+      return 1
+    }
+    rm -f "$tmp_tar"
+    rm -rf "$extract_dir"
+    ln -sfn "$install_dir/bin/nvim" "$HOME/.local/bin/nvim" || return 1
+    validate_nvim_binary "$HOME/.local/bin/nvim" >/dev/null || return 1
+    success "Neovim $installed_version installed to ~/.local/bin/nvim"
     return 0
   fi
 
   if [[ "$method" == "appimage" ]]; then
     info "Installing Neovim AppImage to ~/.local"
-    mkdir -p "$HOME/.local/opt" "$HOME/.local/bin"
-    local tag_path url ai_dest
-    if [[ -n "$NVIM_VERSION_TAG" ]]; then
-      tag_path="download/${NVIM_VERSION_TAG}"
-      info "Using NVIM_VERSION_TAG=$NVIM_VERSION_TAG"
-    else
-      tag_path="latest/download"
-    fi
-    url="https://github.com/neovim/neovim/releases/${tag_path}/nvim.appimage"
-    ai_dest="$HOME/.local/opt/nvim.appimage"
-    if curl -fL --retry 3 --retry-delay 1 -o "$ai_dest" "$url"; then
-      chmod +x "$ai_dest"
-      ln -sfn "$ai_dest" "$HOME/.local/bin/nvim"
-      success "Neovim AppImage installed to $ai_dest"
-      return 0
-    else
-      warning "Failed to download Neovim AppImage from $url"
+    local opt_dir ai_dest ai_tmp installed_version
+    opt_dir="$HOME/.local/opt"
+    ai_dest="$opt_dir/$asset"
+    mkdir -p "$opt_dir"
+    ai_tmp="$(mktemp "$opt_dir/.nvim-appimage.XXXXXX")" || return 1
+    if ! curl -fL --retry 3 --retry-delay 1 -o "$ai_tmp" "$url"; then
+      error "Failed to download Neovim AppImage from $url"
+      rm -f "$ai_tmp"
       return 1
     fi
+    chmod +x "$ai_tmp" || { rm -f "$ai_tmp"; return 1; }
+    installed_version="$(validate_nvim_binary "$ai_tmp")" || {
+      rm -f "$ai_tmp"
+      return 1
+    }
+    mv -f "$ai_tmp" "$ai_dest" || return 1
+    ln -sfn "$ai_dest" "$HOME/.local/bin/nvim" || return 1
+    validate_nvim_binary "$HOME/.local/bin/nvim" >/dev/null || return 1
+    success "Neovim $installed_version installed to $ai_dest"
+    return 0
   fi
+
+  error "Unsupported NVIM_METHOD after resolution: $method"
+  return 1
+}
+
+# Validate the Neovim selected by PATH (Homebrew on macOS, portable/backports
+# on Linux) before claiming installation success.
+validate_selected_nvim() {
+  validate_nvim_config || return 1
+  local binary version
+  binary="$(command -v nvim 2>/dev/null || true)"
+  if [[ -z "$binary" ]]; then
+    error "Required Neovim executable was not installed"
+    return 1
+  fi
+  version="$(validate_nvim_binary "$binary")" || return 1
+  success "Validated Neovim $version at $binary"
 }
 
 # Ensure the modern Neovim we installed takes precedence on PATH
 ensure_nvim_precedence() {
-  local min_ver="0.9.0"
+  local min_ver="$NVIM_MIN_VERSION"
   local portable_nvim="$HOME/.local/bin/nvim"
   if [[ -x "$portable_nvim" ]]; then
     local pv
@@ -463,6 +584,7 @@ confirm() {
 # Prompt for sudo password once upfront to avoid mid-script failures
 # Returns: 0 if sudo is available (with or without password), 1 if no sudo
 validate_sudo() {
+  [[ "$DRY_RUN" == "true" ]] && return 1
   if ! command -v sudo >/dev/null 2>&1; then
     return 1
   fi
@@ -566,12 +688,12 @@ install_xcode_tools() {
 install_homebrew() {
   step "Checking Homebrew"
 
-  if ! check_command brew; then
-    if [[ "$DRY_RUN" == "true" ]]; then
-      info "[DRY RUN] Would install Homebrew"
-      return 0
-    fi
+  if [[ "$DRY_RUN" == "true" ]]; then
+    info "[DRY RUN] Would ensure Homebrew is installed and up to date"
+    return 0
+  fi
 
+  if ! check_command brew; then
     info "Installing Homebrew..."
     local BREW_INSTALL_SCRIPT="/tmp/homebrew-install-$$.sh"
 
@@ -641,8 +763,9 @@ install_linux_packages() {
   fi
 
   if [[ "$DRY_RUN" == "true" ]]; then
-    info "[DRY RUN] Would run: sudo apt-get update && sudo apt-get install -y <packages>"
-    return 0
+    info "[DRY RUN] Would run: sudo apt-get update && sudo apt-get install -y <packages including fontconfig>"
+    install_modern_neovim_linux
+    return $?
   fi
 
   # Update package lists
@@ -658,7 +781,7 @@ install_linux_packages() {
     zsh zsh-autosuggestions zsh-syntax-highlighting
     stow git tmux ripgrep fzf fd-find bat build-essential
     gawk grep sed rsync python3-pip python3-venv ca-certificates curl
-    unzip zip jq git-lfs
+    unzip zip jq git-lfs fontconfig
   )
 
   local apt_install=(apt-get install -y --no-install-recommends)
@@ -687,8 +810,8 @@ install_linux_packages() {
 
   success "Apt package installation completed (with possible warnings above)"
 
-  # Ensure a modern Neovim (>= 0.9) is installed
-  install_modern_neovim_linux || true
+  # Neovim is required; do not turn a failed selected install into success.
+  install_modern_neovim_linux
 }
 
 # Install packages using Brewfile if present
@@ -697,6 +820,11 @@ install_linux_packages() {
 install_packages() {
   if [[ "${OS_FAMILY:-}" == "macos" ]]; then
     step "Installing packages from Brewfile"
+
+    if [[ "$DRY_RUN" == "true" ]]; then
+      info "[DRY RUN] Would check and install packages from $DOTFILES_DIR/Brewfile"
+      return 0
+    fi
 
     if [[ ! -f "$DOTFILES_DIR/Brewfile" ]]; then
       warning "Brewfile not found at $DOTFILES_DIR/Brewfile"
@@ -911,6 +1039,7 @@ install_additional_tools() {
       # The upstream installer may append a PATH line to ~/.zshrc; our PATH is
       # already managed in .zshenv/.zprofile, so strip the redundant line.
       if [[ -f "$HOME/.zshrc" ]]; then
+        # shellcheck disable=SC2016 # Match literal $HOME/$PATH in the file.
         sed -i.bak '/^export PATH="\$HOME\/\.local\/bin:\$PATH"$/d' "$HOME/.zshrc" 2>/dev/null && rm -f "$HOME/.zshrc.bak"
       fi
       if check_command tlink; then
@@ -938,6 +1067,17 @@ install_additional_tools() {
 setup_dotfiles_repo() {
   step "Setting up dotfiles repository"
 
+  if [[ "$DRY_RUN" == "true" ]]; then
+    if [[ -d "$DOTFILES_DIR/.git" ]]; then
+      info "[DRY RUN] Would offer to pull the dotfiles repository"
+    elif [[ "$SCRIPT_DIR" != "$DOTFILES_DIR" ]]; then
+      info "[DRY RUN] Would clone $GITHUB_REPO to $DOTFILES_DIR"
+    else
+      info "[DRY RUN] Would use the current dotfiles checkout"
+    fi
+    return 0
+  fi
+
   if [[ ! -d "$DOTFILES_DIR/.git" ]]; then
     if [[ "$SCRIPT_DIR" != "$DOTFILES_DIR" ]]; then
       info "Cloning dotfiles repository..."
@@ -950,9 +1090,7 @@ setup_dotfiles_repo() {
   else
     success "Dotfiles repository already present"
 
-    if [[ "$DRY_RUN" == "true" ]]; then
-      info "[DRY RUN] Would offer to pull latest changes from repository."
-    elif confirm "Pull latest changes from repository?" "y"; then
+    if confirm "Pull latest changes from repository?" "y"; then
       cd "$DOTFILES_DIR"
       # Get current branch name
       local current_branch
@@ -974,6 +1112,11 @@ setup_dotfiles_repo() {
 # Returns: 0 on success, exits if user declines backup
 backup_existing_files() {
   step "Checking for existing configuration files"
+
+  if [[ "$DRY_RUN" == "true" ]]; then
+    info "[DRY RUN] Would detect and back up files that conflict with stow packages"
+    return 0
+  fi
 
   # Get list of files that would be stowed
   cd "$DOTFILES_DIR"
@@ -1020,17 +1163,13 @@ backup_existing_files() {
 setup_dotfiles() {
   step "Installing dotfiles with GNU Stow"
 
-  cd "$DOTFILES_DIR"
-
   if [[ "$DRY_RUN" == "true" ]]; then
     local _pkgs_str
     _pkgs_str="$(IFS=' '; printf '%s' "${STOW_PACKAGES[*]}")"
     info "[DRY RUN] Would run: stow -v ${_pkgs_str}"
-    # Show what would be stowed
-    info "Preview of what would be linked:"
-    stow -n -v "${STOW_PACKAGES[@]}" 2>&1 | grep -E "LINK:|directory" || true
     success "[DRY RUN] Dotfiles would be linked"
   else
+    cd "$DOTFILES_DIR"
     info "Running stow..."
     if stow -v "${STOW_PACKAGES[@]}"; then
       success "Dotfiles linked successfully"
@@ -1060,13 +1199,16 @@ report_stow_target() {
 # `just pi-settings` and the git post-merge/post-checkout hooks).
 setup_pi_settings() {
   local script="${DOTFILES_DIR}/scripts/gen-pi-settings.sh"
-  [[ -f "$script" ]] || return 0
-  info "Generating pi settings (base + local merge)..."
-  if bash "$script"; then
-    success "Pi settings generated at $HOME/.pi/agent/settings.json"
-  else
-    warning "Pi settings generation failed"
+  if [[ ! -f "$script" ]]; then
+    error "Required Pi settings generator is missing: $script"
+    return 1
   fi
+  info "Generating pi settings (base + local merge)..."
+  if ! bash "$script"; then
+    error "Pi settings generation failed"
+    return 1
+  fi
+  success "Pi settings generated at $HOME/.pi/agent/settings.json"
 }
 
 # Symlink the tracked global memory file into ~/.pi/agent/memory/ without
@@ -1078,20 +1220,30 @@ setup_pi_memory() {
   local dir="$HOME/.pi/agent/memory"
   local dest="$dir/MEMORY.md"
 
-  [[ -f "$src" ]] || return 0
-  mkdir -p "$dir/daily"
+  if [[ ! -f "$src" ]]; then
+    error "Required Pi memory file is missing: $src"
+    return 1
+  fi
+  mkdir -p "$dir/daily" || return 1
 
   if [[ -L "$dest" ]]; then
-    : # already a symlink; leave it
+    if [[ ! "$dest" -ef "$src" ]]; then
+      warning "Updating stale Pi memory symlink: $dest"
+      ln -sfn "$src" "$dest" || return 1
+    fi
   elif [[ -e "$dest" ]]; then
     local backup
     backup="$dest.pre-link-backup-$(date +%Y%m%d-%H%M%S)"
     warning "Existing $dest is a real file; backing up to $backup before linking"
-    mv "$dest" "$backup"
+    mv "$dest" "$backup" || return 1
+    ln -s "$src" "$dest" || return 1
+  else
+    ln -s "$src" "$dest" || return 1
   fi
 
-  if [[ ! -L "$dest" ]]; then
-    ln -s "$src" "$dest"
+  if [[ ! -L "$dest" || ! "$dest" -ef "$src" ]]; then
+    error "Pi memory link validation failed: $dest"
+    return 1
   fi
   success "Global memory linked: $dest → tracked MEMORY.md"
 }
@@ -1100,13 +1252,23 @@ setup_pi_memory() {
 # pi settings automatically after pulls. Hooks also keep git-lfs working.
 setup_git_hooks() {
   local hooks_dir="${DOTFILES_DIR}/.githooks"
-  [[ -d "$hooks_dir" ]] || return 0
-  chmod +x "$hooks_dir"/* 2>/dev/null || true
-  if git -C "$DOTFILES_DIR" config core.hooksPath ".githooks"; then
-    success "git core.hooksPath → .githooks"
-  else
-    warning "Could not set core.hooksPath"
+  if [[ ! -d "$hooks_dir" ]]; then
+    error "Required git hooks directory is missing: $hooks_dir"
+    return 1
   fi
+  if ! chmod +x "$hooks_dir"/*; then
+    error "Could not make tracked git hooks executable"
+    return 1
+  fi
+  if ! git -C "$DOTFILES_DIR" config core.hooksPath ".githooks"; then
+    error "Could not set core.hooksPath"
+    return 1
+  fi
+  if [[ "$(git -C "$DOTFILES_DIR" config --get core.hooksPath)" != ".githooks" ]]; then
+    error "core.hooksPath validation failed"
+    return 1
+  fi
+  success "git core.hooksPath → .githooks"
 }
 
 # Perform post-installation tasks (directories, Git LFS, TPM, shell)
@@ -1188,21 +1350,17 @@ post_install_setup() {
     fi
   fi
 
-  # Shared agent skills
+  # Shared agent skills are optional integrations with other assistants.
   setup_agent_skills || true
 
-  # pi extension packages
-  install_pi_package_deps || true
+  # Pi runtime state is required: failures must stop the installer rather than
+  # leave a configuration that reports success but cannot load.
+  install_pi_package_deps
+  setup_pi_settings
+  setup_pi_memory
 
-  # pi settings: merge global base + per-machine local overrides
-  setup_pi_settings || true
-
-  # pi memory: link tracked global MEMORY.md (local files stay per-machine)
-  setup_pi_memory || true
-
-  # git hooks: auto-regenerate pi settings after pulls (set last so it wins
-  # over any hooksPath git-lfs install may have configured above)
-  setup_git_hooks || true
+  # Set last so this wins over any hooksPath git-lfs may have configured.
+  setup_git_hooks
 }
 
 # Install npm dependencies for pi extension packages under dotfiles/pi/packages.
@@ -1210,34 +1368,51 @@ post_install_setup() {
 # node_modules cause extension load failures (e.g. "Cannot find module 'croner'").
 install_pi_package_deps() {
   local pkg_root="$DOTFILES_DIR/pi/packages"
-  [[ -d "$pkg_root" ]] || return 0
-
-  if ! check_command npm; then
-    warning "npm not found; skipping pi package dependency install"
-    return 0
+  if [[ ! -d "$pkg_root" ]]; then
+    error "Required Pi packages directory is missing: $pkg_root"
+    return 1
+  fi
+  if ! check_command npm || ! check_command node; then
+    error "npm and node are required to install Pi runtime dependencies"
+    return 1
   fi
 
-  local pkg name
+  local pkg name lock_rel found=false
   for pkg in "$pkg_root"/*/; do
     [[ -f "$pkg/package.json" ]] || continue
-    # Skip packages with no runtime dependencies declared
-    jq -e '.dependencies // empty | length > 0' "$pkg/package.json" >/dev/null 2>&1 || continue
-    name="$(basename "$pkg")"
-    if [[ -d "$pkg/node_modules" ]]; then
-      [[ "$VERBOSE" == "true" ]] && success "pi package $name deps already installed" || true
+    # Only production dependencies are needed by Pi at runtime. Reconcile them
+    # on every run so a stale node_modules cannot hide manifest changes.
+    local dependency_status=0
+    node -e 'const p=require(process.argv[1]); process.exit(p.dependencies && Object.keys(p.dependencies).length ? 0 : 2)' \
+      "$pkg/package.json" || dependency_status=$?
+    if [[ $dependency_status -eq 2 ]]; then
       continue
+    elif [[ $dependency_status -ne 0 ]]; then
+      error "Could not read runtime dependencies from $pkg/package.json"
+      return 1
     fi
-    info "Installing deps for pi package: $name"
-    local cmd="install"
-    [[ -f "$pkg/package-lock.json" ]] && cmd="ci"
-    if (cd "$pkg" && npm "$cmd" --silent); then
-      success "pi package $name deps installed"
+    found=true
+    name="$(basename "$pkg")"
+    lock_rel="${pkg#"$DOTFILES_DIR"/}package-lock.json"
+    info "Reconciling deps for Pi package: $name"
+    if git -C "$DOTFILES_DIR" ls-files --error-unmatch -- "$lock_rel" >/dev/null 2>&1; then
+      if ! (cd "$pkg" && npm ci --silent --no-audit --no-fund); then
+        error "npm ci failed for required Pi package $name"
+        return 1
+      fi
     else
-      warning "npm $cmd failed for pi package $name"
+      if ! (cd "$pkg" && npm install --package-lock=false --silent --no-audit --no-fund); then
+        error "npm install failed for required Pi package $name"
+        return 1
+      fi
     fi
+    success "Pi package $name deps reconciled"
   done
-}
 
+  if [[ "$found" != "true" ]]; then
+    warning "No Pi packages declare runtime dependencies"
+  fi
+}
 # Link shared agent skills to AI coding assistants
 # Creates symlinks from ~/.gemini/skills, ~/.cursor/skills, etc. to dotfiles/.agent/skills
 setup_agent_skills() {
@@ -1295,8 +1470,13 @@ install_fira_code_nerd_font() {
 
   step "Installing Fira Code Nerd Font (Linux)"
 
-  # Check if already present (match the Nerd Font family, not plain Fira Code)
-  if fc-list | grep -Fqi "FiraCode Nerd Font" 2>/dev/null; then
+  if ! check_command fc-list || ! check_command fc-cache; then
+    warning "fontconfig tools (fc-list/fc-cache) are unavailable; cannot install or validate fonts"
+    return 1
+  fi
+
+  # Check if already present (match the Nerd Font family, not plain Fira Code).
+  if fc-list 2>/dev/null | grep -Fi "FiraCode Nerd Font" >/dev/null; then
     success "Fira Code Nerd Font already available"
     return 0
   fi
@@ -1310,16 +1490,24 @@ install_fira_code_nerd_font() {
   info "Downloading Fira Code Nerd Font..."
   if curl -fL "$url_latest" -o "$tmp_zip"; then
     info "Installing to $font_dir"
-    if unzip -o -q "$tmp_zip" -d "$font_dir"; then
-      rm -f "$tmp_zip"
-      fc-cache -f "$HOME/.local/share/fonts" >/dev/null 2>&1 || true
-      success "Fira Code Nerd Font installed"
-    else
+    if ! unzip -o -q "$tmp_zip" -d "$font_dir"; then
       warning "Failed to extract Nerd Font archive"
       rm -f "$tmp_zip" || true
+      return 1
     fi
+    rm -f "$tmp_zip"
+    if ! fc-cache -f "$HOME/.local/share/fonts" >/dev/null 2>&1; then
+      warning "Font cache refresh failed"
+      return 1
+    fi
+    if ! fc-list 2>/dev/null | grep -Fi "FiraCode Nerd Font" >/dev/null; then
+      warning "Fira Code Nerd Font was extracted but fontconfig cannot find it"
+      return 1
+    fi
+    success "Fira Code Nerd Font installed and font cache validated"
   else
     warning "Download failed (possibly offline or blocked). You can manually install from: $url_latest"
+    return 1
   fi
 }
 
@@ -1327,6 +1515,11 @@ install_fira_code_nerd_font() {
 # Returns: 0 on success
 setup_macos_defaults() {
   step "macOS System Preferences"
+
+  if [[ "$DRY_RUN" == "true" ]]; then
+    info "[DRY RUN] Would offer to apply macOS system preferences"
+    return 0
+  fi
 
   if [[ -f "$DOTFILES_DIR/macos-defaults.sh" ]]; then
     if confirm "Apply macOS system preferences?" "n"; then
@@ -1348,7 +1541,11 @@ show_summary() {
 
   echo
   success "Bootstrap process completed successfully!"
-  info "Log file saved to: $LOG_FILE"
+  if [[ "$DRY_RUN" == "true" ]]; then
+    info "Dry run complete; no log file or system changes were created"
+  else
+    info "Log file saved to: $LOG_FILE"
+  fi
 
   if [[ -d "$BACKUP_DIR" ]]; then
     info "Backups saved to: $BACKUP_DIR"
@@ -1397,7 +1594,7 @@ main() {
   # Parse command line arguments first
   parse_args "$@"
 
-  clear
+  clear 2>/dev/null || true
   echo "Dotfiles Bootstrap Script v2.0"
   echo "=============================="
   echo
@@ -1406,10 +1603,10 @@ main() {
   else
     info "This script will set up your Debian/Ubuntu development environment"
   fi
-  info "All actions will be logged to: $LOG_FILE"
-
   if [[ "$DRY_RUN" == "true" ]]; then
-    info "DRY RUN MODE: No changes will be made to your system"
+    info "DRY RUN MODE: No changes or log files will be written"
+  else
+    info "All actions will be logged to: $LOG_FILE"
   fi
 
   echo
@@ -1430,6 +1627,7 @@ main() {
   setup_dotfiles_repo
   if [[ "${OS_FAMILY}" == "macos" ]]; then
     install_packages
+    [[ "$DRY_RUN" == "true" ]] || validate_selected_nvim
   else
     install_linux_packages
   fi
@@ -1443,8 +1641,10 @@ main() {
   show_summary
 }
 
-# Run main function
-main "$@"
-
-# Wait for any background processes to complete
-wait
+# Execute only when invoked as a script; sourcing exposes helpers for tests and
+# shell reuse without starting an installation.
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  main "$@"
+  # Wait for any background processes to complete.
+  wait
+fi
