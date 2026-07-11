@@ -93,6 +93,18 @@ class GenPiSettingsTest(unittest.TestCase):
         )
         return base
 
+    def test_tracked_npm_packages_use_exact_versions(self):
+        tracked_base = REPO_ROOT / "pi" / ".pi" / "agent" / "settings.base.json"
+        packages = json.loads(tracked_base.read_text(encoding="utf-8"))["packages"]
+        npm_specs = [spec.removeprefix("npm:") for spec in packages if spec.startswith("npm:")]
+
+        self.assertGreater(len(npm_specs), 0)
+        for spec in npm_specs:
+            with self.subTest(spec=spec):
+                separator = spec.rfind("@")
+                self.assertGreater(separator, 0, f"floating npm package: {spec}")
+                self.assertRegex(spec[separator + 1 :], r"^\d+\.\d+\.\d+$")
+
     def test_jq_merge_rewrites_packages_without_modifying_base(self):
         base = self.prepare_merge_inputs(symlink_destination=True)
 

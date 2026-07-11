@@ -15,7 +15,7 @@
     "../../dotfiles/pi/packages/pi-plan-review",
     "../../dotfiles/pi/packages/pi-memory",
     "npm:@feniix/pi-notion@2.2.2",
-    "npm:pi-web-access"
+    "npm:pi-web-access@0.13.0"
   ],
   "hideThinkingBlock": false,
   "doubleEscapeAction": "tree",
