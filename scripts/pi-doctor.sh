@@ -241,6 +241,7 @@ check_private_permissions() {
   local -a private_dirs=(
     "$PI_AGENT/memory"
     "$PI_AGENT/memory/daily"
+    "$PI_AGENT/intercom"
   )
   local -a private_files=(
     "$HOME/.zshenv.local"
@@ -250,6 +251,9 @@ check_private_permissions() {
     "$PI_AGENT/settings.local.json"
     "$PI_AGENT/memory/MEMORY.local.md"
     "$PI_AGENT/memory/SCRATCHPAD.md"
+    "$PI_AGENT/intercom/broker.log"
+    "$PI_AGENT/intercom/broker.pid"
+    "$PI_AGENT/intercom/tailnet-relay.pid"
   )
 
   for path in "${private_dirs[@]}"; do
