@@ -7,7 +7,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { mkdirSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -393,6 +393,20 @@ describe("ensureStore (idempotent)", () => {
 		expect(existsSync(paths.memory)).toBe(true);
 		expect(existsSync(paths.memoryLocal)).toBe(true);
 		expect(existsSync(paths.scratchpad)).toBe(true);
+	});
+
+	it("creates and repairs private store permissions", async () => {
+		const paths = await ensureStore(scratch);
+		expect((await stat(paths.dir)).mode & 0o777).toBe(0o700);
+		expect((await stat(paths.dailyDir)).mode & 0o777).toBe(0o700);
+		expect((await stat(paths.memoryLocal)).mode & 0o777).toBe(0o600);
+		expect((await stat(paths.scratchpad)).mode & 0o777).toBe(0o600);
+
+		await chmod(paths.dir, 0o755);
+		await chmod(paths.memoryLocal, 0o644);
+		await ensureStore(scratch);
+		expect((await stat(paths.dir)).mode & 0o777).toBe(0o700);
+		expect((await stat(paths.memoryLocal)).mode & 0o777).toBe(0o600);
 	});
 
 	it("does NOT create the project memory file", async () => {

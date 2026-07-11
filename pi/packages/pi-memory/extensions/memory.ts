@@ -2,7 +2,7 @@ import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { withFileMutationQueue } from "@earendil-works/pi-coding-agent";
 import { existsSync } from "node:fs";
-import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { chmod, lstat, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, relative } from "node:path";
 import { Type } from "typebox";
@@ -160,21 +160,34 @@ const getStorePaths = (cwd: string = process.cwd()): StorePaths => {
 export const memoryPathForScope = (paths: StorePaths, scope: Scope | undefined): string =>
 	scope === "local" ? paths.memoryLocal : scope === "project" ? paths.project : paths.memory;
 
+const ensurePrivateDirectory = async (path: string): Promise<void> => {
+	await mkdir(path, { recursive: true, mode: 0o700 });
+	await chmod(path, 0o700);
+};
+
+const tightenPrivateFile = async (path: string): Promise<void> => {
+	const info = await lstat(path);
+	// Global MEMORY.md may intentionally be a symlink to a public dotfiles repo;
+	// never chmod through it and unexpectedly mutate the tracked target.
+	if (!info.isSymbolicLink() && info.isFile()) await chmod(path, 0o600);
+};
+
 const writeFileIfMissing = async (path: string, content: string): Promise<void> => {
-	await mkdir(dirname(path), { recursive: true });
+	await ensurePrivateDirectory(dirname(path));
 	try {
-		await writeFile(path, content, { flag: "wx" });
+		await writeFile(path, content, { flag: "wx", mode: 0o600 });
 	} catch (error) {
-		if (error && typeof error === "object" && "code" in error && error.code === "EEXIST") return;
-		throw error;
+		if (!error || typeof error !== "object" || !("code" in error) || error.code !== "EEXIST") throw error;
 	}
+	await tightenPrivateFile(path);
 };
 
 // NOTE: deliberately does NOT create the project file — that would litter every
 // repo the user opens. Project memory is created lazily on first scope=project write.
 export const ensureStore = async (cwd?: string): Promise<StorePaths> => {
 	const paths = getStorePaths(cwd);
-	await mkdir(paths.dailyDir, { recursive: true });
+	await ensurePrivateDirectory(paths.dir);
+	await ensurePrivateDirectory(paths.dailyDir);
 	await writeFileIfMissing(paths.memory, defaultMemoryTemplate);
 	await writeFileIfMissing(paths.memoryLocal, defaultMemoryLocalTemplate);
 	await writeFileIfMissing(paths.scratchpad, defaultScratchpadTemplate);
@@ -389,7 +402,7 @@ export const appendToTarget = async (params: MemoryParams, cwd?: string): Promis
 	let resultText = `Appended to ${displayPath(paths, path)}.`;
 
 	await withFileMutationQueue(path, async () => {
-		await mkdir(dirname(path), { recursive: true });
+		await ensurePrivateDirectory(dirname(path));
 		let current = "";
 		try {
 			current = await readTextFile(path);
