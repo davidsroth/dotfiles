@@ -30,6 +30,23 @@ function pidRunning(pid: number): boolean {
   }
 }
 
+const RELAY_ENV_KEYS = new Set([
+  "PATH", "HOME", "USER", "USERNAME", "USERPROFILE", "LOGNAME", "SHELL",
+  "TMPDIR", "TMP", "TEMP", "TERM", "LANG", "LC_ALL", "LC_CTYPE",
+  "SystemRoot", "ComSpec", "PATHEXT", "APPDATA", "LOCALAPPDATA",
+  "XDG_RUNTIME_DIR", "NVM_DIR", "NVM_BIN", "NVM_INC", "NODE_PATH",
+]);
+
+/** Build the relay environment without inheriting unrelated API keys/tokens. */
+export function buildRelayEnv(source: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {};
+  for (const [key, value] of Object.entries(source)) {
+    if (value === undefined) continue;
+    if (RELAY_ENV_KEYS.has(key) || key.startsWith("PI_INTERCOM_")) env[key] = value;
+  }
+  return env;
+}
+
 export function isRelayRunning(): boolean {
   if (!existsSync(RELAY_PID_PATH)) return false;
   try {
@@ -55,7 +72,7 @@ export function spawnRelayIfNeeded(): void {
   const child = spawn(command, args, {
     detached: true,
     stdio: "ignore",
-    env: { ...process.env },
+    env: buildRelayEnv(),
   });
 
   // Watchdog: if the relay exits unexpectedly, respawn it after a short

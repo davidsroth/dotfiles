@@ -4,6 +4,7 @@ import path from "node:path";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import {
+  buildBrokerEnv,
   getBrokerLaunchSpec,
   getBrokerSpawnOptions,
   getTsxCliPath,
@@ -92,6 +93,22 @@ test("getBrokerLaunchSpec uses custom broker command on non-Windows", () => {
   assert.equal(spec.command, "bun");
   assert.deepEqual(spec.args, ["/repo/broker.ts"]);
   assert.equal(spec.kind, "direct");
+});
+
+test("buildBrokerEnv excludes unrelated credentials", () => {
+  const env = buildBrokerEnv({
+    PATH: "/bin",
+    HOME: "/home/test",
+    PI_INTERCOM_REAPER_INTERVAL_MS: "1000",
+    OPENROUTER_API_KEY: "secret",
+    SLACK_MCP_XOXP_TOKEN: "secret",
+  });
+  assert.equal(env.PATH, "/bin");
+  assert.equal(env.HOME, "/home/test");
+  assert.equal(env.PI_INTERCOM_REAPER_INTERVAL_MS, "1000");
+  assert.equal(env.NODE_NO_WARNINGS, "1");
+  assert.equal(env.OPENROUTER_API_KEY, undefined);
+  assert.equal(env.SLACK_MCP_XOXP_TOKEN, undefined);
 });
 
 test("getBrokerSpawnOptions hides the broker console window on Windows", () => {

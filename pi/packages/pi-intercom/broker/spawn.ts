@@ -134,6 +134,23 @@ export function getBrokerLaunchSpec(
   };
 }
 
+const BROKER_ENV_KEYS = new Set([
+  "PATH", "HOME", "USER", "USERNAME", "USERPROFILE", "LOGNAME", "SHELL",
+  "TMPDIR", "TMP", "TEMP", "TERM", "LANG", "LC_ALL", "LC_CTYPE",
+  "SystemRoot", "ComSpec", "PATHEXT", "APPDATA", "LOCALAPPDATA",
+  "XDG_RUNTIME_DIR", "NVM_DIR", "NVM_BIN", "NVM_INC", "NODE_PATH",
+]);
+
+/** Build the daemon environment without inheriting unrelated API keys/tokens. */
+export function buildBrokerEnv(source: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { NODE_NO_WARNINGS: "1" };
+  for (const [key, value] of Object.entries(source)) {
+    if (value === undefined) continue;
+    if (BROKER_ENV_KEYS.has(key) || key.startsWith("PI_INTERCOM_")) env[key] = value;
+  }
+  return env;
+}
+
 export function getBrokerSpawnOptions(extensionDir: string = EXTENSION_DIR): {
   detached: true;
   stdio: "ignore";
@@ -145,7 +162,7 @@ export function getBrokerSpawnOptions(extensionDir: string = EXTENSION_DIR): {
     detached: true,
     stdio: "ignore",
     cwd: extensionDir,
-    env: { ...process.env, NODE_NO_WARNINGS: "1" },
+    env: buildBrokerEnv(),
     windowsHide: true,
   };
 }
