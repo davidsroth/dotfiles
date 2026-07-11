@@ -49,6 +49,8 @@ Environment variables:
 - `DOTFILES_DIR`: Installation directory (default: ~/dotfiles)
 - `DEFAULT_BRANCH`: Git branch to use (default: main)
 - `NVM_VERSION`: NVM installer version (default: v0.40.5)
+- `NODE_VERSION`: Node.js release installed through NVM (default: 22)
+- `PI_VERSION`: Pi coding agent version (default: 0.80.6)
 
 The installer will:
 
@@ -58,7 +60,7 @@ The installer will:
 - Clone/update the dotfiles repository
 - Create backups of existing configs
 - Set up all symlinks using GNU Stow
-- Configure additional tools (NVM, Git LFS, tmux plugins)
+- Configure additional tools (NVM, Node.js, Pi, Git LFS, tmux plugins)
 - Optionally apply macOS system preferences
 
 ### Symlinking (GNU Stow)

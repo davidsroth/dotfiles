@@ -73,6 +73,8 @@ compute_total_steps() {
 readonly XCODE_TIMEOUT=300 # 5 minutes
 readonly DEFAULT_BRANCH="${DEFAULT_BRANCH:-main}"
 readonly NVM_VERSION="${NVM_VERSION:-v0.40.5}"
+readonly NODE_VERSION="${NODE_VERSION:-22}"
+readonly PI_VERSION="${PI_VERSION:-0.80.6}"
 
 # Script options
 DRY_RUN=false
@@ -108,7 +110,9 @@ Environment Variables:
     GITHUB_USER     Your GitHub username (default: davidsroth)
     DOTFILES_DIR    Installation directory (default: ~/dotfiles)
     DEFAULT_BRANCH  Git branch to use (default: main)
-    NVM_VERSION     NVM version to install (default: v0.40.5)
+    NVM_VERSION     NVM installer version (default: v0.40.5)
+    NODE_VERSION    Node.js release installed through NVM (default: 22)
+    PI_VERSION      Pi coding agent version (default: 0.80.6)
     NVIM_METHOD     Neovim method: auto|appimage|tarball|backports (default: auto→appimage on x86_64)
     NVIM_MIN_VERSION     Ensure Neovim >= this version (default: 0.9.0)
     NVIM_FORCE_UPDATE    true to force reinstall (default: false)
@@ -913,13 +917,66 @@ install_packages_fallback() {
   done
 }
 
-# Install additional development tools (NVM, zsh-defer, pipx)
-# Returns: 0 on success (continues on partial failure)
+# Install and select the pinned Node release, then install the pinned Pi CLI.
+# NVM's default alias makes the selected release persistent across fresh shells.
+install_node_and_pi() {
+  if [[ "$DRY_RUN" == "true" ]]; then
+    info "[DRY RUN] Would install Node $NODE_VERSION through NVM and Pi $PI_VERSION"
+    return 0
+  fi
+
+  export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
+  if [[ ! -s "$NVM_DIR/nvm.sh" ]]; then
+    error "NVM was not installed correctly: $NVM_DIR/nvm.sh is missing"
+    return 1
+  fi
+  # shellcheck disable=SC1091 # Installed dynamically at the configured NVM_DIR.
+  . "$NVM_DIR/nvm.sh"
+
+  info "Installing Node $NODE_VERSION through NVM..."
+  if ! nvm install "$NODE_VERSION"; then
+    error "Failed to install Node $NODE_VERSION through NVM"
+    return 1
+  fi
+  nvm alias default "$NODE_VERSION" >/dev/null || {
+    error "Failed to set the NVM default Node release"
+    return 1
+  }
+  nvm use "$NODE_VERSION" >/dev/null || return 1
+
+  local actual_node
+  actual_node="$(node --version 2>/dev/null || true)"
+  if [[ -z "$actual_node" ]] || ! check_command npm; then
+    error "Node/npm validation failed after NVM installation"
+    return 1
+  fi
+  success "Using Node $actual_node with npm $(npm --version)"
+
+  local actual_pi=""
+  if check_command pi; then
+    actual_pi="$(pi --version 2>/dev/null || true)"
+  fi
+  if [[ "$actual_pi" != "$PI_VERSION" ]]; then
+    info "Installing Pi $PI_VERSION..."
+    npm install -g --no-audit --no-fund "@earendil-works/pi-coding-agent@$PI_VERSION" || {
+      error "Failed to install Pi $PI_VERSION"
+      return 1
+    }
+  fi
+  if ! check_command pi || [[ "$(pi --version 2>/dev/null || true)" != "$PI_VERSION" ]]; then
+    error "Pi validation failed after installation (expected $PI_VERSION)"
+    return 1
+  fi
+  success "Validated Pi $PI_VERSION"
+}
+
+# Install additional development tools (NVM, Node/Pi, zsh-defer, pipx)
+# Returns: 0 on success (continues on optional-tool failures)
 install_additional_tools() {
   step "Installing additional tools"
 
   if [[ "$DRY_RUN" == "true" ]]; then
-    info "[DRY RUN] Would install NVM, zsh-defer, pipx tools, tree-sitter-cli, etc."
+    info "[DRY RUN] Would install NVM, Node $NODE_VERSION, Pi $PI_VERSION, zsh-defer, pipx tools, tree-sitter-cli, etc."
     return 0
   fi
 
@@ -946,6 +1003,10 @@ install_additional_tools() {
   else
     [[ "$VERBOSE" == "true" ]] && success "NVM already installed" || true
   fi
+
+  # Node and Pi are required by later setup; fail rather than leave a partial
+  # agent installation that the summary would incorrectly call successful.
+  install_node_and_pi
 
   # zsh-defer
   if [[ ! -d "$HOME/zsh-defer" ]]; then

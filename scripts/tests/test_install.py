@@ -162,6 +162,57 @@ exit 97
                 self.assertEqual(list(tmp.iterdir()), [])
                 self.assertIn("no log file or system changes", result.stdout)
 
+    def test_node_and_pi_are_installed_and_validated_through_nvm(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            root = Path(tempdir)
+            nvm_dir = root / ".nvm"
+            nvm_dir.mkdir()
+            call_log = root / "calls.log"
+            pi_state = root / "pi-version"
+            (nvm_dir / "nvm.sh").write_text(
+                """nvm() { { printf 'nvm'; printf ' <%s>' \"$@\"; printf '\\n'; } >> \"$CALL_LOG\"; }
+node() { echo v22.99.0; }
+npm() {
+  { printf 'npm'; printf ' <%s>' \"$@\"; printf '\\n'; } >> \"$CALL_LOG\"
+  if [[ \"${1:-}\" == \"--version\" ]]; then echo 10.9.0; return; fi
+  printf '%s' \"$PI_VERSION\" > \"$PI_STATE\"
+}
+pi() { [[ -f \"$PI_STATE\" ]] || return 127; cat \"$PI_STATE\"; }
+""",
+                encoding="utf-8",
+            )
+            result = self.run_bash(
+                "install_node_and_pi",
+                env={
+                    "HOME": root,
+                    "NVM_DIR": nvm_dir,
+                    "NODE_VERSION": "22",
+                    "PI_VERSION": "0.80.6",
+                    "CALL_LOG": call_log,
+                    "PI_STATE": pi_state,
+                },
+            )
+
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            calls = call_log.read_text(encoding="utf-8")
+            self.assertIn("nvm <install> <22>", calls)
+            self.assertIn("nvm <alias> <default> <22>", calls)
+            self.assertIn("nvm <use> <22>", calls)
+            self.assertIn(
+                "npm <install> <-g> <--no-audit> <--no-fund> "
+                "<@earendil-works/pi-coding-agent@0.80.6>",
+                calls,
+            )
+            self.assertIn("Validated Pi 0.80.6", result.stdout)
+
+    def test_node_and_pi_setup_fails_without_nvm_runtime(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            result = self.run_bash(
+                "install_node_and_pi", env={"HOME": tempdir, "NVM_DIR": tempdir}
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("nvm.sh is missing", result.stderr)
+
     def test_linux_package_set_includes_fontconfig(self):
         with tempfile.TemporaryDirectory() as tempdir:
             apt_log = Path(tempdir) / "apt.log"
