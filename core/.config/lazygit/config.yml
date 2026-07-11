@@ -180,13 +180,13 @@ git:
   # Automatically fetch from remote
   autoFetch: true
   # Automatically fetch interval in seconds
-  autoFetchInterval: 60
+  autoFetchInterval: 300
   # Periodic refresh of files and submodules
   autoRefresh: true
   # Pass --all to git fetch for all remotes
-  fetchAll: true
+  fetchAll: false
   # Auto fast-forward local branches when possible
-  autoForwardBranches: allBranches
+  autoForwardBranches: onlyMainBranches
   # ============================================================================
   # Staging & Diff Configuration
   # ============================================================================
