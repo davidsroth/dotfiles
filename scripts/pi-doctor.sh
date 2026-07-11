@@ -206,7 +206,23 @@ check_stow_health() {
 }
 
 # ---------------------------------------------------------------------------
-# 6. TOOLCHAIN
+# 6. AI TOOL RUNTIME STATE
+# ---------------------------------------------------------------------------
+check_runtime_state_locations() {
+  local path
+  for path in "$HOME/.claude" "$HOME/.codex"; do
+    if [[ -L "$path" ]]; then
+      FAIL "RUNTIME STATE: $path is a legacy repository symlink — migrate it to a private real directory"
+    elif [[ -d "$path" ]]; then
+      PASS "RUNTIME STATE: $path is a real home-directory store"
+    else
+      WARN "RUNTIME STATE: $path is absent (tool may not be initialized)"
+    fi
+  done
+}
+
+# ---------------------------------------------------------------------------
+# 7. TOOLCHAIN
 # ---------------------------------------------------------------------------
 check_toolchain() {
   if command -v jq >/dev/null 2>&1; then
@@ -230,7 +246,7 @@ check_toolchain() {
 }
 
 # ---------------------------------------------------------------------------
-# 7. PRIVATE FILE PERMISSIONS
+# 8. PRIVATE FILE PERMISSIONS
 # ---------------------------------------------------------------------------
 path_mode() {
   stat -f '%Lp' "$1" 2>/dev/null || stat -c '%a' "$1" 2>/dev/null || true
@@ -242,6 +258,8 @@ check_private_permissions() {
     "$PI_AGENT/memory"
     "$PI_AGENT/memory/daily"
     "$PI_AGENT/intercom"
+    "$HOME/.claude"
+    "$HOME/.codex"
   )
   local -a private_files=(
     "$HOME/.zshenv.local"
@@ -288,7 +306,7 @@ check_private_permissions() {
 }
 
 # ---------------------------------------------------------------------------
-# 8. SECRETS REPORT (info only, never values, never FAIL)
+# 9. SECRETS REPORT (info only, never values, never FAIL)
 # ---------------------------------------------------------------------------
 check_secrets() {
   local secrets=(
@@ -321,6 +339,7 @@ check_package_paths
 check_hooks
 check_memory_link
 check_stow_health
+check_runtime_state_locations
 check_toolchain
 check_private_permissions
 check_secrets
