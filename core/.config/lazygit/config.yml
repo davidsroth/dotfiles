@@ -114,7 +114,7 @@ gui:
   # ============================================================================
 
   # If true, do not show a warning when discarding changes in the staging view.
-  skipDiscardChangeWarning: true
+  skipDiscardChangeWarning: false
   # Show list view headers
   showListFooter: true
   # Show random tip in command log

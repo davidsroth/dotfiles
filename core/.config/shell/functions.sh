@@ -636,8 +636,17 @@ tmux_rename_worktree() {
     cd "$new_worktree_dir"
 }
 
-# Clean up current git worktree and tmux session
+# Clean up the current git worktree and tmux session.
+# Dirty worktrees are refused unless --force is paired with an exact-name prompt.
 tmux_cleanup_worktree() {
+    local force=false
+    if [[ "${1:-}" == "--force" ]]; then
+        force=true
+    elif [[ $# -gt 0 ]]; then
+        echo "Usage: tmux_cleanup_worktree [--force]"
+        return 2
+    fi
+
     # Check if we're in a git repository
     if ! git rev-parse --git-dir >/dev/null 2>&1; then
         echo "Error: Not in a git repository"
@@ -660,7 +669,38 @@ tmux_cleanup_worktree() {
     fi
     
     local worktree_name="$(basename "$git_root")"
-    
+    local worktree_status
+    worktree_status="$(git -C "$git_root" status --porcelain=v1 --untracked-files=all)"
+
+    if [[ -n "$worktree_status" ]]; then
+        echo "Worktree has uncommitted or untracked files: $git_root"
+        printf '%s\n' "$worktree_status"
+        if [[ "$force" != "true" ]]; then
+            echo "Refusing removal. Preserve the work, or rerun with --force."
+            return 1
+        fi
+        if [[ ! -t 0 ]]; then
+            echo "Error: forced cleanup requires an interactive terminal"
+            return 1
+        fi
+        local typed
+        printf "Type '%s' to permanently remove this dirty worktree: " "$worktree_name"
+        read -r typed
+        if [[ "$typed" != "$worktree_name" ]]; then
+            echo "Cleanup cancelled"
+            return 1
+        fi
+    elif [[ "${TMUX_CLEANUP_CONFIRMED:-}" != "1" ]]; then
+        if [[ ! -t 0 ]]; then
+            echo "Error: cleanup requires confirmation in an interactive terminal"
+            return 1
+        fi
+        local reply
+        printf "Remove clean worktree '%s' at %s? [y/N] " "$worktree_name" "$git_root"
+        read -r reply
+        [[ "$reply" == [Yy] ]] || { echo "Cleanup cancelled"; return 1; }
+    fi
+
     # Get current tmux session info
     local current_session=""
     local main_session="$repo_name"
@@ -677,8 +717,12 @@ tmux_cleanup_worktree() {
         tmux switch-client -t "$main_session" 2>/dev/null
     fi
     
-    # Remove the worktree (force to handle uncommitted changes)
-    if ! git worktree remove --force "$git_root" 2>/dev/null; then
+    # A normal removal is intentionally non-forced. --force reaches this point
+    # only after the caller typed the exact dirty worktree name above.
+    local -a remove_args=(worktree remove)
+    [[ "$force" == "true" ]] && remove_args+=(--force)
+    remove_args+=("$git_root")
+    if ! git "${remove_args[@]}" 2>/dev/null; then
         echo "Error: Failed to remove worktree"
         return 1
     fi
