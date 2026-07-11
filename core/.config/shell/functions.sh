@@ -38,11 +38,38 @@ now() {
 # Temporary File Management
 # ============================================================================
 
-# Create today's temp directory if it doesn't exist
+# Private state root for logs, notes, and background-command output.
+_dotfiles_state_root() {
+    printf '%s\n' "${XDG_STATE_HOME:-$HOME/.local/state}/dotfiles"
+}
+
+# Create today's private working directory if it doesn't exist.
 ensure_today_dir() {
-    local dir="/tmp/$(today)"
-    mkdir -p "$dir"
+    local root="$(_dotfiles_state_root)/daily"
+    local dir="$root/$(today)"
+    if [[ -L "$root" || -L "$dir" ]]; then
+        echo "Error: refusing symlinked dotfiles state directory" >&2
+        return 1
+    fi
+    mkdir -p -m 700 "$dir" || return 1
+    chmod 700 "$(_dotfiles_state_root)" "$root" "$dir" || return 1
     echo "$dir"
+}
+
+# Create or repair a private regular file without following a symlink.
+_ensure_private_file() {
+    local file="$1"
+    if [[ -L "$file" ]]; then
+        echo "Error: refusing symlinked state file: $file" >&2
+        return 1
+    fi
+    if [[ ! -e "$file" ]]; then
+        (umask 077; : >"$file") || return 1
+    elif [[ ! -f "$file" ]]; then
+        echo "Error: state path is not a regular file: $file" >&2
+        return 1
+    fi
+    chmod 600 "$file"
 }
 
 # Go to today's temp directory
@@ -54,8 +81,9 @@ gtt() {
 tmpfile() {
     local name="${1:-temp}"
     local dir="$(ensure_today_dir)"
+    name="$(printf '%s' "$name" | tr -cs 'A-Za-z0-9._-' '_')"
     local file="$dir/$(datetime)_${name}.txt"
-    touch "$file"
+    _ensure_private_file "$file" || return 1
     echo "$file"
 }
 
@@ -68,9 +96,10 @@ pblog() {
     local dir="$(ensure_today_dir)"
     local file="$dir/$(today).md"
     local timestamp=$(now)
+    _ensure_private_file "$file" || return 1
 
-    # Create file with frontmatter if it doesn't exist
-    if [[ ! -f "$file" ]]; then
+    # Create file with frontmatter if it is empty
+    if [[ ! -s "$file" ]]; then
         cat >"$file" <<EOF
 ---
 date: $(today)
@@ -105,8 +134,10 @@ note() {
         return 1
     fi
 
-    # Create file with frontmatter if it doesn't exist
-    if [[ ! -f "$file" ]]; then
+    _ensure_private_file "$file" || return 1
+
+    # Create file with frontmatter if it is empty
+    if [[ ! -s "$file" ]]; then
         cat >"$file" <<EOF
 ---
 date: $(today)
@@ -243,10 +274,10 @@ _ctc_capture() {
     rm -f "$tmp"
 }
 
-# Include invoking command in clipboard along with result AND log to /tmp.
+# Include invoking command in clipboard along with result and log to private state.
 # Works with the global alias `CTCT` which pipes into this function.
 # Behavior: prints original result to stdout; copies "<CMD> -> <RESULT>" to clipboard;
-#           logs "<CMD> -> <RESULT>" to /tmp/YYYYMMDD/log.
+#           logs "<CMD> -> <RESULT>" under $XDG_STATE_HOME/dotfiles/daily.
 _ctct_capture_to_log() {
     # Stream to terminal while capturing to a temp file
     local tmp
@@ -283,7 +314,7 @@ _ctct_capture_to_log() {
         return 127
     fi
 
-    # Log to /tmp/YYYYMMDD/log using the tlog function
+    # Log to today's private state file using the tlog function
     printf "%s" "$formatted_output" | tlog "CTCT Capture"
 
     rm -f "$tmp"
@@ -316,6 +347,7 @@ tdump() {
     local dir="$(ensure_today_dir)"
     local header="$1"
     local file="$dir/$(datetime).txt"
+    _ensure_private_file "$file" || return 1
 
     # Add header if provided
     if [[ -n "$header" ]]; then
@@ -343,6 +375,7 @@ tlog() {
     local file="$dir/log"
     local context="${1:-}"
     local timestamp="$(date '+%Y-%m-%d %H:%M:%S')"
+    _ensure_private_file "$file" || return 1
 
     # If context provided, show it
     if [[ -n "$context" ]]; then
@@ -373,7 +406,7 @@ tlog-view() {
 # Tail today's tlog live
 tlog-tail() {
     local file="$(ensure_today_dir)/log"
-    [[ -e "$file" ]] || : >"$file"
+    _ensure_private_file "$file" || return 1
     tail -f "$file"
 }
 
@@ -382,9 +415,9 @@ fls() {
     ls -t | head -n 1
 }
 
-# Find latest file in today's temp directory
+# Find latest file in today's private state directory
 flstd() {
-    local dir="/tmp/$(today)"
+    local dir="$(_dotfiles_state_root)/daily/$(today)"
     if [[ ! -d "$dir" ]]; then
         echo "No temp directory for today" >&2
         return 1
@@ -760,21 +793,24 @@ sysinfo() {
 # Cleanup Utilities
 # ============================================================================
 
-# Clean old temp directories (older than 7 days)
+# Clean old dotfiles state directories (older than 7 days)
 cleanup_tmp() {
     local days="${1:-7}"
-    find /tmp -maxdepth 1 -type d -name "[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]" -mtime +$days -exec rm -rf {} +
-    echo "✓ Cleaned up temp directories older than $days days"
+    [[ "$days" == <-> ]] || { echo "Usage: cleanup_tmp [days]" >&2; return 1; }
+    local root="$(_dotfiles_state_root)/daily"
+    [[ -d "$root" && ! -L "$root" ]] || return 0
+    find "$root" -maxdepth 1 -type d -name "[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]" -mtime "+$days" -exec rm -rf -- {} +
+    echo "✓ Cleaned up dotfiles state directories older than $days days"
 }
 
 # ============================================================================
 # Process Utilities
 # ============================================================================
 
-# Run an arbitrary command in the background with logging under /tmp.
+# Run an arbitrary command in the background with private XDG-state logging.
 # - Persists after terminal closes (nohup + disown when available)
 # - Runs in an interactive login shell so zsh aliases/functions are available
-# - Logs to /tmp/bgrun/<YYYYMMDD-HHMMSS>-<name>.log and writes a .pid file
+# - Logs under $XDG_STATE_HOME/dotfiles/bgrun and writes a private .pid file
 # Usage:
 #   bgrun <cmd> [args...]
 #   bgrun -n <name> <cmd> [args...]
@@ -799,8 +835,13 @@ bgrun() {
         shift 2
     fi
 
-    local logdir="/tmp/bgrun"
-    mkdir -p "$logdir"
+    local logdir="$(_dotfiles_state_root)/bgrun"
+    if [[ -L "$logdir" ]]; then
+        echo "bgrun: refusing symlinked log directory" >&2
+        return 1
+    fi
+    mkdir -p -m 700 "$logdir" || return 1
+    chmod 700 "$(_dotfiles_state_root)" "$logdir" || return 1
     local ts
     ts=$(date +"%Y%m%d-%H%M%S")
 
@@ -841,6 +882,11 @@ bgrun() {
             cmd_str="${cmd_str% }"
         fi
     fi
+
+    name="$(printf '%s' "$name" | tr -cs 'A-Za-z0-9._-' '_')"
+    logfile="$logdir/${ts}-${name}.log"
+    _ensure_private_file "$logfile" || return 1
+    _ensure_private_file "${logfile}.pid" || return 1
 
     # Execute via a non-interactive zsh, but preload aliases/functions explicitly
     # to avoid TTY-dependent interactive init (compinit) while still expanding aliases.
