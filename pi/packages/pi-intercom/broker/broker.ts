@@ -145,7 +145,8 @@ class IntercomBroker {
             // The dir 0700 is the real boundary; this is extra hardening.
           }
         }
-        writeFileSync(PID_PATH, String(process.pid));
+        writeFileSync(PID_PATH, String(process.pid), { mode: 0o600 });
+        chmodSync(PID_PATH, 0o600);
         console.log(`Intercom broker started (pid: ${process.pid})`);
       });
     };

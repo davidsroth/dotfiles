@@ -1,5 +1,5 @@
 import { spawn } from "child_process";
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, statSync, unlinkSync, writeFileSync } from "fs";
+import { chmodSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, statSync, unlinkSync, writeFileSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import { homedir } from "os";
@@ -26,7 +26,9 @@ function openBrokerLogFd(): number | undefined {
     } catch {
       // No existing log yet; append-create is fine.
     }
-    return openSync(logPath, mode);
+    const fd = openSync(logPath, mode, 0o600);
+    chmodSync(logPath, 0o600);
+    return fd;
   } catch {
     return undefined;
   }
@@ -300,7 +302,7 @@ function acquireSpawnLock(): boolean {
   const maxRetries = 5;
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     try {
-      writeFileSync(BROKER_SPAWN_LOCK, `${process.pid}\n${Date.now()}\n`, { flag: "wx" });
+      writeFileSync(BROKER_SPAWN_LOCK, `${process.pid}\n${Date.now()}\n`, { flag: "wx", mode: 0o600 });
       return true;
     } catch (error) {
       if (!(error instanceof Error) || (error as NodeJS.ErrnoException).code !== "EEXIST") {

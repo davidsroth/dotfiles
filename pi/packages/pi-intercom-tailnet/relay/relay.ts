@@ -18,7 +18,7 @@
 // extension when `enabled: true` in tailnet.json. Exits cleanly on
 // SIGTERM/SIGINT.
 
-import { writeFileSync, unlinkSync, mkdirSync } from "fs";
+import { chmodSync, writeFileSync, unlinkSync, mkdirSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
 import net from "net";
@@ -68,7 +68,8 @@ class TailnetRelay {
       process.exit(0);
     }
 
-    mkdirSync(INTERCOM_DIR, { recursive: true });
+    mkdirSync(INTERCOM_DIR, { recursive: true, mode: 0o700 });
+    chmodSync(INTERCOM_DIR, 0o700);
 
     // 1. Discover our own host name via the tailscale CLI (unless overridden).
     if (this.config.hostOverride) {
@@ -125,7 +126,8 @@ class TailnetRelay {
         resolve();
       });
     });
-    writeFileSync(RELAY_PID_PATH, String(process.pid));
+    writeFileSync(RELAY_PID_PATH, String(process.pid), { mode: 0o600 });
+    chmodSync(RELAY_PID_PATH, 0o600);
     console.error(`[tailnet-relay] listening on ${ipv4}:${this.config.port} as ${this.selfHost}`);
 
     // 4. Discovery loop.
