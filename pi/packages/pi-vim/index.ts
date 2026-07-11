@@ -53,11 +53,11 @@ import {
   copyToClipboard,
   CustomEditor,
   type ExtensionAPI,
-} from "@mariozechner/pi-coding-agent";
+} from "@earendil-works/pi-coding-agent";
 import {
   Key,
   matchesKey,
-} from "@mariozechner/pi-tui";
+} from "@earendil-works/pi-tui";
 
 import type {
   Mode,
@@ -176,11 +176,6 @@ export class ModalEditor extends CustomEditor {
   override invalidate(): void {
     super.invalidate();
     this.syncFooterStatus();
-  }
-
-  override dispose(): void {
-    this.setStatusText?.(undefined);
-    super.dispose();
   }
 
   private captureSnapshot(): EditorSnapshot {
@@ -2273,6 +2268,10 @@ export class ModalEditor extends CustomEditor {
 }
 
 export default function (pi: ExtensionAPI) {
+  pi.on("session_shutdown", (_event, ctx) => {
+    ctx.ui.setStatus("pi-vim", undefined);
+  });
+
   pi.on("session_start", (_event, ctx) => {
     const t = ctx.ui.theme;
     const colorizers = t ? {

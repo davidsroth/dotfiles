@@ -21,13 +21,9 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "echo 'nothing to build'",
-    "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "test": "node --import tsx/esm --test 'test/**/*.test.ts'",
-    "check": "npm run lint && npm run typecheck && npm run test",
-    "pack:check": "node --import tsx/esm script/pack-check.ts",
-    "prepublishOnly": "npm run lint && npm run typecheck && npm run pack:check && npm test"
+    "test": "vitest --run",
+    "check": "npm run typecheck && npm test"
   },
   "pi": {
     "extensions": [
@@ -35,15 +31,14 @@
     ]
   },
   "devDependencies": {
-    "@eslint/js": "^9.25.1",
-    "@types/node": "^24.7.2",
-    "eslint": "^9.25.1",
-    "tsx": "^4.19.3",
-    "typescript": "^5.9.3",
-    "typescript-eslint": "^8.31.1"
+    "@earendil-works/pi-coding-agent": "^0.80.6",
+    "@earendil-works/pi-tui": "^0.80.6",
+    "@types/node": "^25",
+    "typescript": "^6",
+    "vitest": "^4"
   },
   "peerDependencies": {
-    "@mariozechner/pi-coding-agent": "*",
-    "@mariozechner/pi-tui": "*"
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*"
   }
 }
