@@ -12,8 +12,11 @@ else
     # Fallback if zsh-defer is not available
     # Emulate basic interface: `zsh-defer -c 'cmd'` executes immediately
     function zsh-defer() {
-        if [[ "$1" == "-c" ]]; then
+        if [[ "${1:-}" == "-c" ]]; then
             shift
+            [[ $# -gt 0 ]] || return 0
+            eval -- "$1"
+            return
         fi
         "$@"
     }
@@ -79,8 +82,9 @@ setopt PUSHD_SILENT         # Don't print directory stack
 setopt CORRECT              # Spelling correction for commands
 setopt INTERACTIVE_COMMENTS # Allow comments in interactive shell
 
-# Disable flow control (C-s/C-q) so keys are available for tmux/vim
-stty -ixon
+# Disable flow control (C-s/C-q) so keys are available for tmux/vim.
+# Scripted `zsh -i -c` invocations have no terminal on stdin.
+[[ -t 0 ]] && stty -ixon
 
 # ============================================================================
 # Critical Immediate Loads
