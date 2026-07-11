@@ -10,7 +10,7 @@
  *
  *   {
  *     "command": "npx",                                  // optional; defaults shown
- *     "args": ["-y", "slack-mcp-server@latest", "--transport", "stdio"],
+ *     "args": ["-y", "slack-mcp-server@1.3.0", "--transport", "stdio"],
  *     "env": {
  *       "SLACK_MCP_XOXP_TOKEN": "xoxp-..."               // OR XOXB, OR XOXC+XOXD
  *     },

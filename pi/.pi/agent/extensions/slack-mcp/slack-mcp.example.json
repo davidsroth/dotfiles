@@ -3,7 +3,7 @@
   "_comment_2": "Use one of the auth methods below. Priority: XOXP > XOXB > XOXC+XOXD.",
 
   "command": "npx",
-  "args": ["-y", "slack-mcp-server@latest", "--transport", "stdio"],
+  "args": ["-y", "slack-mcp-server@1.3.0", "--transport", "stdio"],
 
   "env": {
     "SLACK_MCP_XOXP_TOKEN": "xoxp-..."

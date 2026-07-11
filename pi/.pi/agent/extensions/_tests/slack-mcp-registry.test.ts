@@ -38,7 +38,11 @@ import {
   killProcessTreeHard,
   _collectDescendants,
 } from "../slack-mcp/process-tracker";
-import { buildChildEnv } from "../slack-mcp/constants";
+import {
+  buildChildEnv,
+  DEFAULT_ARGS,
+  SLACK_MCP_SERVER_VERSION,
+} from "../slack-mcp/constants";
 import type { ResolvedConfig } from "../slack-mcp/types";
 
 // ---------------------------------------------------------------------------
@@ -611,8 +615,16 @@ describe("tracker-killProcessTreeHard-three-stage-strategy", () => {
 });
 
 // ===========================================================================
-// constants.ts — buildChildEnv allowlist filtering
+// constants.ts — dependency pin and child environment
 // ===========================================================================
+describe("constants-runtime-dependency-pin", () => {
+  it("uses an exact reviewed slack-mcp-server version", () => {
+    expect(SLACK_MCP_SERVER_VERSION).toMatch(/^\d+\.\d+\.\d+$/);
+    expect(DEFAULT_ARGS).toContain(`slack-mcp-server@${SLACK_MCP_SERVER_VERSION}`);
+    expect(DEFAULT_ARGS.join(" ")).not.toContain("@latest");
+  });
+});
+
 describe("constants-buildChildEnv-allowlist-filtering", () => {
   const savedEnv: Record<string, string | undefined> = {};
   const testKeys = [

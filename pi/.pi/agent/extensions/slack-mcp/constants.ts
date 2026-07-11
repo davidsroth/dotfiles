@@ -8,7 +8,9 @@ import { join } from "node:path";
 export const AUTH_FILE = join(process.env.HOME || homedir(), ".pi", "agent", "slack-mcp.json");
 
 export const DEFAULT_COMMAND = "npx";
-export const DEFAULT_ARGS = ["-y", "slack-mcp-server@latest", "--transport", "stdio"];
+// Exact pin: this child receives Slack credentials, so upgrades must be reviewed.
+export const SLACK_MCP_SERVER_VERSION = "1.3.0";
+export const DEFAULT_ARGS = ["-y", `slack-mcp-server@${SLACK_MCP_SERVER_VERSION}`, "--transport", "stdio"];
 export const DEFAULT_TOOL_PREFIX = "slack_";
 export const DEFAULT_STARTUP_TIMEOUT_MS = 60_000;
 // Default per-tool-call timeout. Overridable via the auth file's
