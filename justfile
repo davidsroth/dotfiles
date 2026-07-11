@@ -134,35 +134,6 @@ maintenance:
   @[ -d "$HOME/zsh-defer/.git" ] && git -C "$HOME/zsh-defer" pull || echo "Skipping zsh-defer (not found)"
 
   @echo ""
-  @echo "🐳 Cleaning Docker..."
-  @if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then \
-    docker system prune -f; \
-  else \
-    echo "Skipping Docker cleanup (daemon not running or docker not found)"; \
-  fi
-
-  @echo ""
-  @echo "📦 Cleaning pnpm store..."
-  @command -v pnpm >/dev/null 2>&1 && pnpm store prune || echo "Skipping pnpm (not found)"
-
-  @echo ""
-  @echo "📜 Cleaning NPM & Yarn..."
-  @command -v npm >/dev/null 2>&1 && { npm cache clean --force; rm -rf ~/.npm/_logs; } || echo "Skipping NPM cleanup"
-  @command -v yarn >/dev/null 2>&1 && yarn cache clean || echo "Skipping Yarn cleanup"
-
-  @echo ""
-  @echo "🐹 Cleaning Go cache..."
-  @command -v go >/dev/null 2>&1 && go clean -cache || echo "Skipping Go cleanup"
-
-  @echo ""
-  @echo "☀️ Cleaning uv cache..."
-  @command -v uv >/dev/null 2>&1 && uv cache clean --force || echo "Skipping uv cleanup"
-
-  @echo ""
-  @echo "💎 Cleaning Ruby Gems..."
-  @command -v gem >/dev/null 2>&1 && gem cleanup || echo "Skipping gem cleanup"
-
-  @echo ""
   @echo "🍎 Checking macOS updates..."
   @softwareupdate -l 2>&1 || echo "Skipping macOS update check (failed)"
 
@@ -172,6 +143,30 @@ maintenance:
 
   @echo ""
   @echo "✨ Maintenance complete!"
+  @echo "Run 'just prune-caches' separately for destructive Docker/cache cleanup."
+
+# Explicit, confirmed cleanup of Docker state and language package caches.
+prune-caches:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  if [[ ! -t 0 ]]; then
+    echo "prune-caches requires an interactive terminal" >&2
+    exit 1
+  fi
+  read -r -p "Type PRUNE to remove Docker build state and package caches: " answer
+  [[ "$answer" == "PRUNE" ]] || { echo "Cancelled"; exit 1; }
+
+  if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+    docker system prune -f
+  else
+    echo "Skipping Docker cleanup (daemon not running or docker not found)"
+  fi
+  command -v pnpm >/dev/null 2>&1 && pnpm store prune || echo "Skipping pnpm (not found)"
+  command -v npm >/dev/null 2>&1 && { npm cache clean --force; rm -rf "$HOME/.npm/_logs"; } || echo "Skipping npm (not found)"
+  command -v yarn >/dev/null 2>&1 && yarn cache clean || echo "Skipping yarn (not found)"
+  command -v go >/dev/null 2>&1 && go clean -cache || echo "Skipping go (not found)"
+  command -v uv >/dev/null 2>&1 && uv cache clean --force || echo "Skipping uv (not found)"
+  command -v gem >/dev/null 2>&1 && gem cleanup || echo "Skipping gem (not found)"
 
 # Remove OS cruft and editor backup files
 clean:
