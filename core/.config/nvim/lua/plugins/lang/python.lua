@@ -81,6 +81,9 @@ return {
 
       -- Function to find uv venv
       local function get_uv_venv_path(root_dir)
+        if not root_dir or root_dir == "" then
+          return nil
+        end
         local venv_path = util.path.join(root_dir, ".venv")
         if vim.fn.isdirectory(venv_path) == 1 then
           return venv_path
@@ -90,6 +93,9 @@ return {
 
       -- Function to find Poetry venv
       local function get_poetry_venv_path(root_dir)
+        if not root_dir or root_dir == "" then
+          return nil
+        end
         -- Check if pyproject.toml exists and contains poetry
         local pyproject_path = util.path.join(root_dir, "pyproject.toml")
         if vim.fn.filereadable(pyproject_path) == 1 then
