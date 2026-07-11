@@ -699,7 +699,8 @@ install_homebrew() {
 
   if ! check_command brew; then
     info "Installing Homebrew..."
-    local BREW_INSTALL_SCRIPT="/tmp/homebrew-install-$$.sh"
+    local BREW_INSTALL_SCRIPT
+    BREW_INSTALL_SCRIPT="$(mktemp "${TMPDIR:-/tmp}/homebrew-install.XXXXXX")" || return 1
 
     # NOTE: SHA not pinned (acceptable for a dotfiles installer; the script is
     # downloaded to a temp file first, never piped directly into a shell).
@@ -983,7 +984,8 @@ install_additional_tools() {
   # NVM
   if [[ ! -d "$HOME/.nvm" ]]; then
     info "Installing NVM..."
-    local NVM_INSTALL_SCRIPT="/tmp/nvm-install-$$.sh"
+    local NVM_INSTALL_SCRIPT
+    NVM_INSTALL_SCRIPT="$(mktemp "${TMPDIR:-/tmp}/nvm-install.XXXXXX")" || return 1
 
     # NOTE: SHA not pinned (acceptable for a dotfiles installer; the script is
     # downloaded to a temp file first, never piped directly into a shell).
@@ -1093,7 +1095,8 @@ install_additional_tools() {
     ensure_user_local_bin_path
     # Download-then-run (not `curl | sh`) to match the Homebrew/NVM pattern above:
     # lets us inspect/fail cleanly instead of executing a stream we never see.
-    local tlink_installer="${TMPDIR:-/tmp}/tlink-install-$$.sh"
+    local tlink_installer
+    tlink_installer="$(mktemp "${TMPDIR:-/tmp}/tlink-install.XXXXXX")" || return 1
     if curl -fsSL https://raw.githubusercontent.com/ahnopologetic/tlink/main/install.sh -o "$tlink_installer" && sh "$tlink_installer"; then
       rm -f "$tlink_installer"
       hash -r 2>/dev/null || true
@@ -1551,7 +1554,8 @@ install_fira_code_nerd_font() {
   local font_dir="$HOME/.local/share/fonts/FiraCodeNerdFont"
   mkdir -p "$font_dir"
 
-  local tmp_zip="/tmp/FiraCodeNerdFont-$$.zip"
+  local tmp_zip
+  tmp_zip="$(mktemp "${TMPDIR:-/tmp}/FiraCodeNerdFont.XXXXXX")" || return 1
   local url_latest="https://github.com/ryanoasis/nerd-fonts/releases/latest/download/FiraCode.zip"
 
   info "Downloading Fira Code Nerd Font..."

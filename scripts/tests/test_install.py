@@ -54,6 +54,20 @@ class InstallScriptTests(unittest.TestCase):
         self.assertEqual(repo_url, "https://github.com/davidsroth/dotfiles.git")
         self.assertIn(f"git clone {repo_url} ~/dotfiles", readme)
 
+    def test_downloaded_installers_use_mktemp_paths(self):
+        source = INSTALL_SH.read_text(encoding="utf-8")
+        self.assertNotIn('homebrew-install-$$', source)
+        self.assertNotIn('nvm-install-$$', source)
+        self.assertNotIn('tlink-install-$$', source)
+        self.assertNotIn('FiraCodeNerdFont-$$', source)
+        for prefix in (
+            "homebrew-install.XXXXXX",
+            "nvm-install.XXXXXX",
+            "tlink-install.XXXXXX",
+            "FiraCodeNerdFont.XXXXXX",
+        ):
+            self.assertIn(prefix, source)
+
     def test_current_neovim_release_assets_are_arch_specific(self):
         result = self.run_bash(
             """
