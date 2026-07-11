@@ -86,6 +86,9 @@ cask "hammerspoon"
 cask "karabiner-elements"
 cask "amethyst"             # Tiling window manager
 cask "espanso"              # Text expander
+cask "skim"                 # VimTeX PDF viewer
+cask "obsidian"             # Hammerspoon launch target
+cask "sunsama"              # Hammerspoon launch target and task workflow
 
 # Communication
 cask "slack"
