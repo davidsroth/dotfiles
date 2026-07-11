@@ -24,9 +24,24 @@ skip_path() {
   esac
 }
 
+require_tracked_path() {
+  local file="$1"
+  if [[ ! -e "$file" && ! -L "$file" ]]; then
+    failure "tracked path missing from working tree: $file"
+    return 1
+  fi
+}
+
+printf '%s\n' 'Tracked path presence'
+while IFS= read -r -d '' file; do
+  skip_path "$file" && continue
+  require_tracked_path "$file" || true
+done < <(git ls-files -z)
+
 printf '%s\n' 'Shell syntax (tracked files)'
 while IFS= read -r -d '' file; do
   skip_path "$file" && continue
+  [[ -e "$file" || -L "$file" ]] || continue
   first_line="$(head -n 1 "$file" 2>/dev/null || true)"
   shell=""
   case "$file:$first_line" in
@@ -46,6 +61,7 @@ done < <(git ls-files -z)
 printf '%s\n' 'JSON syntax (tracked files)'
 while IFS= read -r -d '' file; do
   skip_path "$file" && continue
+  [[ -e "$file" || -L "$file" ]] || continue
   checked=$((checked + 1))
   python3 -m json.tool "$file" >/dev/null || failure "JSON syntax: $file"
 done < <(git ls-files -z -- '*.json')
@@ -54,6 +70,7 @@ if command -v luac >/dev/null 2>&1; then
   printf '%s\n' 'Lua syntax (tracked files)'
   while IFS= read -r -d '' file; do
     skip_path "$file" && continue
+    [[ -e "$file" || -L "$file" ]] || continue
     checked=$((checked + 1))
     luac -p "$file" || failure "Lua syntax: $file"
   done < <(git ls-files -z -- '*.lua')
@@ -65,6 +82,7 @@ if python3 -c 'import tomllib' >/dev/null 2>&1; then
   printf '%s\n' 'TOML syntax (tracked files)'
   while IFS= read -r -d '' file; do
     skip_path "$file" && continue
+    [[ -e "$file" || -L "$file" ]] || continue
     checked=$((checked + 1))
     python3 - "$file" >/dev/null <<'PY' || failure "TOML syntax: $file"
 import sys
@@ -82,6 +100,7 @@ if command -v ruby >/dev/null 2>&1; then
   printf '%s\n' 'YAML syntax (tracked files)'
   while IFS= read -r -d '' file; do
     skip_path "$file" && continue
+    [[ -e "$file" || -L "$file" ]] || continue
     checked=$((checked + 1))
     ruby -e 'require "yaml"; YAML.parse_file(ARGV.fetch(0))' "$file" || failure "YAML syntax: $file"
   done < <(git ls-files -z -- '*.yaml' '*.yml')
@@ -92,6 +111,7 @@ fi
 printf '%s\n' 'Tracked symlinks'
 while IFS= read -r -d '' file; do
   skip_path "$file" && continue
+  [[ -e "$file" || -L "$file" ]] || continue
   if [[ -L "$file" && ! -e "$file" ]]; then
     failure "broken symlink: $file -> $(readlink "$file")"
   fi

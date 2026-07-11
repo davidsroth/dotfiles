@@ -63,6 +63,20 @@ class AuditTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("Audit passed", result.stdout)
 
+    def test_fails_cleanly_for_missing_tracked_file(self):
+        self.write("deleted.json", '{"ok": true}\n')
+        self.track("deleted.json")
+        (self.root / "deleted.json").unlink()
+
+        result = self.run_audit()
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(
+            "tracked path missing from working tree: deleted.json", result.stderr
+        )
+        self.assertNotIn("Traceback", result.stderr)
+        self.assertNotIn("FileNotFoundError", result.stderr)
+
     def test_fails_for_invalid_tracked_json(self):
         self.write("broken.json", "{invalid\n")
         self.track("broken.json")
