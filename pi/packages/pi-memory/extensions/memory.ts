@@ -31,6 +31,8 @@ type MemoryParams = {
 	section?: string;
 };
 
+type MemoryDataParams = Omit<MemoryParams, "action"> & { action?: Action };
+
 type StorePaths = {
 	dir: string;
 	dailyDir: string;
@@ -342,7 +344,7 @@ export const readSection = async (
 	return { text: lines.slice(range.start, range.end).join("\n").trimEnd(), files: [path] };
 };
 
-export const searchMemory = async (params: MemoryParams, cwd?: string): Promise<{ text: string; files: string[]; count: number }> => {
+export const searchMemory = async (params: MemoryDataParams, cwd?: string): Promise<{ text: string; files: string[]; count: number }> => {
 	const query = params.query?.trim() || params.text?.trim();
 	if (!query) return { text: "Error: query is required for memory search.", files: [], count: 0 };
 
@@ -389,7 +391,7 @@ export const searchMemory = async (params: MemoryParams, cwd?: string): Promise<
 	};
 };
 
-export const appendToTarget = async (params: MemoryParams, cwd?: string): Promise<{ text: string; files: string[] }> => {
+export const appendToTarget = async (params: MemoryDataParams, cwd?: string): Promise<{ text: string; files: string[] }> => {
 	const target = params.target;
 	const text = params.text?.trim();
 	if (!text) return { text: "Error: text is required for append.", files: [] };
@@ -450,7 +452,7 @@ export const appendToTarget = async (params: MemoryParams, cwd?: string): Promis
 	return { text: resultText, files: [path] };
 };
 
-export const replaceInTarget = async (params: MemoryParams, cwd?: string): Promise<{ text: string; files: string[] }> => {
+export const replaceInTarget = async (params: MemoryDataParams, cwd?: string): Promise<{ text: string; files: string[] }> => {
 	const target = params.target ?? "memory";
 	if (target === "daily" || target === "all") {
 		return { text: "Error: replace is only allowed for memory or scratchpad. Daily logs are append-only.", files: [] };
@@ -480,7 +482,7 @@ export const replaceInTarget = async (params: MemoryParams, cwd?: string): Promi
 	return { text: `Replaced one occurrence in ${displayPath(paths, path)}.`, files: [path] };
 };
 
-export const markScratchDone = async (params: MemoryParams): Promise<{ text: string; files: string[] }> => {
+export const markScratchDone = async (params: MemoryDataParams): Promise<{ text: string; files: string[] }> => {
 	const query = params.query?.trim() || params.text?.trim();
 	if (!query) return { text: "Error: query or text is required for scratch_done.", files: [] };
 

@@ -35,8 +35,8 @@ vi.mock("typebox", () => ({
 	Type: {
 		Object: (shape: unknown) => shape,
 		Optional: (t: unknown) => t,
-		String: (opts?: unknown) => ({ type: "string", ...opts }),
-		Number: (opts?: unknown) => ({ type: "number", ...opts }),
+		String: (opts?: unknown) => ({ type: "string", ...(opts && typeof opts === "object" ? opts : {}) }),
+		Number: (opts?: unknown) => ({ type: "number", ...(opts && typeof opts === "object" ? opts : {}) }),
 	},
 }));
 
@@ -60,7 +60,7 @@ import {
 	markScratchDone,
 	readSection,
 	searchMemory,
-} from "../extensions/memory.ts";
+} from "../extensions/memory.js";
 
 // ---------------------------------------------------------------------------
 // Helper: create a unique tmp directory per test
@@ -312,15 +312,12 @@ describe("memoryPathForScope", () => {
 		expect(memoryPathForScope(paths, undefined)).toBe("/store/MEMORY.md");
 	});
 	it("returns memory for scope=global", () => {
-		// @ts-expect-error testing runtime value
 		expect(memoryPathForScope(paths, "global")).toBe("/store/MEMORY.md");
 	});
 	it("returns memoryLocal for scope=local", () => {
-		// @ts-expect-error testing runtime value
 		expect(memoryPathForScope(paths, "local")).toBe("/store/MEMORY.local.md");
 	});
 	it("returns project for scope=project", () => {
-		// @ts-expect-error testing runtime value
 		expect(memoryPathForScope(paths, "project")).toBe("/project/.pi/memory/MEMORY.md");
 	});
 });
