@@ -333,6 +333,37 @@ done
             self.assertEqual(len(unlocked_calls), 2)
             self.assertTrue(all("install --package-lock=false" in line for line in unlocked_calls))
 
+    def test_pi_memory_setup_restricts_private_runtime_paths(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            root = Path(tempdir)
+            repo = root / "repo"
+            source_dir = repo / "pi" / ".pi" / "agent" / "memory"
+            source_dir.mkdir(parents=True)
+            (source_dir / "MEMORY.md").write_text("# Shared memory\n", encoding="utf-8")
+            home = root / "home"
+            private_dir = home / ".pi" / "agent" / "memory"
+            daily_dir = private_dir / "daily"
+            daily_dir.mkdir(parents=True)
+            local_memory = private_dir / "MEMORY.local.md"
+            daily = daily_dir / "2026-07-11.md"
+            local_memory.write_text("private\n", encoding="utf-8")
+            daily.write_text("private daily\n", encoding="utf-8")
+            private_dir.chmod(0o755)
+            daily_dir.chmod(0o755)
+            local_memory.chmod(0o644)
+            daily.chmod(0o644)
+
+            result = self.run_bash(
+                "setup_pi_memory", env={"DOTFILES_DIR": repo, "HOME": home}
+            )
+
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertEqual(stat.S_IMODE(private_dir.stat().st_mode), 0o700)
+            self.assertEqual(stat.S_IMODE(daily_dir.stat().st_mode), 0o700)
+            self.assertEqual(stat.S_IMODE(local_memory.stat().st_mode), 0o600)
+            self.assertEqual(stat.S_IMODE(daily.stat().st_mode), 0o600)
+            self.assertTrue((private_dir / "MEMORY.md").is_symlink())
+
     def test_required_pi_failures_are_not_suppressed(self):
         with tempfile.TemporaryDirectory() as tempdir:
             repo = Path(tempdir) / "repo"

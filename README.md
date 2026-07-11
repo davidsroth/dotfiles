@@ -180,14 +180,14 @@ After running `install.sh` on a new machine, three manual steps are required bef
 
 1. **Copy the settings example and edit it:**
    ```bash
-   cp ~/dotfiles/pi/.pi/agent/settings.local.json.example ~/.pi/agent/settings.local.json
+   install -m 600 ~/dotfiles/pi/.pi/agent/settings.local.json.example ~/.pi/agent/settings.local.json
    # Edit ~/.pi/agent/settings.local.json — set defaultProvider and defaultModel
    just pi-settings   # regenerate settings.json from base + local
    ```
 
 2. **Export API-key environment variables.** Copy the example env file and fill in real values:
    ```bash
-   cp ~/dotfiles/zsh/.zshenv.local.example ~/.zshenv.local
+   install -m 600 ~/dotfiles/zsh/.zshenv.local.example ~/.zshenv.local
    # Edit ~/.zshenv.local — add OPENROUTER_API_KEY, AZURE_INFERENCE_CREDENTIAL, etc.
    ```
    `~/.zshenv` sources `~/.zshenv.local` automatically on every shell start.

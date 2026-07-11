@@ -230,7 +230,61 @@ check_toolchain() {
 }
 
 # ---------------------------------------------------------------------------
-# 7. SECRETS REPORT (info only, never values, never FAIL)
+# 7. PRIVATE FILE PERMISSIONS
+# ---------------------------------------------------------------------------
+path_mode() {
+  stat -f '%Lp' "$1" 2>/dev/null || stat -c '%a' "$1" 2>/dev/null || true
+}
+
+check_private_permissions() {
+  local path expected mode issues=0
+  local -a private_dirs=(
+    "$PI_AGENT/memory"
+    "$PI_AGENT/memory/daily"
+  )
+  local -a private_files=(
+    "$HOME/.zshenv.local"
+    "$HOME/.env"
+    "$HOME/.claude.json"
+    "$PI_AGENT/settings.json"
+    "$PI_AGENT/settings.local.json"
+    "$PI_AGENT/memory/MEMORY.local.md"
+    "$PI_AGENT/memory/SCRATCHPAD.md"
+  )
+
+  for path in "${private_dirs[@]}"; do
+    [[ -e "$path" ]] || continue
+    mode="$(path_mode "$path")"
+    if [[ "$mode" == "700" ]]; then
+      PASS "PERMISSIONS: $path is 0700"
+    else
+      WARN "PERMISSIONS: $path is ${mode:-unknown}, expected 0700 — run: chmod 700 '$path'"
+      issues=$((issues + 1))
+    fi
+  done
+
+  shopt -s nullglob
+  private_files+=("$PI_AGENT"/memory/daily/*.md)
+  shopt -u nullglob
+  for path in "${private_files[@]}"; do
+    [[ -e "$path" && ! -L "$path" ]] || continue
+    expected=600
+    mode="$(path_mode "$path")"
+    if [[ "$mode" == "$expected" ]]; then
+      PASS "PERMISSIONS: $path is 0$expected"
+    else
+      WARN "PERMISSIONS: $path is ${mode:-unknown}, expected 0$expected — run: chmod $expected '$path'"
+      issues=$((issues + 1))
+    fi
+  done
+
+  if [[ "$issues" -eq 0 ]]; then
+    PASS "PERMISSIONS: existing private runtime paths are restricted"
+  fi
+}
+
+# ---------------------------------------------------------------------------
+# 8. SECRETS REPORT (info only, never values, never FAIL)
 # ---------------------------------------------------------------------------
 check_secrets() {
   local secrets=(
@@ -264,6 +318,7 @@ check_hooks
 check_memory_link
 check_stow_health
 check_toolchain
+check_private_permissions
 check_secrets
 
 printf '\n%d pass / %d warn / %d fail\n' "$pass" "$warn" "$fail"

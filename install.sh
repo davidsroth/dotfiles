@@ -1285,7 +1285,13 @@ setup_pi_memory() {
     error "Required Pi memory file is missing: $src"
     return 1
   fi
-  mkdir -p "$dir/daily" || return 1
+  mkdir -p -m 700 "$dir/daily" || return 1
+  chmod 700 "$dir" "$dir/daily" || return 1
+  local private_file
+  for private_file in "$dir/MEMORY.local.md" "$dir/SCRATCHPAD.md" "$dir"/daily/*.md; do
+    [[ -f "$private_file" && ! -L "$private_file" ]] || continue
+    chmod 600 "$private_file" || return 1
+  done
 
   if [[ -L "$dest" ]]; then
     if [[ ! "$dest" -ef "$src" ]]; then
