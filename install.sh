@@ -22,7 +22,7 @@ BACKUP_DIR="$HOME/.dotfiles-backup/$(date +%Y%m%d-%H%M%S)"; readonly BACKUP_DIR
 LOG_FILE="${TMPDIR:-/tmp}/dotfiles-install-$(date +%Y%m%d-%H%M%S).log"; readonly LOG_FILE
 
 # GitHub repository (update this with your username)
-readonly GITHUB_USER="${GITHUB_USER:-davidroth}"
+readonly GITHUB_USER="${GITHUB_USER:-davidsroth}"
 readonly GITHUB_REPO="https://github.com/${GITHUB_USER}/dotfiles.git"
 
 # Colors for output
@@ -105,7 +105,7 @@ Options:
     -q, --quiet     Suppress non-error output
 
 Environment Variables:
-    GITHUB_USER     Your GitHub username (default: davidroth)
+    GITHUB_USER     Your GitHub username (default: davidsroth)
     DOTFILES_DIR    Installation directory (default: ~/dotfiles)
     DEFAULT_BRANCH  Git branch to use (default: main)
     NVM_VERSION     NVM version to install (default: v0.40.5)

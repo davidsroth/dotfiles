@@ -46,6 +46,14 @@ class InstallScriptTests(unittest.TestCase):
         self.assertEqual(result.stdout, "sourced\n")
         self.assertEqual(result.stderr, "")
 
+    def test_default_repository_matches_documented_clone_url(self):
+        result = self.run_bash('printf "%s\\n" "$GITHUB_REPO"', check=True)
+        repo_url = result.stdout.strip()
+        readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+
+        self.assertEqual(repo_url, "https://github.com/davidsroth/dotfiles.git")
+        self.assertIn(f"git clone {repo_url} ~/dotfiles", readme)
+
     def test_current_neovim_release_assets_are_arch_specific(self):
         result = self.run_bash(
             """

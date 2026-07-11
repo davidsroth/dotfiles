@@ -14,12 +14,12 @@ This repository contains personal dotfiles for macOS, organized following the XD
 
 ```bash
 # Clone and run the automated installer
-git clone https://github.com/davidroth/dotfiles.git ~/dotfiles
+git clone https://github.com/davidsroth/dotfiles.git ~/dotfiles
 cd ~/dotfiles
 ./install.sh
 
 # Or install with a single command (download first, then inspect/run)
-curl -fsSL https://raw.githubusercontent.com/davidroth/dotfiles/main/install.sh -o /tmp/dotfiles-install.sh
+curl -fsSL https://raw.githubusercontent.com/davidsroth/dotfiles/main/install.sh -o /tmp/dotfiles-install.sh
 bash /tmp/dotfiles-install.sh --help
 ```
 
@@ -45,10 +45,10 @@ The `install.sh` script provides a fully automated setup:
 
 Environment variables:
 
-- `GITHUB_USER`: Your GitHub username (default: davidroth)
+- `GITHUB_USER`: Your GitHub username (default: davidsroth)
 - `DOTFILES_DIR`: Installation directory (default: ~/dotfiles)
 - `DEFAULT_BRANCH`: Git branch to use (default: main)
-- `NVM_VERSION`: NVM version to install (default: v0.40.1)
+- `NVM_VERSION`: NVM installer version (default: v0.40.5)
 
 The installer will:
 
@@ -85,7 +85,7 @@ If you prefer manual setup:
 
 ```bash
 # Clone the repository
-git clone https://github.com/davidroth/dotfiles.git ~/dotfiles
+git clone https://github.com/davidsroth/dotfiles.git ~/dotfiles
 
 # Install GNU Stow
 brew install stow
