@@ -5,7 +5,7 @@
  * load/save, parse-error self-heal, stale-lock recovery.
  */
 
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -55,6 +55,21 @@ describe("ScheduleStore", () => {
     // New instance on same file — verifies persistence
     const fresh = new ScheduleStore(join(tmp, "s.json"));
     expect(fresh.list()).toEqual([job]);
+  });
+
+  it("creates and repairs private store permissions", () => {
+    const dir = join(tmp, "private");
+    const file = join(dir, "s.json");
+    const store = new ScheduleStore(file);
+    store.add(makeJob());
+    expect(statSync(dir).mode & 0o777).toBe(0o700);
+    expect(statSync(file).mode & 0o777).toBe(0o600);
+
+    chmodSync(dir, 0o755);
+    chmodSync(file, 0o644);
+    new ScheduleStore(file);
+    expect(statSync(dir).mode & 0o777).toBe(0o700);
+    expect(statSync(file).mode & 0o777).toBe(0o600);
   });
 
   it("update returns merged record and persists the patch", () => {

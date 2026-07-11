@@ -10,7 +10,7 @@
  * from disk, applies the change, atomic-writes via temp+rename, releases.
  */
 
-import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { ScheduledSubagent, ScheduleStoreData } from "./types.js";
 
@@ -24,7 +24,7 @@ function isProcessRunning(pid: number): boolean {
 function acquireLock(lockPath: string): void {
   for (let i = 0; i < LOCK_MAX_RETRIES; i++) {
     try {
-      writeFileSync(lockPath, `${process.pid}`, { flag: "wx" });
+      writeFileSync(lockPath, `${process.pid}`, { flag: "wx", mode: 0o600 });
       return;
     } catch (e: any) {
       if (e.code === "EEXIST") {
@@ -62,7 +62,12 @@ export class ScheduleStore {
   constructor(filePath: string) {
     this.filePath = filePath;
     this.lockPath = filePath + ".lock";
-    mkdirSync(dirname(filePath), { recursive: true });
+    const storeDir = dirname(filePath);
+    mkdirSync(storeDir, { recursive: true, mode: 0o700 });
+    try { chmodSync(storeDir, 0o700); } catch { /* best effort on Windows */ }
+    if (existsSync(filePath)) {
+      try { chmodSync(filePath, 0o600); } catch { /* best effort on Windows */ }
+    }
     this.load();
   }
 
@@ -80,7 +85,7 @@ export class ScheduleStore {
   private save(): void {
     const data: ScheduleStoreData = { version: 1, jobs: [...this.jobs.values()] };
     const tmp = this.filePath + ".tmp";
-    writeFileSync(tmp, JSON.stringify(data, null, 2));
+    writeFileSync(tmp, JSON.stringify(data, null, 2), { mode: 0o600 });
     renameSync(tmp, this.filePath);
   }
 
