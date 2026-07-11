@@ -1,4 +1,7 @@
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import http from "node:http";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
 // Stub the OS integration so the test never opens a real browser or shells out
@@ -14,6 +17,7 @@ import { createReviewServer } from "../extensions/_review/server";
 interface RawResponse {
 	status: number | undefined;
 	body: string;
+	headers: http.IncomingHttpHeaders;
 }
 
 /** Raw HTTP request so we can forge an arbitrary Host header. */
@@ -30,7 +34,7 @@ function rawRequest(
 			(res) => {
 				let data = "";
 				res.on("data", (c) => { data += c; });
-				res.on("end", () => resolve({ status: res.statusCode, body: data }));
+				res.on("end", () => resolve({ status: res.statusCode, body: data, headers: res.headers }));
 			},
 		);
 		req.on("error", reject);
@@ -40,7 +44,10 @@ function rawRequest(
 }
 
 /** Start a server whose page body is just the nonce, so the test can read it. */
-async function start(timeoutMs = 2000) {
+async function start(
+	timeoutMs = 2000,
+	staticAssets?: Record<string, { filePath: string; contentType: string }>,
+) {
 	let url = "";
 	const promise = createReviewServer<{ action: unknown }>({
 		renderPage: (nonce) => nonce,
@@ -48,6 +55,7 @@ async function start(timeoutMs = 2000) {
 		onTimeout: () => ({ action: "TIMEOUT" }),
 		timeoutMs,
 		onUrl: (u) => { url = u; },
+		staticAssets,
 	});
 	await vi.waitFor(() => { if (!url) throw new Error("no url yet"); });
 	const port = Number(new URL(url).port);
@@ -55,6 +63,12 @@ async function start(timeoutMs = 2000) {
 }
 
 describe("createReviewServer", () => {
+	it("keeps Mermaid on the local review origin", () => {
+		const source = readFileSync(join(import.meta.dirname, "../extensions/miniplan/index.ts"), "utf8");
+		expect(source).toContain('require.resolve("mermaid/dist/mermaid.min.js")');
+		expect(source).not.toMatch(/https?:\/\/[^"']*mermaid/i);
+	});
+
 	it("gates Host, gates nonce, accepts a valid decision, and dedups duplicates", async () => {
 		const { port, promise } = await start();
 
@@ -97,6 +111,35 @@ describe("createReviewServer", () => {
 
 		// The promise resolves with the parsed decision once the server closes.
 		await expect(promise).resolves.toEqual({ action: "approve" });
+	});
+
+	it("serves only declared local assets and applies a restrictive page CSP", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "pi-review-server-"));
+		const filePath = join(dir, "asset.js");
+		writeFileSync(filePath, "globalThis.localAsset = true;", "utf8");
+		try {
+			const { port, promise } = await start(2000, {
+				"/assets/local.js": { filePath, contentType: "text/javascript; charset=utf-8" },
+			});
+			const page = await rawRequest(port, {});
+			expect(page.headers["content-security-policy"]).toContain("default-src 'none'");
+			expect(page.headers["content-security-policy"]).toContain("connect-src 'self'");
+
+			const asset = await rawRequest(port, { path: "/assets/local.js" });
+			expect(asset.status).toBe(200);
+			expect(asset.body).toBe("globalThis.localAsset = true;");
+			expect(asset.headers["x-content-type-options"]).toBe("nosniff");
+			expect((await rawRequest(port, { path: "/assets/unknown.js" })).status).toBe(404);
+
+			await rawRequest(port, {
+				method: "POST",
+				path: "/decision",
+				body: JSON.stringify({ nonce: page.body, action: "done" }),
+			});
+			await expect(promise).resolves.toEqual({ action: "done" });
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
 	});
 
 	it("resolves via onTimeout when no decision is made", async () => {

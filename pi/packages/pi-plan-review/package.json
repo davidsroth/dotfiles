@@ -28,6 +28,9 @@
     "test": "vitest --run",
     "typecheck": "tsc --noEmit"
   },
+  "dependencies": {
+    "mermaid": "11.16.0"
+  },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*"
   },

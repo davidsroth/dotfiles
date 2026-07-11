@@ -10,6 +10,7 @@
  */
 
 import { readFileSync, statSync } from "node:fs";
+import { createRequire } from "node:module";
 import { extname, resolve } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { escapeHtml, scriptJson } from "../_review/html";
@@ -306,7 +307,14 @@ export function parseReviewDecision(data: Record<string, unknown>): ReviewResult
 
 // ── Page rendering ───────────────────────────────────────────────────────
 
-const MERMAID_CDN_URL = "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+const require = createRequire(import.meta.url);
+const MERMAID_ASSET_URL = "/assets/mermaid.min.js";
+const REVIEW_STATIC_ASSETS = {
+	[MERMAID_ASSET_URL]: {
+		filePath: require.resolve("mermaid/dist/mermaid.min.js"),
+		contentType: "text/javascript; charset=utf-8",
+	},
+} as const;
 
 function mermaidHex(value: string, fallback: string): string {
 	const raw = value.trim();
@@ -340,13 +348,14 @@ function buildMermaidThemeVariables(palette: Palette): Record<string, string> {
 
 function buildMermaidScript(body: string, palette: Palette): string {
 	if (!body.includes('class="mermaid"')) return "";
-	const mermaidUrl = scriptJson(MERMAID_CDN_URL);
 	const themeVariables = scriptJson(buildMermaidThemeVariables(palette));
-	return `<script type="module">
+	return `<script src="${MERMAID_ASSET_URL}"></script>
+<script type="module">
 const diagrams = Array.from(document.querySelectorAll('.mermaid-diagram .mermaid'));
 if (diagrams.length) {
   try {
-    const { default: mermaid } = await import(${mermaidUrl});
+    const mermaid = globalThis.mermaid;
+    if (!mermaid) throw new Error('Local Mermaid bundle did not load');
     mermaid.initialize({
       startOnLoad: false,
       securityLevel: 'strict',
@@ -838,6 +847,7 @@ export default function plan(pi: ExtensionAPI): void {
 
 		void createReviewServer<ReviewResult>({
 			renderPage: (nonce) => buildPage(found.text, LAST_REPLY_OPTIONS, palette, nonce),
+			staticAssets: REVIEW_STATIC_ASSETS,
 			parseDecision: parseReviewDecision,
 			onTimeout: () => ({ action: LAST_REPLY_OPTIONS.defaultAction, approved: false, feedback: LAST_REPLY_OPTIONS.timeoutFeedback }),
 			onUrl: (url) => {
@@ -933,6 +943,7 @@ export default function plan(pi: ExtensionAPI): void {
 			try {
 				result = await createReviewServer<ReviewResult>({
 					renderPage: (nonce) => buildPage(content, { ...PLAN_REVIEW_OPTIONS, sourceLabel: inputPath }, palette, nonce),
+					staticAssets: REVIEW_STATIC_ASSETS,
 					parseDecision: parseReviewDecision,
 					// Timeout = no decision → route to the feedback path (NOT approve).
 					onTimeout: () => ({ action: "send-feedback", approved: false, feedback: PLAN_REVIEW_OPTIONS.timeoutFeedback }),

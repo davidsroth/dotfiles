@@ -17,11 +17,18 @@
  */
 
 import { randomBytes } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { focusApp, getFrontmostAppName, openBrowser } from "./os";
 
 const DEFAULT_TIMEOUT_MS = 30 * 60 * 1000;
 const MAX_BODY_BYTES = 1_000_000;
+
+export interface StaticAsset {
+	/** Absolute path to a reviewed, local file. */
+	filePath: string;
+	contentType: string;
+}
 
 export interface ReviewServerSpec<T> {
 	/** Build the full HTML page. The nonce must be embedded for `/decision`. */
@@ -37,9 +44,18 @@ export interface ReviewServerSpec<T> {
 	timeoutMs?: number;
 	/** Called once with the bound URL (best-effort; e.g. to notify the TUI). */
 	onUrl?: (url: string) => void;
+	/** Exact URL paths mapped to reviewed files on the local filesystem. */
+	staticAssets?: Readonly<Record<string, StaticAsset>>;
 }
 
 const JSON_HEADERS = { "Content-Type": "application/json" } as const;
+const PAGE_HEADERS = {
+	"Content-Type": "text/html; charset=utf-8",
+	"Cache-Control": "no-store",
+	"Content-Security-Policy": "default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+	"Referrer-Policy": "no-referrer",
+	"X-Content-Type-Options": "nosniff",
+} as const;
 
 export function createReviewServer<T>(spec: ReviewServerSpec<T>): Promise<T> {
 	return new Promise<T>((resolve, reject) => {
@@ -63,6 +79,23 @@ export function createReviewServer<T>(spec: ReviewServerSpec<T>): Promise<T> {
 			// DNS-rebinding guard: only serve our own loopback origin.
 			if (!hostAllowed(req.headers.host)) { res.writeHead(403); res.end(); return; }
 			if (req.method === "OPTIONS") { res.writeHead(403); res.end(); return; }
+
+			if (req.method === "GET" && req.url && spec.staticAssets?.[req.url]) {
+				const asset = spec.staticAssets[req.url];
+				try {
+					const content = readFileSync(asset.filePath);
+					res.writeHead(200, {
+						"Content-Type": asset.contentType,
+						"Cache-Control": "no-store",
+						"X-Content-Type-Options": "nosniff",
+					});
+					res.end(content);
+				} catch {
+					res.writeHead(404);
+					res.end();
+				}
+				return;
+			}
 
 			if (req.method === "POST" && req.url === "/decision") {
 				let body = "";
@@ -107,7 +140,12 @@ export function createReviewServer<T>(spec: ReviewServerSpec<T>): Promise<T> {
 				return;
 			}
 
-			res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
+			if (req.method !== "GET" || req.url !== "/") {
+				res.writeHead(404);
+				res.end();
+				return;
+			}
+			res.writeHead(200, PAGE_HEADERS);
 			res.end(spec.renderPage(nonce));
 		});
 
