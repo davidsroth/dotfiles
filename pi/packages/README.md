@@ -19,7 +19,10 @@ It is its own git repo and was never wired into the Pi config, so it now lives
 at `~/src/rpiv-mono` instead of nested untracked inside dotfiles.
 
 These packages are loaded by Pi via relative paths declared in the tracked
-`pi/.pi/agent/settings.base.json`. On install, `install.sh` (or `just pi-settings`)
+`pi/.pi/agent/settings.base.json`, which is the canonical package inventory.
+`scripts/pi-packages.sh` derives installation, verification, typechecking, and
+testing from that list and rejects unconfigured package directories or missing
+lockfiles. On install, `install.sh` (or `just pi-settings`)
 merges that base with any per-machine `settings.local.json` to generate the live,
 gitignored `pi/.pi/agent/settings.json`. Edit the package list in
 `settings.base.json`, not the generated `settings.json`.
@@ -36,6 +39,8 @@ gitignored `pi/.pi/agent/settings.json`. Edit the package list in
 - **Do not vendor install artifacts** such as `node_modules/`, `dist/`, `build/`, or caches
 - Keep upstream provenance in each package's `VENDORED_FROM.md` when available
 - Prefer small, explicit commits for local modifications to vendored packages
+- Run `just pi-install` after dependency changes, `just pi-check` for all
+  typechecks, and `just pi-test` for every configured package test suite
 
 A local `.gitignore` in this directory excludes common install/build artifacts.
 

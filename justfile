@@ -33,32 +33,24 @@ pi-settings:
 
 alias pis := pi-settings
 
-# Typecheck the hand-written pi extensions (pi/.pi/agent/extensions) against the
-# installed pi SDK. Builds a gitignored node_modules symlink farm, then `tsc --noEmit`.
+# Verify and typecheck the hand-written extensions plus every configured local Pi package.
 pi-check:
-  bash {{justfile_directory()}}/scripts/pi-typecheck.sh
+  bash {{justfile_directory()}}/scripts/pi-packages.sh typecheck
+  bash {{justfile_directory()}}/scripts/pi-packages.sh load
 
 alias pic := pi-check
 
-# Run the vitest suites: hand-written extension tests (extensions/_tests)
-# plus the vendored pi packages that ship tests.
+# Run tests for the hand-written extensions and every configured local Pi package.
 pi-test:
-  #!/usr/bin/env bash
-  set -euo pipefail
-  EXT="{{justfile_directory()}}/pi/.pi/agent/extensions"
-  if [[ ! -d "$EXT/node_modules/vitest" ]]; then
-    (cd "$EXT" && npm install --silent --no-audit --no-fund)
-  fi
-  # npm install prunes the SDK symlink farm; restore it for runtime resolution.
-  bash "{{justfile_directory()}}/scripts/pi-typecheck.sh" --links-only
-  (cd "$EXT" && npx vitest --run)
-  (cd "{{justfile_directory()}}/pi/packages/pi-plan-review" && npm test)
-  (cd "{{justfile_directory()}}/pi/packages/pi-subagents" && npm test)
-  (cd "{{justfile_directory()}}/pi/packages/pi-intercom" && npm test)
-  (cd "{{justfile_directory()}}/pi/packages/pi-intercom-tailnet" && npm test)
-  (cd "{{justfile_directory()}}/pi/packages/pi-btw" && npm test)
-  (cd "{{justfile_directory()}}/pi/packages/pi-memory" && npm test)
-  (cd "{{justfile_directory()}}/pi/packages/pi-qna" && npm test)
+  bash {{justfile_directory()}}/scripts/pi-packages.sh test
+
+# Reconcile locked development dependencies for all Pi packages.
+pi-install:
+  bash {{justfile_directory()}}/scripts/pi-packages.sh install-dev
+
+# Verify settings.base.json, package directories, manifests, and lockfiles agree.
+pi-verify:
+  bash {{justfile_directory()}}/scripts/pi-packages.sh verify
 
 alias pit := pi-test
 

@@ -1433,55 +1433,24 @@ post_install_setup() {
   setup_git_hooks
 }
 
-# Install npm dependencies for pi extension packages under dotfiles/pi/packages.
-# Pi loads these via relative paths from ~/.pi/agent/settings.json; missing
-# node_modules cause extension load failures (e.g. "Cannot find module 'croner'").
+# Reconcile locked production dependencies for every local package configured
+# in settings.base.json. The package runner is the single inventory/policy owner.
 install_pi_package_deps() {
-  local pkg_root="$DOTFILES_DIR/pi/packages"
-  if [[ ! -d "$pkg_root" ]]; then
-    error "Required Pi packages directory is missing: $pkg_root"
+  local runner="$DOTFILES_DIR/scripts/pi-packages.sh"
+  if [[ ! -x "$runner" ]]; then
+    error "Required Pi package runner is missing or not executable: $runner"
     return 1
   fi
-  if ! check_command npm || ! check_command node; then
-    error "npm and node are required to install Pi runtime dependencies"
+  if ! check_command npm || ! check_command node || ! check_command python3; then
+    error "node, npm, and python3 are required to install Pi runtime dependencies"
     return 1
   fi
-
-  local pkg name lock_rel found=false
-  for pkg in "$pkg_root"/*/; do
-    [[ -f "$pkg/package.json" ]] || continue
-    # Only production dependencies are needed by Pi at runtime. Reconcile them
-    # on every run so a stale node_modules cannot hide manifest changes.
-    local dependency_status=0
-    node -e 'const p=require(process.argv[1]); process.exit(p.dependencies && Object.keys(p.dependencies).length ? 0 : 2)' \
-      "$pkg/package.json" || dependency_status=$?
-    if [[ $dependency_status -eq 2 ]]; then
-      continue
-    elif [[ $dependency_status -ne 0 ]]; then
-      error "Could not read runtime dependencies from $pkg/package.json"
-      return 1
-    fi
-    found=true
-    name="$(basename "$pkg")"
-    lock_rel="${pkg#"$DOTFILES_DIR"/}package-lock.json"
-    info "Reconciling deps for Pi package: $name"
-    if git -C "$DOTFILES_DIR" ls-files --error-unmatch -- "$lock_rel" >/dev/null 2>&1; then
-      if ! (cd "$pkg" && npm ci --silent --no-audit --no-fund); then
-        error "npm ci failed for required Pi package $name"
-        return 1
-      fi
-    else
-      if ! (cd "$pkg" && npm install --package-lock=false --silent --no-audit --no-fund); then
-        error "npm install failed for required Pi package $name"
-        return 1
-      fi
-    fi
-    success "Pi package $name deps reconciled"
-  done
-
-  if [[ "$found" != "true" ]]; then
-    warning "No Pi packages declare runtime dependencies"
+  info "Reconciling locked Pi runtime dependencies..."
+  if ! "$runner" install-runtime; then
+    error "Locked Pi runtime dependency installation failed"
+    return 1
   fi
+  success "Pi runtime dependencies reconciled"
 }
 # Link shared agent skills to AI coding assistants
 # Creates symlinks from ~/.gemini/skills, ~/.cursor/skills, etc. to dotfiles/.agent/skills

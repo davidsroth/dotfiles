@@ -307,45 +307,21 @@ done
             self.assertTrue(cache_log.exists())
             self.assertIn("installed and font cache validated", result.stdout)
 
-    def test_pi_runtime_dependencies_reconcile_with_lockfile_policy_every_run(self):
+    def test_pi_runtime_dependencies_delegate_to_package_runner(self):
         with tempfile.TemporaryDirectory() as tempdir:
             repo = Path(tempdir) / "repo"
-            packages = repo / "pi" / "packages"
-            tracked = packages / "tracked"
-            unlocked = packages / "unlocked"
-            tracked.mkdir(parents=True)
-            unlocked.mkdir()
-            manifest = '{"dependencies":{"example":"1.0.0"}}\n'
-            (tracked / "package.json").write_text(manifest)
-            (unlocked / "package.json").write_text(manifest)
-            (tracked / "package-lock.json").write_text("{}\n")
-            (unlocked / "package-lock.json").write_text("{}\n")
-            subprocess.run(["git", "init", "-q", repo], check=True)
-            subprocess.run(
-                ["git", "-C", repo, "add", "pi/packages/tracked/package-lock.json"],
-                check=True,
-            )
-            bin_dir = Path(tempdir) / "bin"
-            bin_dir.mkdir()
-            npm_log = Path(tempdir) / "npm.log"
-            self.write_executable(bin_dir / "npm", 'printf "%s|%s\\n" "$PWD" "$*" >> "$NPM_LOG"\n')
+            runner = repo / "scripts" / "pi-packages.sh"
+            runner.parent.mkdir(parents=True)
+            call_log = Path(tempdir) / "runner.log"
+            self.write_executable(runner, 'printf "%s\\n" "$*" >> "$RUNNER_LOG"\n')
+
             result = self.run_bash(
                 "install_pi_package_deps; install_pi_package_deps",
-                env={
-                    "DOTFILES_DIR": repo,
-                    "NPM_LOG": npm_log,
-                    "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
-                },
+                env={"DOTFILES_DIR": repo, "RUNNER_LOG": call_log},
             )
+
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            calls = npm_log.read_text().splitlines()
-            self.assertEqual(len(calls), 4)
-            tracked_calls = [line for line in calls if "/tracked|" in line]
-            unlocked_calls = [line for line in calls if "/unlocked|" in line]
-            self.assertEqual(len(tracked_calls), 2)
-            self.assertTrue(all("|ci " in line for line in tracked_calls))
-            self.assertEqual(len(unlocked_calls), 2)
-            self.assertTrue(all("install --package-lock=false" in line for line in unlocked_calls))
+            self.assertEqual(call_log.read_text().splitlines(), ["install-runtime", "install-runtime"])
 
     def test_pi_memory_setup_restricts_private_runtime_paths(self):
         with tempfile.TemporaryDirectory() as tempdir:
@@ -381,21 +357,14 @@ done
     def test_required_pi_failures_are_not_suppressed(self):
         with tempfile.TemporaryDirectory() as tempdir:
             repo = Path(tempdir) / "repo"
-            package = repo / "pi" / "packages" / "broken"
-            package.mkdir(parents=True)
-            (package / "package.json").write_text('{"dependencies":{"example":"1"}}\n')
-            bin_dir = Path(tempdir) / "bin"
-            bin_dir.mkdir()
-            self.write_executable(bin_dir / "npm", "exit 23\n")
+            runner = repo / "scripts" / "pi-packages.sh"
+            runner.parent.mkdir(parents=True)
+            self.write_executable(runner, "exit 23\n")
             npm_failure = self.run_bash(
-                "install_pi_package_deps",
-                env={
-                    "DOTFILES_DIR": repo,
-                    "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
-                },
+                "install_pi_package_deps", env={"DOTFILES_DIR": repo}
             )
             self.assertNotEqual(npm_failure.returncode, 0)
-            self.assertIn("failed for required Pi package", npm_failure.stderr)
+            self.assertIn("Locked Pi runtime dependency installation failed", npm_failure.stderr)
 
             for function, expected in (
                 ("setup_pi_settings", "settings generator is missing"),

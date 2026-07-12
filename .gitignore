@@ -84,9 +84,6 @@ core/.config/gh-dash/config.yml
 # Symlink to shared .agent/skills (created by install.sh)
 pi/.pi/agent/skills
 
-# Extensions dev deps (vitest) — installed by `just pi-test` / pi-check
-pi/.pi/agent/extensions/package-lock.json
-
 # Systemd enable symlinks (absolute, machine-specific)
 core/.config/systemd/user/default.target.wants/
 
