@@ -310,9 +310,10 @@ class IntercomBroker {
       }
 
       case "unregister": {
-        this.sessions.delete(currentId);
+        const registeredId = currentId as string;
+        this.sessions.delete(registeredId);
         setId(null);
-        this.broadcast({ type: "session_left", sessionId: currentId }, currentId);
+        this.broadcast({ type: "session_left", sessionId: registeredId }, registeredId);
         // The client always `socket.end()`s right after sending `unregister`
         // and never reuses this socket, so destroy it now to release the FD
         // immediately instead of waiting for the end/close roundtrip.
@@ -359,7 +360,7 @@ class IntercomBroker {
             });
             break;
           }
-          const fromSession = this.sessions.get(currentId);
+          const fromSession = this.sessions.get(currentId as string);
           if (!fromSession) {
             writeMessage(socket, {
               type: "delivery_failed",
@@ -442,7 +443,7 @@ class IntercomBroker {
       }
 
       case "presence": {
-        const session = this.sessions.get(currentId);
+        const session = this.sessions.get(currentId as string);
         if (session) {
           if (clientMessage.name !== undefined) {
             if (typeof clientMessage.name !== "string") {
@@ -463,7 +464,7 @@ class IntercomBroker {
             session.info.model = clientMessage.model;
           }
           session.info.lastActivity = Date.now();
-          this.broadcast({ type: "presence_update", session: session.info }, currentId);
+          this.broadcast({ type: "presence_update", session: session.info }, currentId as string);
         }
         break;
       }

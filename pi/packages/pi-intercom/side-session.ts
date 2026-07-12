@@ -6,8 +6,8 @@ import {
   type AgentSession,
   type ExtensionContext,
   type ResourceLoader,
-} from "@mariozechner/pi-coding-agent";
-import type { AssistantMessage, Message as AiMessage } from "@mariozechner/pi-ai";
+} from "@earendil-works/pi-coding-agent";
+import type { AssistantMessage, Message as AiMessage } from "@earendil-works/pi-ai";
 
 /**
  * Answers an intercom "aside" question out of band, without disturbing the

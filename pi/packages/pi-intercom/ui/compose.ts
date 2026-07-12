@@ -1,5 +1,5 @@
-import type { Component, TUI } from "@mariozechner/pi-tui";
-import type { KeybindingsManager, Theme } from "@mariozechner/pi-coding-agent";
+import type { Component, TUI } from "@earendil-works/pi-tui";
+import type { KeybindingsManager, Theme } from "@earendil-works/pi-coding-agent";
 import type { IntercomClient } from "../broker/client.js";
 import type { SessionInfo } from "../types.js";
 import { framedOverlay, hintLine } from "./frame.js";

@@ -1,7 +1,7 @@
-import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { randomUUID } from "crypto";
 import { Type } from "typebox";
-import { Text } from "@mariozechner/pi-tui";
+import { Text, type KeyId } from "@earendil-works/pi-tui";
 import { readFileSync } from "fs";
 import { IntercomClient } from "./broker/client.ts";
 import { spawnBrokerIfNeeded } from "./broker/spawn.ts";
@@ -880,7 +880,7 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
       });
     }, getReconnectDelayMs());
   }
-  async function ensureConnected(reason: "startup" | "background" | "tool" | "overlay"): Promise<IntercomClient> {
+  async function ensureConnected(reason: "startup" | "background" | "tool" | "overlay" | "agent-picker"): Promise<IntercomClient> {
     if (!config.enabled) {
       throw new Error("Intercom disabled");
     }
@@ -899,7 +899,8 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
     if (reconnectPromise && reconnectPromiseGeneration === generationAtStart) {
       return reconnectPromise;
     }
-    const nextReconnectPromise = (async () => {
+    let nextReconnectPromise: Promise<IntercomClient>;
+    nextReconnectPromise = (async () => {
       const nextClient = new IntercomClient();
       client = nextClient;
       attachClientHandlers(nextClient);
@@ -926,7 +927,7 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
         }
         throw toError(error);
       } finally {
-        if (reconnectPromise === nextReconnectPromise) {
+        if (reconnectPromiseGeneration === generationAtStart) {
           reconnectPromise = null;
           reconnectPromiseGeneration = null;
         }
@@ -1415,9 +1416,9 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
           return {
             content: [{ type: "text", text: `**Reply from supervisor:**\n${replyText}${replyAttachments}` }],
             isError: false,
-            ...(structuredReply
-              ? { details: structuredReply.value !== undefined ? { structuredReply: structuredReply.value } : { structuredReplyParseError: structuredReply.error } }
-              : {}),
+            details: structuredReply
+              ? (structuredReply.value !== undefined ? { structuredReply: structuredReply.value } : { structuredReplyParseError: structuredReply.error })
+              : undefined,
           };
         } catch (error) {
           rejectReplyWaiter(questionId, toError(error));
@@ -1480,6 +1481,7 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
       return {
         content: [{ type: "text" as const, text: "No unresolved inbound asks." }],
         isError: false,
+        details: undefined,
       };
     }
     const now = Date.now();
@@ -1491,6 +1493,7 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
     return {
       content: [{ type: "text" as const, text: `**Pending asks:**\n${lines.join("\n")}` }],
       isError: false,
+      details: undefined,
     };
   }
 
@@ -1542,6 +1545,7 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
     return {
       content: [{ type: "text" as const, text: lines.join("\n") }],
       isError: false,
+      details: undefined,
     };
   }
 
@@ -1636,6 +1640,7 @@ Usage:
             return {
               content: [{ type: "text", text: `${currentSection}\n\n${otherSection}` }],
               isError: false,
+              details: undefined,
             };
           } catch (error) {
             return {
@@ -1675,6 +1680,7 @@ Usage:
                 return {
                   content: [{ type: "text", text: "Message cancelled by user" }],
                   isError: false,
+                  details: undefined,
                 };
               }
             }
@@ -1806,6 +1812,7 @@ Usage:
             return {
               content: [{ type: "text", text: `**${isAside ? "Aside reply" : "Reply"} from ${to}:**\n${replyText}${replyAttachments}` }],
               isError: false,
+              details: undefined,
             };
           } catch (error) {
             rejectReplyWaiter(questionId, toError(error));
@@ -2175,7 +2182,7 @@ Usage:
       handler: async (_args, ctx) => openAgentPickerOverlay(ctx),
     });
 
-    pi.registerShortcut(AGENT_PICKER_KEY, {
+    pi.registerShortcut(AGENT_PICKER_KEY as KeyId, {
       description: "Open running Pi sessions picker",
       handler: async (ctx) => openAgentPickerOverlay(ctx),
     });
