@@ -22,7 +22,8 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import { type Message, complete, type UserMessage } from "@earendil-works/pi-ai";
+import { type Message, type UserMessage } from "@earendil-works/pi-ai";
+import { complete } from "@earendil-works/pi-ai/compat";
 import { BorderedLoader, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
 	Editor,
@@ -741,6 +742,7 @@ export default function qna(pi: ExtensionAPI) {
 							},
 						],
 						isError: true,
+						details: undefined,
 					};
 				}
 				if (!ctx.hasUI) {
@@ -749,6 +751,7 @@ export default function qna(pi: ExtensionAPI) {
 							{ type: "text", text: "Cannot launch Q&A: not in interactive mode." },
 						],
 						isError: true,
+						details: undefined,
 					};
 				}
 
@@ -770,12 +773,14 @@ export default function qna(pi: ExtensionAPI) {
 									text: `User cancelled Q&A. ${result.typedCount}/${qs.length} answers were typed and stashed — they can resume with /qna --resume.`,
 								},
 							],
+							details: undefined,
 						};
 					}
 					return {
 						content: [
 							{ type: "text", text: "User cancelled Q&A without answering." },
 						],
+						details: undefined,
 					};
 				}
 
@@ -791,6 +796,7 @@ export default function qna(pi: ExtensionAPI) {
 							text: `User answered ${qs.length} question${qs.length === 1 ? "" : "s"}:\n\n${block}`,
 						},
 					],
+					details: undefined,
 				};
 			},
 		});
