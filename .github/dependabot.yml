@@ -1,0 +1,30 @@
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      timezone: America/Los_Angeles
+    groups:
+      github-actions:
+        patterns: ["*"]
+
+  - package-ecosystem: npm
+    directories:
+      - /pi/.pi/agent/extensions
+      - /pi/packages/pi-btw
+      - /pi/packages/pi-intercom
+      - /pi/packages/pi-intercom-tailnet
+      - /pi/packages/pi-memory
+      - /pi/packages/pi-plan-review
+      - /pi/packages/pi-qna
+      - /pi/packages/pi-subagents
+      - /pi/packages/pi-vim
+    schedule:
+      interval: weekly
+      day: monday
+      timezone: America/Los_Angeles
+    groups:
+      pi-packages:
+        patterns: ["*"]
