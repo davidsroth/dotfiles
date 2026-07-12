@@ -6,11 +6,19 @@
 # Later sources win per-key, so base/local override stale runtime values while
 # runtime-only keys (not present in base/local) are preserved across regens.
 #
-# Usage: gen-pi-settings.sh [--quiet]
+# Usage: gen-pi-settings.sh [--quiet] [--check]
 set -euo pipefail
 
 QUIET=0
-[[ "${1:-}" == "--quiet" ]] && QUIET=1
+CHECK=0
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --quiet) QUIET=1 ;;
+    --check) CHECK=1 ;;
+    *) printf 'Unknown option: %s\n' "$1" >&2; exit 2 ;;
+  esac
+  shift
+done
 log() { [[ "$QUIET" == 1 ]] || printf '%s\n' "$*"; }
 
 # Resolve repo root from this script's location (scripts/ is at repo root).
@@ -102,7 +110,29 @@ with open(destination, "w", encoding="utf-8") as handle:
 PY
 fi
 
+if [[ "$CHECK" == 1 ]]; then
+  if [[ ! -f "$DEST" ]]; then
+    log "Settings drift: $DEST does not exist."
+    exit 3
+  fi
+  if python3 - "$tmp" "$DEST" <<'PY'
+import json
+import sys
+with open(sys.argv[1], encoding="utf-8") as expected, open(sys.argv[2], encoding="utf-8") as actual:
+    raise SystemExit(0 if json.load(expected) == json.load(actual) else 3)
+PY
+  then
+    log "Settings are current."
+    exit 0
+  else
+    status=$?
+    [[ "$status" == 3 ]] && log "Settings drift: run just pi-settings."
+    exit "$status"
+  fi
+fi
+
 mv "$tmp" "$DEST"
+chmod 600 "$DEST"
 rm -f "$existing"
 trap - EXIT
 

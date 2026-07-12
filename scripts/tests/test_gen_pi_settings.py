@@ -38,13 +38,13 @@ class GenPiSettingsTest(unittest.TestCase):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
 
-    def run_generator(self, path=None):
+    def run_generator(self, path=None, *args):
         env = os.environ.copy()
         env["HOME"] = str(self.home)
         if path is not None:
             env["PATH"] = str(path)
         return subprocess.run(
-            ["/bin/bash", str(self.root / "scripts" / SCRIPT.name), "--quiet"],
+            ["/bin/bash", str(self.root / "scripts" / SCRIPT.name), "--quiet", *args],
             env=env,
             text=True,
             capture_output=True,
@@ -105,6 +105,23 @@ class GenPiSettingsTest(unittest.TestCase):
                 self.assertGreater(separator, 0, f"floating npm package: {spec}")
                 self.assertRegex(spec[separator + 1 :], r"^\d+\.\d+\.\d+$")
 
+    def test_check_mode_detects_drift_without_rewriting(self):
+        self.prepare_merge_inputs()
+        generated = self.run_generator()
+        self.assertEqual(generated.returncode, 0, generated.stderr)
+        before = self.destination.read_bytes()
+
+        current = self.run_generator(None, "--check")
+        self.assertEqual(current.returncode, 0, current.stderr)
+        self.assertEqual(self.destination.read_bytes(), before)
+
+        base = json.loads(self.base_path.read_text(encoding="utf-8"))
+        base["theme"] = "changed-after-generation"
+        self.write_json(self.base_path, base)
+        stale = self.run_generator(None, "--check")
+        self.assertEqual(stale.returncode, 3, stale.stderr)
+        self.assertEqual(self.destination.read_bytes(), before)
+
     def test_jq_merge_rewrites_packages_without_modifying_base(self):
         base = self.prepare_merge_inputs(symlink_destination=True)
 
@@ -121,6 +138,7 @@ class GenPiSettingsTest(unittest.TestCase):
         tool_bin.mkdir()
         tools = {
             "cat": shutil.which("cat"),
+            "chmod": shutil.which("chmod"),
             "dirname": shutil.which("dirname"),
             "mkdir": shutil.which("mkdir"),
             "mktemp": shutil.which("mktemp"),

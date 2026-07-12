@@ -20,61 +20,20 @@ INFO() { printf 'INFO: %s\n' "$*"; }
 # 1. SETTINGS DRIFT
 # ---------------------------------------------------------------------------
 check_settings_drift() {
-  local base="$REPO_ROOT/pi/.pi/agent/settings.base.json"
-  local local_overrides="$PI_AGENT/settings.local.json"
-  local live="$PI_AGENT/settings.json"
-
-  if ! command -v jq >/dev/null 2>&1; then
-    FAIL "SETTINGS DRIFT: jq not on PATH — cannot perform drift check"
+  local generator="$REPO_ROOT/scripts/gen-pi-settings.sh"
+  if [[ ! -x "$generator" ]]; then
+    FAIL "SETTINGS DRIFT: generator missing or not executable at $generator"
     return
   fi
-
-  if [[ ! -f "$live" ]]; then
-    FAIL "SETTINGS DRIFT: $live does not exist"
-    return
-  fi
-
-  if [[ ! -f "$base" ]]; then
-    FAIL "SETTINGS DRIFT: settings.base.json not found at $base"
-    return
-  fi
-
-  local tmp
-  tmp="$(mktemp)"
-
-  # Mirror gen-pi-settings.sh's merge and generated package-path rewrite.
-  local existing_src="$live"
-  local local_src
-  if [[ -f "$local_overrides" ]]; then
-    local_src="$local_overrides"
-  else
-    local_src=/dev/null
-  fi
-
-  jq -s --arg repo_root "$REPO_ROOT" --arg prefix '../../dotfiles/' '
-    ((.[0] // {}) * (.[1] // {}) * (.[2] // {}))
-    | if (.packages | type) == "array" then
-        .packages |= map(
-          if type == "string" and startswith($prefix)
-          then $repo_root + "/" + ltrimstr($prefix)
-          else .
-          end
-        )
-      else .
-      end
-  ' \
-    <(cat "$existing_src" 2>/dev/null || printf '{}') \
-    "$base" \
-    <(cat "$local_src" 2>/dev/null || printf '{}') \
-    > "$tmp"
-
-  if diff <(jq -S . "$tmp") <(jq -S . "$live") >/dev/null 2>&1; then
+  local status=0
+  "$generator" --quiet --check || status=$?
+  if [[ "$status" == 0 ]]; then
     PASS "SETTINGS DRIFT: settings.json matches merged base+local"
-  else
+  elif [[ "$status" == 3 ]]; then
     FAIL "SETTINGS DRIFT: settings.json is out of date — run: just pi-settings"
+  else
+    FAIL "SETTINGS DRIFT: generator check failed (exit $status)"
   fi
-
-  rm -f "$tmp"
 }
 
 # ---------------------------------------------------------------------------
@@ -227,8 +186,10 @@ check_runtime_state_locations() {
 check_toolchain() {
   if command -v jq >/dev/null 2>&1; then
     PASS "TOOLCHAIN: jq found at $(command -v jq)"
+  elif command -v python3 >/dev/null 2>&1; then
+    PASS "TOOLCHAIN: jq absent; supported python3 settings fallback is available"
   else
-    FAIL "TOOLCHAIN: jq not on PATH — gen-pi-settings will silently drop local overrides without it"
+    FAIL "TOOLCHAIN: neither jq nor python3 is available for settings generation"
   fi
 
   local npm_global_root pi_sdk_path
