@@ -90,7 +90,7 @@ fi
 # Picker command (use fzf-tmux only inside tmux)
 picker_cmd=()
 if [ -n "${TMUX:-}" ] && command -v fzf-tmux >/dev/null 2>&1; then
-  picker_cmd=(fzf-tmux -p 80%,80%)
+  picker_cmd=(fzf-tmux -p "80%,80%")
 elif command -v fzf >/dev/null 2>&1; then
   picker_cmd=(fzf)
 fi

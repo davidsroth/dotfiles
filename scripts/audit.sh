@@ -47,7 +47,7 @@ while IFS= read -r -d '' file; do
   case "$file:$first_line" in
     zsh/*:*|core/.config/shell/aliases.sh:*|core/.config/shell/functions.sh:*|*:*zsh*) shell=zsh ;;
     *.sh:*|*:*bash*) shell=bash ;;
-    *:'#!'/bin/sh|*:'#!'/usr/bin/sh) shell=sh ;;
+    *:'#!'/bin/sh|*:'#!'/usr/bin/sh) shell="sh" ;;
   esac
   [[ -n "$shell" ]] || continue
   if ! command -v "$shell" >/dev/null 2>&1; then
@@ -57,6 +57,23 @@ while IFS= read -r -d '' file; do
   checked=$((checked + 1))
   "$shell" -n "$file" || failure "$shell syntax: $file"
 done < <(git ls-files -z)
+
+if command -v shellcheck >/dev/null 2>&1; then
+  printf '%s\n' 'ShellCheck (tracked Bash files)'
+  bash_files=()
+  while IFS= read -r -d '' file; do
+    skip_path "$file" && continue
+    [[ -f "$file" ]] || continue
+    first_line="$(head -n 1 "$file" 2>/dev/null || true)"
+    [[ "$first_line" == *bash* ]] && bash_files+=("$file")
+  done < <(git ls-files -z)
+  if (( ${#bash_files[@]} > 0 )); then
+    checked=$((checked + ${#bash_files[@]}))
+    shellcheck -x "${bash_files[@]}" || failure "ShellCheck"
+  fi
+else
+  printf '%s\n' 'SKIP ShellCheck (shellcheck not installed)'
+fi
 
 printf '%s\n' 'JSON syntax (tracked files)'
 while IFS= read -r -d '' file; do
