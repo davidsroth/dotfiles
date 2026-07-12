@@ -12,9 +12,9 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "22"
           cache: npm
@@ -23,7 +23,7 @@ jobs:
             pi/packages/*/package-lock.json
 
       - name: Install just
-        uses: extractions/setup-just@v3
+        uses: extractions/setup-just@f8a3cce218d9f83db3a2ecd90e41ac3de6cdfd9b # v3
 
       - name: Install pi coding agent globally
         run: npm install -g @earendil-works/pi-coding-agent@0.80.6
@@ -42,7 +42,7 @@ jobs:
     runs-on: macos-15
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Install lightweight validators
         run: brew install just stow jq lua
@@ -66,13 +66,13 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Install lightweight validators
         run: sudo apt-get update && sudo apt-get install -y jq lua5.4 ruby stow zsh
 
       - name: Install just
-        uses: extractions/setup-just@v3
+        uses: extractions/setup-just@f8a3cce218d9f83db3a2ecd90e41ac3de6cdfd9b # v3
 
       - name: Run script and config tests
         run: just script-test
