@@ -5,10 +5,10 @@
  *
  * Selected events: agent_end (pi finished a turn, waiting for input)
  *
- * Banner layout (terminal-notifier):
- *   title    →  Pi · <project>
- *   subtitle →  <git-branch|session> · <tmux loc> · <response time>
- *   message  →  one-line preview of pi's last reply
+ * Privacy-preserving default banner: title "Pi", response duration, and
+ * "Ready for input". Set PI_NOTIFICATION_INCLUDE_CONTEXT=1 to include project,
+ * branch/session, and tmux location; set PI_NOTIFICATION_INCLUDE_PREVIEW=1 to
+ * include a one-line preview of the last reply. Keep both disabled on lock screens.
  *
  * Note: the duration is the response time for the just-finished prompt
  * (agent_start → agent_end), NOT how long the session has been running.
@@ -16,9 +16,8 @@
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-
-const { execSync, spawn } = require("child_process");
-const path = require("path");
+import { execSync, spawn } from "node:child_process";
+import { basename } from "node:path";
 
 // ── tmux context ──────────────────────────────────────────────────────────────
 function tmuxContext(): { session: string; window: string; pane: string; term: string } {
@@ -118,6 +117,23 @@ function percentEncode(s: string): string {
   return encodeURIComponent(s).replace(/[!'()*]/g, (c) => "%" + c.charCodeAt(0).toString(16).toUpperCase());
 }
 
+const envEnabled = (value: string | undefined): boolean => value === "1" || value === "true";
+
+export function buildNotificationCopy(
+  values: { project: string; branch: string; location: string; duration: string; assistantText: string },
+  env: NodeJS.ProcessEnv = process.env,
+): { title: string; subtitle: string; message: string } {
+  const includeContext = envEnabled(env.PI_NOTIFICATION_INCLUDE_CONTEXT);
+  const includePreview = envEnabled(env.PI_NOTIFICATION_INCLUDE_PREVIEW);
+  return {
+    title: includeContext ? `Pi · ${values.project}` : "Pi",
+    subtitle: includeContext
+      ? [values.branch, values.location, values.duration].filter(Boolean).join(" · ")
+      : values.duration,
+    message: includePreview ? (oneLine(values.assistantText) || "Ready for input") : "Ready for input",
+  };
+}
+
 // ── notification dispatch ─────────────────────────────────────────────────────
 function notify(title: string, subtitle: string, message: string, ctxInfo: { session: string; window: string; pane: string; term: string }): void {
   const { session, window, pane, term } = ctxInfo;
@@ -176,20 +192,21 @@ export default function (pi: ExtensionAPI) {
       const tmux = tmuxContext();
 
       const cwd: string = (ctx as any)?.cwd || process.cwd();
-      const project = path.basename(cwd) || "pi";
+      const project = basename(cwd) || "pi";
 
       const branch = gitBranch(cwd);
       const loc = `${tmux.session}:${tmux.window}.${tmux.pane}`;
       const duration = turnStartedAt ? fmtDuration(Date.now() - turnStartedAt) : "";
 
-      const subtitleParts = [branch || tmux.session, loc, duration].filter(Boolean);
+      const copy = buildNotificationCopy({
+        project,
+        branch: branch || tmux.session,
+        location: loc,
+        duration,
+        assistantText: lastAssistantText((event as any)?.messages),
+      });
 
-      const preview = oneLine(lastAssistantText((event as any)?.messages)) || "Ready for input";
-
-      const title = `Pi · ${project}`;
-      const subtitle = subtitleParts.join(" · ");
-
-      notify(title, subtitle, preview, tmux);
+      notify(copy.title, copy.subtitle, copy.message, tmux);
     } catch {
       // Last-resort: minimal notification so a failure here never breaks pi.
       try {
