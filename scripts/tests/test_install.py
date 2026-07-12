@@ -6,6 +6,7 @@ its real functions without changing the developer machine.
 
 import os
 from pathlib import Path
+import re
 import shlex
 import stat
 import subprocess
@@ -67,6 +68,16 @@ class InstallScriptTests(unittest.TestCase):
             "FiraCodeNerdFont.XXXXXX",
         ):
             self.assertIn(prefix, source)
+
+        self.assertNotIn("Homebrew/install/HEAD/install.sh", source)
+        self.assertNotIn("ahnopologetic/tlink/main/install.sh", source)
+        for constant in (
+            "HOMEBREW_INSTALL_COMMIT",
+            "NVM_INSTALL_COMMIT",
+            "TLINK_INSTALL_COMMIT",
+        ):
+            match = re.search(rf'{constant}="([0-9a-f]{{40}})"', source)
+            self.assertIsNotNone(match, f"{constant} must be a full Git commit")
 
     def test_current_neovim_release_assets_are_arch_specific(self):
         result = self.run_bash(

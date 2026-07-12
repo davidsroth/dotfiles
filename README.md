@@ -48,7 +48,6 @@ Environment variables:
 - `GITHUB_USER`: Your GitHub username (default: davidsroth)
 - `DOTFILES_DIR`: Installation directory (default: ~/dotfiles)
 - `DEFAULT_BRANCH`: Git branch to use (default: main)
-- `NVM_VERSION`: NVM installer version (default: v0.40.5)
 - `NODE_VERSION`: Node.js release installed through NVM (default: 22)
 - `PI_VERSION`: Pi coding agent version (default: 0.80.6)
 

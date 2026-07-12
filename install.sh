@@ -72,7 +72,10 @@ compute_total_steps() {
 # Timeouts and constants
 readonly XCODE_TIMEOUT=300 # 5 minutes
 readonly DEFAULT_BRANCH="${DEFAULT_BRANCH:-main}"
-readonly NVM_VERSION="${NVM_VERSION:-v0.40.5}"
+# Reviewed immutable commits for downloaded executable installers.
+readonly HOMEBREW_INSTALL_COMMIT="c7952e40b7957268f61643152f4db725379b292e"
+readonly NVM_INSTALL_COMMIT="1889911f0841e669de0be5bd02c737a3f1fd20fa"
+readonly TLINK_INSTALL_COMMIT="9b80997fee802491bd86f1d3b0a85ed5e1b3f4d9"
 readonly NODE_VERSION="${NODE_VERSION:-22}"
 readonly PI_VERSION="${PI_VERSION:-0.80.6}"
 
@@ -110,7 +113,6 @@ Environment Variables:
     GITHUB_USER     Your GitHub username (default: davidsroth)
     DOTFILES_DIR    Installation directory (default: ~/dotfiles)
     DEFAULT_BRANCH  Git branch to use (default: main)
-    NVM_VERSION     NVM installer version (default: v0.40.5)
     NODE_VERSION    Node.js release installed through NVM (default: 22)
     PI_VERSION      Pi coding agent version (default: 0.80.6)
     NVIM_METHOD     Neovim method: auto|appimage|tarball|backports (default: auto→appimage on x86_64)
@@ -702,10 +704,10 @@ install_homebrew() {
     local BREW_INSTALL_SCRIPT
     BREW_INSTALL_SCRIPT="$(mktemp "${TMPDIR:-/tmp}/homebrew-install.XXXXXX")" || return 1
 
-    # NOTE: SHA not pinned (acceptable for a dotfiles installer; the script is
-    # downloaded to a temp file first, never piped directly into a shell).
+    # Fetch the reviewed installer by immutable Git commit, then execute the
+    # complete downloaded file (never a streaming pipe).
     # Download the install script
-    if curl -fsSL "https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh" -o "$BREW_INSTALL_SCRIPT"; then
+    if curl -fsSL "https://raw.githubusercontent.com/Homebrew/install/${HOMEBREW_INSTALL_COMMIT}/install.sh" -o "$BREW_INSTALL_SCRIPT"; then
       # Review script if verbose
       if [[ "$VERBOSE" == "true" ]]; then
         info "Homebrew install script downloaded to: $BREW_INSTALL_SCRIPT"
@@ -987,10 +989,10 @@ install_additional_tools() {
     local NVM_INSTALL_SCRIPT
     NVM_INSTALL_SCRIPT="$(mktemp "${TMPDIR:-/tmp}/nvm-install.XXXXXX")" || return 1
 
-    # NOTE: SHA not pinned (acceptable for a dotfiles installer; the script is
-    # downloaded to a temp file first, never piped directly into a shell).
+    # Fetch the reviewed installer by immutable Git commit, then execute the
+    # complete downloaded file (never a streaming pipe).
     # Download the install script
-    if curl -fsSL "https://raw.githubusercontent.com/nvm-sh/nvm/${NVM_VERSION}/install.sh" -o "$NVM_INSTALL_SCRIPT"; then
+    if curl -fsSL "https://raw.githubusercontent.com/nvm-sh/nvm/${NVM_INSTALL_COMMIT}/install.sh" -o "$NVM_INSTALL_SCRIPT"; then
       # Make it executable and run it
       chmod +x "$NVM_INSTALL_SCRIPT"
       if bash "$NVM_INSTALL_SCRIPT"; then
@@ -1097,7 +1099,7 @@ install_additional_tools() {
     # lets us inspect/fail cleanly instead of executing a stream we never see.
     local tlink_installer
     tlink_installer="$(mktemp "${TMPDIR:-/tmp}/tlink-install.XXXXXX")" || return 1
-    if curl -fsSL https://raw.githubusercontent.com/ahnopologetic/tlink/main/install.sh -o "$tlink_installer" && sh "$tlink_installer"; then
+    if curl -fsSL "https://raw.githubusercontent.com/ahnopologetic/tlink/${TLINK_INSTALL_COMMIT}/install.sh" -o "$tlink_installer" && sh "$tlink_installer"; then
       rm -f "$tlink_installer"
       hash -r 2>/dev/null || true
       # The upstream installer may append a PATH line to ~/.zshrc; our PATH is
