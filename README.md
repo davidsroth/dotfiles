@@ -50,6 +50,15 @@ Environment variables:
 - `DEFAULT_BRANCH`: Git branch to use (default: main)
 - `NODE_VERSION`: Node.js release installed through NVM (default: 22)
 - `PI_VERSION`: Pi coding agent version (default: 0.80.6)
+- `NVIM_VERSION_TAG`: exact Linux Neovim release (default: v0.12.4)
+- `NVIM_SHA256`: required checksum override when selecting a different Neovim release
+
+Remote executable policy: Homebrew, NVM, and tlink installer scripts are fetched
+from reviewed immutable Git commits rather than floating branches. Neovim and
+FiraCode Nerd Font release archives are pinned and SHA-256 verified. Updating
+these inputs requires updating the corresponding constants and tests in
+`install.sh`; this deliberately trades automatic freshness for reviewable
+bootstrap behavior.
 
 The installer will:
 
