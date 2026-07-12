@@ -26,7 +26,7 @@ import { loadTailnetConfig, isPeerAllowed, type TailnetConfig } from "../config.
 import { getTailnetStatus, whoisHost, type TailnetStatus } from "../tailscale.js";
 import { createBrokerBridge, type BrokerBridge, type VirtualSessionHandle } from "./broker-bridge.js";
 import { dialPeer, acceptPeer, type PeerLink } from "./peer-link.js";
-import type { IntercomMessage, SessionInfo, TailnetDM } from "../types.js";
+import type { IntercomMessage, SessionInfo, TailnetDM, TailnetFrame } from "../types.js";
 
 const INTERCOM_DIR = join(homedir(), ".pi/agent/intercom");
 const RELAY_PID_PATH = join(INTERCOM_DIR, "tailnet-relay.pid");
@@ -304,11 +304,11 @@ class TailnetRelay {
     });
   }
 
-  private broadcastToPeers(frame: { type: string } & Record<string, unknown>): void {
+  private broadcastToPeers(frame: TailnetFrame): void {
     for (const peer of this.peers.values()) {
       if (peer.host === this.selfHost) continue;
       const link = peer.outbound ?? peer.inbound;
-      if (link) link.send(frame as import("../types.js").TailnetFrame);
+      if (link) link.send(frame);
     }
   }
 
@@ -557,7 +557,7 @@ class TailnetRelay {
       // peer state we still hold so cross-host targets don't go stale.
       this.rebuildVirtualSessions();
       // Re-advertise local sessions to all connected peers.
-      this.broadcastToPeers({ type: "tailnet_sessions", sessions: this.getLocalSessionsForBroadcast() } as import("../types.js").TailnetFrame);
+      this.broadcastToPeers({ type: "tailnet_sessions", sessions: this.getLocalSessionsForBroadcast() });
       console.error("[tailnet-relay] reconnected to broker");
     } catch (err) {
       if (!this.shuttingDown) {

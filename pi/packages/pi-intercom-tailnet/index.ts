@@ -8,7 +8,7 @@
 // Phase 1 will add: list_grants / revoke_grant, channel verbs
 // (post/read/tail), and an interactive approval flow.
 
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { loadTailnetConfig } from "./config.ts";
 import { spawnRelayIfNeeded, isRelayRunning } from "./relay/spawn.ts";
 
