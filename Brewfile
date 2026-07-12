@@ -26,6 +26,7 @@ brew "fzf-tab"         # fzf-powered tab-completion menu (sourced in .zshrc)
 # Development Tools
 brew "git"
 brew "git-lfs"
+brew "gitleaks"       # Current-tree secret scanning (CI + pre-push)
 brew "gnupg"           # GPG for commit signing
 brew "lazygit"
 brew "gh"              # GitHub CLI

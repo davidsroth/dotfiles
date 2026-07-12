@@ -85,6 +85,10 @@ alias pid := pi-doctor
 script-test:
   python3 -m unittest discover -s {{justfile_directory()}}/scripts/tests -v
 
+# Scan tracked and untracked non-ignored files for credentials.
+secret-scan:
+  bash {{justfile_directory()}}/scripts/secret-scan.sh
+
 # Backward-compatible name for the original session-picker-only test recipe.
 alias picker-test := script-test
 

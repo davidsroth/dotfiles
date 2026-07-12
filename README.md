@@ -291,7 +291,8 @@ zsh -l -c 'echo PATH=$PATH | cut -c1-200'
 ## Maintenance
 
 - Health check: run `just doctor` to print OS, tool versions, and a Stow dry-run preview.
-- Audit: run `just audit` for deterministic offline syntax and configuration checks over Git-tracked files. Real shell, JSON, Lua, TOML, and YAML parse errors fail the recipe; unavailable optional parsers are reported as skipped.
+- Audit: run `just audit` for deterministic offline syntax and configuration checks over Git-tracked files. Real shell, ShellCheck, JSON, Lua, TOML, and YAML errors fail the recipe; unavailable optional parsers are reported as skipped.
+- Secrets: run `just secret-scan` to scan tracked and untracked non-ignored files with Gitleaks. Synthetic credential fixtures are explicitly allowlisted; CI and the pre-push hook enforce the scan.
 - Links: run `just audit-links` for the separate, network-dependent Markdown link report. Link/network failures are intentionally non-gating.
 - Script tests: run `just script-test` (`just picker-test` remains an alias).
 - Dry-run links: `just doctor` (or `stow -n -v core zsh git-config`) to preview symlinks without changing files.

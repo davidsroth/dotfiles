@@ -1,0 +1,9 @@
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Synthetic credential fixtures used to test secret redaction"
+paths = [
+  '''pi/\.pi/agent/extensions/_tests/secret-guard\.test\.ts$''',
+  '''pi/packages/pi-intercom/presence-name\.test\.ts$''',
+]

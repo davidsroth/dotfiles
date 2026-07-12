@@ -1,5 +1,12 @@
 #!/bin/sh
-# Tracked hook (via core.hooksPath=.githooks). Keep git-lfs working.
+# Tracked hook (via core.hooksPath=.githooks). Scan current files, then keep
+# git-lfs's own pre-push validation working.
+repo_root=$(git rev-parse --show-toplevel 2>/dev/null) || exit 1
+if command -v gitleaks >/dev/null 2>&1; then
+  "$repo_root/scripts/secret-scan.sh" || exit 1
+else
+  printf '%s\n' 'warning: gitleaks not installed; CI will enforce the secret scan' >&2
+fi
 if command -v git-lfs >/dev/null 2>&1; then
   exec git lfs pre-push "$@"
 fi
