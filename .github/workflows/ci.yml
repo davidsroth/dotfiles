@@ -37,6 +37,30 @@ jobs:
       - name: Test all configured Pi packages
         run: just pi-test
 
+  macos-check:
+    name: Validate primary macOS platform
+    runs-on: macos-15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install lightweight validators
+        run: brew install just stow jq lua
+
+      - name: Run script and config tests
+        run: just script-test
+
+      - name: Audit tracked configuration
+        run: just audit
+
+      - name: Verify generated keyboard layout
+        run: |
+          python3 macos/keyboard-layouts/gen-us-nooption.py
+          git diff --exit-code -- macos/keyboard-layouts/US-NoOption.keylayout
+
+      - name: Parse Brewfile
+        run: brew bundle list --file Brewfile >/dev/null
+
   config-check:
     name: Validate scripts and tracked configs
     runs-on: ubuntu-latest
