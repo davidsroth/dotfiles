@@ -99,6 +99,21 @@ class InstallScriptTests(unittest.TestCase):
             ],
         )
 
+    def test_pinned_neovim_assets_have_reviewed_checksums(self):
+        result = self.run_bash(
+            """
+            nvim_release_sha256 tarball arm64 v0.12.4
+            nvim_release_sha256 tarball x86_64 v0.12.4
+            nvim_release_sha256 appimage arm64 v0.12.4
+            nvim_release_sha256 appimage x86_64 v0.12.4
+            """,
+            check=True,
+        )
+        self.assertEqual(len(result.stdout.splitlines()), 4)
+        self.assertTrue(all(len(value) == 64 for value in result.stdout.splitlines()))
+        unreviewed = self.run_bash("nvim_release_sha256 tarball arm64 v9.9.9")
+        self.assertNotEqual(unreviewed.returncode, 0)
+
     def test_neovim_asset_rejects_unsupported_arch_and_method(self):
         result = self.run_bash(
             "nvim_release_asset tarball riscv64 || nvim_release_asset zip x86_64"
@@ -305,7 +320,7 @@ done
             )
             self.write_executable(bin_dir / "unzip", 'mkdir -p "${@: -1}"\n')
             result = self.run_bash(
-                "OS_FAMILY=linux; step() { :; }; install_fira_code_nerd_font",
+                "OS_FAMILY=linux; step() { :; }; verify_sha256() { :; }; install_fira_code_nerd_font",
                 env={
                     "HOME": home,
                     "TMPDIR": root,

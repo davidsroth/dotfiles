@@ -76,6 +76,8 @@ readonly DEFAULT_BRANCH="${DEFAULT_BRANCH:-main}"
 readonly HOMEBREW_INSTALL_COMMIT="c7952e40b7957268f61643152f4db725379b292e"
 readonly NVM_INSTALL_COMMIT="1889911f0841e669de0be5bd02c737a3f1fd20fa"
 readonly TLINK_INSTALL_COMMIT="9b80997fee802491bd86f1d3b0a85ed5e1b3f4d9"
+readonly NERD_FONT_VERSION="v3.4.0"
+readonly FIRA_CODE_SHA256="7cc4ffd8f7a1fc914cdab7b149808298165ff7a7f40e40d82dea9ebe41e8ca0b"
 readonly NODE_VERSION="${NODE_VERSION:-22}"
 readonly PI_VERSION="${PI_VERSION:-0.80.6}"
 
@@ -88,11 +90,12 @@ QUIET=false
 # - NVIM_METHOD: auto|tarball|backports|appimage (default: auto → appimage on x86_64, tarball elsewhere)
 # - NVIM_MIN_VERSION: semantic minimum version to ensure (default: 0.9.0)
 # - NVIM_FORCE_UPDATE: if "true", reinstall even when >= min version (default: false)
-# - NVIM_VERSION_TAG: explicit tag like "v0.10.4" (default: empty → stable)
+# - NVIM_VERSION_TAG: exact release tag (default: v0.12.4)
 NVIM_METHOD="${NVIM_METHOD:-${NVIM_INSTALL_METHOD:-auto}}"
 NVIM_MIN_VERSION="${NVIM_MIN_VERSION:-0.9.0}"
 NVIM_FORCE_UPDATE="${NVIM_FORCE_UPDATE:-false}"
-NVIM_VERSION_TAG="${NVIM_VERSION_TAG:-}"
+NVIM_VERSION_TAG="${NVIM_VERSION_TAG:-v0.12.4}"
+NVIM_SHA256="${NVIM_SHA256:-}"
 
 # Helper functions
 
@@ -118,7 +121,8 @@ Environment Variables:
     NVIM_METHOD     Neovim method: auto|appimage|tarball|backports (default: auto→appimage on x86_64)
     NVIM_MIN_VERSION     Ensure Neovim >= this version (default: 0.9.0)
     NVIM_FORCE_UPDATE    true to force reinstall (default: false)
-    NVIM_VERSION_TAG     Explicit tag like v0.10.4 (default: stable)
+    NVIM_VERSION_TAG     Exact release tag (default: v0.12.4)
+    NVIM_SHA256        Required checksum override for a non-default tag
 
 Examples:
     # Normal installation
@@ -232,6 +236,22 @@ step() {
   fi
 }
 
+verify_sha256() {
+  local file="$1" expected="$2" actual
+  if command -v sha256sum >/dev/null 2>&1; then
+    actual="$(sha256sum "$file" | awk '{print $1}')"
+  elif command -v shasum >/dev/null 2>&1; then
+    actual="$(shasum -a 256 "$file" | awk '{print $1}')"
+  else
+    error "No SHA-256 tool available to verify $file"
+    return 1
+  fi
+  if [[ "$actual" != "$expected" ]]; then
+    error "SHA-256 mismatch for $file (expected $expected, got $actual)"
+    return 1
+  fi
+}
+
 # Check if a command exists
 # Arguments: command name
 # Returns: 0 if exists, 1 if not
@@ -285,6 +305,19 @@ nvim_release_asset() {
   esac
 }
 
+nvim_release_sha256() {
+  local method="$1" arch="$2" tag="$3" asset
+  [[ "$tag" == "v0.12.4" ]] || return 1
+  asset="$(nvim_release_asset "$method" "$arch")" || return 1
+  case "$asset" in
+    nvim-linux-arm64.appimage) printf '%s\n' "3b819841c975b9c206eff5676b5827921cc09867059452615e2e02d9c0a665af" ;;
+    nvim-linux-arm64.tar.gz) printf '%s\n' "ceb7e88c6b681f0515d135dcdfad54f5eb4373b25ce6172197cd9a69c758063f" ;;
+    nvim-linux-x86_64.appimage) printf '%s\n' "cdbd8b533b500e272021e1021eafcfe28a77fc4d769465a8f1a48a34002383a7" ;;
+    nvim-linux-x86_64.tar.gz) printf '%s\n' "012bf3fcac5ade43914df3f174668bf64d05e049a4f032a388c027b1ebd78628" ;;
+    *) return 1 ;;
+  esac
+}
+
 validate_nvim_config() {
   case "$NVIM_METHOD" in
     auto | tarball | appimage | backports) ;;
@@ -295,7 +328,11 @@ validate_nvim_config() {
     return 1
   fi
   if [[ -n "$NVIM_VERSION_TAG" && ! "$NVIM_VERSION_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-    error "NVIM_VERSION_TAG must look like v0.10.4 (got: $NVIM_VERSION_TAG)"
+    error "NVIM_VERSION_TAG must look like v0.12.4 (got: $NVIM_VERSION_TAG)"
+    return 1
+  fi
+  if [[ -n "$NVIM_SHA256" && ! "$NVIM_SHA256" =~ ^[0-9a-fA-F]{64}$ ]]; then
+    error "NVIM_SHA256 must be a 64-character hexadecimal digest"
     return 1
   fi
 }
@@ -429,7 +466,7 @@ install_modern_neovim_linux() {
     return 0
   fi
 
-  local asset tag_path url
+  local asset tag_path url expected_sha
   asset="$(nvim_release_asset "$method" "$arch")" || {
     error "Unsupported Neovim $method architecture: $arch"
     return 1
@@ -441,6 +478,12 @@ install_modern_neovim_linux() {
     tag_path="download/stable"
   fi
   url="https://github.com/neovim/neovim/releases/${tag_path}/${asset}"
+  if [[ -n "$NVIM_SHA256" ]]; then
+    expected_sha="$NVIM_SHA256"
+  elif ! expected_sha="$(nvim_release_sha256 "$method" "$arch" "$NVIM_VERSION_TAG")"; then
+    error "No reviewed checksum for Neovim $NVIM_VERSION_TAG $asset; set NVIM_SHA256 explicitly"
+    return 1
+  fi
 
   ensure_user_local_bin_path
   if [[ "$method" == "tarball" ]]; then
@@ -453,6 +496,11 @@ install_modern_neovim_linux() {
     }
     if ! curl -fL --retry 3 --retry-delay 1 -o "$tmp_tar" "$url"; then
       error "Failed to download Neovim tarball from $url"
+      rm -f "$tmp_tar"
+      rm -rf "$extract_dir"
+      return 1
+    fi
+    if ! verify_sha256 "$tmp_tar" "$expected_sha"; then
       rm -f "$tmp_tar"
       rm -rf "$extract_dir"
       return 1
@@ -498,6 +546,7 @@ install_modern_neovim_linux() {
       rm -f "$ai_tmp"
       return 1
     fi
+    verify_sha256 "$ai_tmp" "$expected_sha" || { rm -f "$ai_tmp"; return 1; }
     chmod +x "$ai_tmp" || { rm -f "$ai_tmp"; return 1; }
     installed_version="$(validate_nvim_binary "$ai_tmp")" || {
       rm -f "$ai_tmp"
@@ -1527,10 +1576,14 @@ install_fira_code_nerd_font() {
 
   local tmp_zip
   tmp_zip="$(mktemp "${TMPDIR:-/tmp}/FiraCodeNerdFont.XXXXXX")" || return 1
-  local url_latest="https://github.com/ryanoasis/nerd-fonts/releases/latest/download/FiraCode.zip"
+  local url_latest="https://github.com/ryanoasis/nerd-fonts/releases/download/${NERD_FONT_VERSION}/FiraCode.zip"
 
   info "Downloading Fira Code Nerd Font..."
   if curl -fL "$url_latest" -o "$tmp_zip"; then
+    if ! verify_sha256 "$tmp_zip" "$FIRA_CODE_SHA256"; then
+      rm -f "$tmp_zip"
+      return 1
+    fi
     info "Installing to $font_dir"
     if ! unzip -o -q "$tmp_zip" -d "$font_dir"; then
       warning "Failed to extract Nerd Font archive"
