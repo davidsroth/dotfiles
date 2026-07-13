@@ -17,25 +17,38 @@ Current default `Alt+key` launch bindings:
 
 - `Alt+i` — WezTerm
 - `Alt+m` — Messages
-- `Alt+s` — Spotify
 - `Alt+c` — Sunsama
 - `Alt+f` — Finder
 - `Alt+u` — Zen
 - `Alt+v` — Antigravity
-- `Alt+t` — Microsoft Teams
+- `Alt+o` — Obsidian
 
 Additional `Alt+Ctrl+key` bindings:
 
 - `Alt+Ctrl+m` — Slack
+- `Alt+Ctrl+s` — Spotify
+- `Alt+Ctrl+t` — Microsoft Teams
 
-### Karabiner-assisted bindings
+### Option dead-key handling
 
-Two bindings are routed through Karabiner to avoid macOS Option dead-key behavior:
+All `Alt` bindings are plain `hs.hotkey` binds — no Karabiner routing. The
+"US-NoOption" keyboard layout (installed by `macos-defaults.sh`, then added
+once via System Settings → Keyboard → Text Input → Edit… → "+" → Others)
+strips Option's glyph/dead-key plane, so a keystroke that falls through to
+an app types nothing instead of an accent or glyph.
 
-- `Option+i` → Karabiner sends `F18` → Hammerspoon launches/focuses `launchKeys.i`
-- `Option+u` → Karabiner sends `F19` → Hammerspoon launches/focuses `launchKeys.u`
+### Troubleshooting: hotkeys stop firing
 
-If Karabiner is not running, those routed bindings stop working.
+If `Alt` hotkeys stop working and the keystrokes leak into the focused app,
+some process has usually engaged macOS Secure Input, which blocks hotkey
+interception system-wide. Find the holder:
+
+```bash
+ioreg -l -w 0 | grep -o 'kCGSSessionSecureInputPID"=[0-9]*'   # then ps -p <pid>
+```
+
+If the PID is dead, the claim is stuck (Sunsama is a known offender):
+lock/unlock the screen, or failing that log out/reboot.
 
 ### Auto reload
 

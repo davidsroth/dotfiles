@@ -95,7 +95,6 @@ success "Disabled press-and-hold"
 # macOS does not reliably read *symlinked* keylayouts, so we copy the file
 # rather than rely on stow.
 LAYOUT_NAME="US-NoOption"
-LAYOUT_ID="-19341"  # must match the id= in the .keylayout (referenced below)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LAYOUT_SRC="$SCRIPT_DIR/macos/keyboard-layouts/$LAYOUT_NAME.keylayout"
 LAYOUT_DEST_DIR="$HOME/Library/Keyboard Layouts"
@@ -103,19 +102,15 @@ if [[ -f "$LAYOUT_SRC" ]]; then
     mkdir -p "$LAYOUT_DEST_DIR"
     cp -f "$LAYOUT_SRC" "$LAYOUT_DEST_DIR/$LAYOUT_NAME.keylayout"
     success "Installed $LAYOUT_NAME keyboard layout"
-    # Enable it in the input-source list (idempotent). It is only *enabled*,
-    # not selected as default — U.S. stays active so you can verify the new
-    # layout and roll back instantly from the input-source menu. HIToolbox
-    # only rescans ~/Library/Keyboard Layouts at login, so this takes effect
-    # after the next logout/login.
-    if ! defaults read com.apple.HIToolbox AppleEnabledInputSources 2>/dev/null \
-         | grep -q "$LAYOUT_NAME"; then
-        defaults write com.apple.HIToolbox AppleEnabledInputSources -array-add \
-            "{ 'InputSourceKind' = 'Keyboard Layout'; 'KeyboardLayout ID' = $LAYOUT_ID; 'KeyboardLayout Name' = '$LAYOUT_NAME'; }"
-        success "Enabled $LAYOUT_NAME input source (select it after logout/login)"
-    else
-        info "$LAYOUT_NAME input source already enabled"
-    fi
+    # Enabling the layout cannot be scripted: modern macOS ignores entries
+    # hand-added to com.apple.HIToolbox AppleEnabledInputSources, and
+    # TISEnableInputSource does not persist from a CLI process. The layout
+    # must be added once through System Settings; HIToolbox only rescans
+    # ~/Library/Keyboard Layouts at login, so log out first.
+    info "To enable $LAYOUT_NAME (after the next logout/login):"
+    echo "    System Settings → Keyboard → Text Input → Edit… → '+'"
+    echo "    → scroll to 'Others' → $LAYOUT_NAME → Add, then select it"
+    echo "    from the menu-bar input picker."
 else
     warning "Keyboard layout source not found at $LAYOUT_SRC; skipping"
 fi
@@ -302,6 +297,7 @@ echo "  • Dock auto-hides"
 echo "  • Screenshots save to ~/Pictures/Screenshots"
 echo "  • Fast key repeat is enabled"
 echo "  • Auto-correct and smart substitutions are disabled"
-echo "  • 'US-NoOption' keyboard layout installed + enabled (Option = pure modifier,"
-echo "    no glyphs/accents). Select it in System Settings → Keyboard → Input Sources"
-echo "    after the next logout/login; keep 'U.S.' enabled as a fallback until verified."
+echo "  • 'US-NoOption' keyboard layout installed (Option = pure modifier, no"
+echo "    glyphs/accents). After the next logout/login, add it in System Settings →"
+echo "    Keyboard → Text Input → Edit… → '+' → Others, then select it from the"
+echo "    menu-bar input picker; keep 'U.S.' enabled as a fallback until verified."
