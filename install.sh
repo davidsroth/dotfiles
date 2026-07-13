@@ -656,12 +656,6 @@ validate_sudo() {
 # Check platform compatibility and requirements
 # Returns: 0 on success, exits on failure
 check_platform() {
-  # Required common tools
-  if ! command -v curl &>/dev/null; then
-    error "curl is required but not installed"
-    exit 1
-  fi
-
   case "$OSTYPE" in
     darwin*)
       export OS_FAMILY="macos"
@@ -692,6 +686,37 @@ check_platform() {
       exit 1
       ;;
   esac
+
+  # A minimal Debian/Ubuntu image may not include curl even though the
+  # installer later manages it as a base package. Bootstrap the tools needed
+  # before repository setup and installer downloads.
+  if ! command -v curl >/dev/null 2>&1; then
+    if [[ "$OS_FAMILY" == "linux" && "${LINUX_PKG_MGR:-}" == "apt" ]]; then
+      if [[ "$DRY_RUN" == "true" ]]; then
+        info "[DRY RUN] Would install bootstrap prerequisites: ca-certificates curl git"
+      else
+        local -a apt_bootstrap=(apt-get install -y --no-install-recommends ca-certificates curl git)
+        info "Installing bootstrap prerequisites: ca-certificates, curl, git"
+        if command -v sudo >/dev/null 2>&1; then
+          if ! sudo apt-get update -y || ! sudo "${apt_bootstrap[@]}"; then
+            error "Failed to install Linux bootstrap prerequisites"
+            exit 1
+          fi
+        elif [[ "$(id -u)" == 0 ]]; then
+          if ! apt-get update -y || ! "${apt_bootstrap[@]}"; then
+            error "Failed to install Linux bootstrap prerequisites"
+            exit 1
+          fi
+        else
+          error "curl is missing and installing it requires root or sudo"
+          exit 1
+        fi
+      fi
+    else
+      error "curl is required but not installed"
+      exit 1
+    fi
+  fi
 
   # Packages to stow. The `linux` package holds Linux-only configs
   # (awesome, kmonad) and is skipped on macOS.

@@ -253,6 +253,26 @@ pi() { [[ -f \"$PI_STATE\" ]] || return 127; cat \"$PI_STATE\"; }
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("nvm.sh is missing", result.stderr)
 
+    def test_minimal_linux_dry_run_bootstraps_missing_curl(self):
+        result = self.run_bash(
+            """
+            OSTYPE=linux-gnu
+            DRY_RUN=true
+            command() {
+              if [[ "$1" == "-v" && "$2" == "curl" ]]; then return 1; fi
+              if [[ "$1" == "-v" && "$2" == "apt-get" ]]; then return 0; fi
+              builtin command "$@"
+            }
+            check_platform
+            printf 'family=%s manager=%s packages=' "$OS_FAMILY" "$LINUX_PKG_MGR"
+            printf '%s,' "${STOW_PACKAGES[@]}"
+            printf '\\n'
+            """,
+            check=True,
+        )
+        self.assertIn("Would install bootstrap prerequisites", result.stdout)
+        self.assertIn("family=linux manager=apt packages=core,zsh,git-config,pi,linux,", result.stdout)
+
     def test_linux_package_set_includes_fontconfig(self):
         with tempfile.TemporaryDirectory() as tempdir:
             apt_log = Path(tempdir) / "apt.log"
