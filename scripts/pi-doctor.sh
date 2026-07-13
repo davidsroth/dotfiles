@@ -178,6 +178,22 @@ check_runtime_state_locations() {
       WARN "RUNTIME STATE: $path is absent (tool may not be initialized)"
     fi
   done
+
+  local raycast_dir="$HOME/Library/Application Support/com.raycast.macos/extensions"
+  local raycast_link bad_raycast_links=0
+  if [[ -d "$raycast_dir" ]]; then
+    while IFS= read -r -d '' raycast_link; do
+      case "$(readlink "$raycast_link")" in
+        "$REPO_ROOT"/*)
+          FAIL "RUNTIME STATE: Raycast extension $raycast_link points into the dotfiles repository"
+          bad_raycast_links=$((bad_raycast_links + 1))
+          ;;
+      esac
+    done < <(find "$raycast_dir" -maxdepth 1 -type l -print0 2>/dev/null)
+    if [[ "$bad_raycast_links" == 0 ]]; then
+      PASS "RUNTIME STATE: Raycast extensions are stored outside the repository"
+    fi
+  fi
 }
 
 # ---------------------------------------------------------------------------
