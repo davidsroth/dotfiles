@@ -1,9 +1,14 @@
 /**
- * advisor.ts — an "advisor" tool that consults a stronger model.
+ * advisor.ts — an experimental "advisor" tool that consults another model.
+ *
+ * Disabled in settings.base.json: observed runs sometimes returned no result,
+ * and a static configured model can equal or be weaker than the caller. The
+ * implementation remains available for experiments with dynamic model ranking
+ * and explicit failure handling.
  *
  * Registers an `advisor` tool callable by the LLM. Under the hood it spawns a
  * one-shot subagent (via the SDK's createAgentSession) running a configurable
- * "strong" model, lets it investigate read-only, and returns its advice.
+ * model, lets it investigate, and returns its advice.
  *
  * Config (all optional) is read from, in increasing precedence:
  *   1. ~/.pi/agent/advisor.json   (global default, tracked in dotfiles)
