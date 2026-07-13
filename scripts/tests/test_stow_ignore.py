@@ -50,6 +50,9 @@ class StowIgnoreTest(unittest.TestCase):
                 ".config/nvim/init.lua",
                 ".config/espanso/config/default.yml",
                 ".config/opencode/opencode.json",
+                # Gitignored machine-local input, intentionally linked into the
+                # active config so init.lua can actually load the overrides.
+                ".hammerspoon/init.local.lua",
             ]
             for relative in tracked_configs:
                 path = package / relative

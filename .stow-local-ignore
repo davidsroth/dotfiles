@@ -78,4 +78,5 @@ Brewfile.lock.json
 ^/\.claude/\.claude$
 ^/\.config/gh-dash/config\.local\.yml$
 ^/\.config/gh-dash/config\.local\.example\.yml$
-.*\.local\.lua$
+# Hammerspoon's gitignored init.local.lua is intentionally stowed so the
+# active ~/.hammerspoon config can load the machine-local key overrides.
