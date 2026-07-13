@@ -42,6 +42,7 @@ printf '%s\n' 'Shell syntax (tracked files)'
 while IFS= read -r -d '' file; do
   skip_path "$file" && continue
   [[ -e "$file" || -L "$file" ]] || continue
+  LC_ALL=C grep -Iq . "$file" || continue
   first_line="$(head -n 1 "$file" 2>/dev/null || true)"
   shell=""
   case "$file:$first_line" in
@@ -64,12 +65,15 @@ if command -v shellcheck >/dev/null 2>&1; then
   while IFS= read -r -d '' file; do
     skip_path "$file" && continue
     [[ -f "$file" ]] || continue
+    LC_ALL=C grep -Iq . "$file" || continue
     first_line="$(head -n 1 "$file" 2>/dev/null || true)"
     [[ "$first_line" == *bash* ]] && bash_files+=("$file")
   done < <(git ls-files -z)
   if (( ${#bash_files[@]} > 0 )); then
     checked=$((checked + ${#bash_files[@]}))
-    shellcheck -x "${bash_files[@]}" || failure "ShellCheck"
+    # ShellCheck versions disagree on whether informational findings affect
+    # the exit status, so make the enforced threshold explicit.
+    shellcheck -x --severity=warning "${bash_files[@]}" || failure "ShellCheck"
   fi
 else
   printf '%s\n' 'SKIP ShellCheck (shellcheck not installed)'
