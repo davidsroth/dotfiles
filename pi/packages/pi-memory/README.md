@@ -54,6 +54,7 @@ selects which file `read`/`append`/`replace` operate on for `target=memory`.
 
 - `MEMORY.md` (global), `MEMORY.local.md` (this machine), and the project's `.pi/memory/MEMORY.md` (when it exists) are automatically injected into the system prompt as separate labeled sections, each capped to a small size. When a file exceeds the cap, an outline of its `##`/`###` section headings is appended so the model can `read` a specific section on demand.
 - The model can call the `memory` tool to read, search, append, update curated memory, or mark scratchpad items done.
+- Interactive tool rows show the action, target/scope, section or query, and a compact write preview. Results identify the files actually touched; expanding a read/search row reveals its returned content.
 - `MEMORY.md` is treated as sectioned Markdown: appends place a well-formed block (no bullet wrapper) under a named `section`, and reads/searches are section-aware. Code fences are respected, so `#` lines inside ``` blocks aren't mistaken for headings.
 - Daily files are append-only through the tool.
 - There are no embeddings, daemons, or network calls.

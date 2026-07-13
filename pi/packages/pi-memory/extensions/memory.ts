@@ -1,6 +1,7 @@
 import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { withFileMutationQueue } from "@earendil-works/pi-coding-agent";
+import { Text } from "@earendil-works/pi-tui";
 import { existsSync } from "node:fs";
 import { chmod, lstat, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -19,7 +20,7 @@ type Target = (typeof TARGETS)[number];
 type Action = (typeof ACTIONS)[number];
 type Scope = (typeof SCOPES)[number];
 
-type MemoryParams = {
+export type MemoryParams = {
 	action: Action;
 	target?: Target;
 	scope?: Scope;
@@ -32,6 +33,56 @@ type MemoryParams = {
 };
 
 type MemoryDataParams = Omit<MemoryParams, "action"> & { action?: Action };
+
+type MemoryToolDetails = {
+	action: Action;
+	target?: Target;
+	scope?: Scope;
+	files: string[];
+	count?: number;
+};
+
+const inlinePreview = (value: string | undefined, maxChars = 96): string => {
+	if (!value) return "";
+	const inline = value.replace(/\s+/g, " ").trim();
+	return inline.length > maxChars ? `${inline.slice(0, maxChars - 1)}…` : inline;
+};
+
+/** Compact, unstyled description used by the TUI tool-call renderer. */
+export const describeMemoryCall = (params: Partial<MemoryParams>): string => {
+	const action = params.action ?? "…";
+	const target = params.target ?? (action === "scratch_done" ? "scratchpad" : "memory");
+	const destination = target === "memory" ? `${target}:${params.scope ?? "global"}` : target;
+	const section = params.section?.trim() ? ` section=\"${inlinePreview(params.section)}\"` : "";
+
+	switch (action) {
+		case "read":
+			return `${action} ${destination}${section}`;
+		case "search":
+			return `${action} \"${inlinePreview(params.query ?? params.text)}\"`;
+		case "append":
+			return `${action} ${destination}${section} ← \"${inlinePreview(params.text)}\"`;
+		case "replace":
+			return `${action} ${destination} \"${inlinePreview(params.oldText)}\" → \"${inlinePreview(params.newText)}\"`;
+		case "scratch_done":
+			return `${action} scratchpad \"${inlinePreview(params.query ?? params.text)}\"`;
+		default:
+			return `${action} ${destination}`;
+	}
+};
+
+/** Shorten home-relative paths without hiding which file was actually touched. */
+export const compactMemoryPath = (path: string, home = homedir()): string => {
+	if (path === home) return "~";
+	const prefix = `${home}/`;
+	return path.startsWith(prefix) ? `~/${path.slice(prefix.length)}` : path;
+};
+
+const textContent = (content: readonly { type: string; text?: string }[]): string =>
+	content
+		.filter((item): item is { type: string; text: string } => item.type === "text" && typeof item.text === "string")
+		.map((item) => item.text)
+		.join("\n");
 
 type StorePaths = {
 	dir: string;
@@ -679,8 +730,51 @@ export default function memoryExtension(pi: ExtensionAPI) {
 					scope: params.scope,
 					files: output.files,
 					count: output.count,
-				},
+				} satisfies MemoryToolDetails,
 			};
+		},
+
+		renderCall(args, theme, context) {
+			let display = theme.fg("toolTitle", theme.bold("memory ")) + theme.fg("muted", describeMemoryCall(args));
+			if (context.expanded) {
+				if (args.action === "append" && args.text) {
+					display += `\n\n${theme.fg("toolOutput", args.text)}`;
+				} else if (args.action === "replace") {
+					display += `\n\n${theme.fg("dim", "old:")}\n${theme.fg("toolOutput", args.oldText ?? "")}`;
+					display += `\n${theme.fg("dim", "new:")}\n${theme.fg("toolOutput", args.newText ?? "")}`;
+				}
+			}
+			return new Text(display, 0, 0);
+		},
+
+		renderResult(result, { expanded }, theme, _context) {
+			const details = result.details as MemoryToolDetails | undefined;
+			const content = textContent(result.content);
+			if (!details) return new Text(content, 0, 0);
+
+			const failed = /^Error:/i.test(content) || /nothing (?:was )?written/i.test(content);
+			let summary: string;
+			switch (details.action) {
+				case "read":
+					summary = `Read ${details.files.length} memory file${details.files.length === 1 ? "" : "s"}`;
+					break;
+				case "search":
+					summary = `Found ${details.count ?? 0} match${details.count === 1 ? "" : "es"} across ${details.files.length} file${details.files.length === 1 ? "" : "s"}`;
+					break;
+				default:
+					summary = content.split("\n", 1)[0] || `${details.action} completed`;
+			}
+
+			const color = failed ? "error" : "success";
+			let display = theme.fg(color, `${failed ? "✗" : "✓"} ${summary}`);
+			for (const file of details.files) display += `\n  ${theme.fg("dim", compactMemoryPath(file))}`;
+
+			// Keep the settled row compact, but expose actual read/search output when
+			// the user expands tool details. Mutation summaries are already visible.
+			if (expanded && (details.action === "read" || details.action === "search" || failed) && content) {
+				display += `\n\n${theme.fg("toolOutput", content)}`;
+			}
+			return new Text(display, 0, 0);
 		},
 	});
 }

@@ -30,6 +30,17 @@ vi.mock("@earendil-works/pi-ai", () => ({
 	StringEnum: (values: string[]) => ({ enum: values }),
 }));
 
+// Mock the TUI Text component; pure formatting tests only inspect its input.
+vi.mock("@earendil-works/pi-tui", () => ({
+	Text: class Text {
+		constructor(
+			public text: string,
+			public paddingX: number,
+			public paddingY: number,
+		) {}
+	},
+}));
+
 // Mock typebox Type (used in schema only)
 vi.mock("typebox", () => ({
 	Type: {
@@ -43,7 +54,7 @@ vi.mock("typebox", () => ({
 // ---------------------------------------------------------------------------
 // Import the module under test (after mocks are registered)
 // ---------------------------------------------------------------------------
-import {
+import memoryExtension, {
 	todayString,
 	timeString,
 	truncateText,
@@ -60,6 +71,8 @@ import {
 	markScratchDone,
 	readSection,
 	searchMemory,
+	describeMemoryCall,
+	compactMemoryPath,
 } from "../extensions/memory.js";
 
 // ---------------------------------------------------------------------------
@@ -104,6 +117,87 @@ function setupStore(scratchDir: string): {
 // ============================================================================
 // 1. Pure functions — no mocks needed
 // ============================================================================
+
+describe("memory tool rendering descriptions", () => {
+	it("shows the scope and section for reads", () => {
+		expect(describeMemoryCall({ action: "read", target: "memory", scope: "local", section: "Machine" })).toBe(
+			'read memory:local section="Machine"',
+		);
+	});
+
+	it("shows a compact preview of appended content", () => {
+		expect(
+			describeMemoryCall({
+				action: "append",
+				target: "memory",
+				scope: "project",
+				section: "Architecture",
+				text: "### Decision\n\nUse the file-backed cache.",
+			}),
+		).toBe('append memory:project section="Architecture" ← "### Decision Use the file-backed cache."');
+	});
+
+	it("shows both sides of a replacement", () => {
+		expect(describeMemoryCall({ action: "replace", oldText: "old value", newText: "new value" })).toBe(
+			'replace memory:global "old value" → "new value"',
+		);
+	});
+
+	it("shortens files beneath the home directory", () => {
+		expect(compactMemoryPath("/home/test/.pi/agent/memory/MEMORY.md", "/home/test")).toBe(
+			"~/.pi/agent/memory/MEMORY.md",
+		);
+		expect(compactMemoryPath("/repo/.pi/memory/MEMORY.md", "/home/test")).toBe("/repo/.pi/memory/MEMORY.md");
+	});
+
+	it("renders full appended text when tool details are expanded", () => {
+		let tool: any;
+		memoryExtension({
+			on: vi.fn(),
+			registerCommand: vi.fn(),
+			registerTool: (definition: unknown) => {
+				tool = definition;
+			},
+		} as never);
+		const theme = {
+			fg: (_color: string, text: string) => text,
+			bold: (text: string) => text,
+		};
+		const rendered = tool.renderCall(
+			{ action: "append", target: "memory", scope: "project", text: "### Full heading\nFull body" },
+			theme,
+			{ expanded: true },
+		) as { text: string };
+		expect(rendered.text).toContain("append memory:project");
+		expect(rendered.text).toContain("### Full heading\nFull body");
+	});
+
+	it("renders the files actually read", () => {
+		let tool: any;
+		memoryExtension({
+			on: vi.fn(),
+			registerCommand: vi.fn(),
+			registerTool: (definition: unknown) => {
+				tool = definition;
+			},
+		} as never);
+		const theme = {
+			fg: (_color: string, text: string) => text,
+			bold: (text: string) => text,
+		};
+		const rendered = tool.renderResult(
+			{
+				content: [{ type: "text", text: "## Machine\n- Workstation" }],
+				details: { action: "read", target: "memory", scope: "local", files: ["/tmp/MEMORY.local.md"] },
+			},
+			{ expanded: false },
+			theme,
+			{},
+		) as { text: string };
+		expect(rendered.text).toContain("Read 1 memory file");
+		expect(rendered.text).toContain("/tmp/MEMORY.local.md");
+	});
+});
 
 describe("todayString", () => {
 	it("formats YYYY-MM-DD with zero-padding for Jan 5", () => {
