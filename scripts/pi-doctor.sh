@@ -179,20 +179,32 @@ check_runtime_state_locations() {
     fi
   done
 
-  local raycast_dir="$HOME/Library/Application Support/com.raycast.macos/extensions"
-  local raycast_link bad_raycast_links=0
-  if [[ -d "$raycast_dir" ]]; then
-    while IFS= read -r -d '' raycast_link; do
-      case "$(readlink "$raycast_link")" in
+  local raycast_root raycast_link bad_raycast_links=0
+  local -a raycast_roots=(
+    "$HOME/.config/raycast"
+    "$HOME/Library/Application Support/com.raycast.macos/extensions"
+  )
+  for raycast_root in "${raycast_roots[@]}"; do
+    if [[ -L "$raycast_root" ]]; then
+      case "$(readlink "$raycast_root")" in
         "$REPO_ROOT"/*)
-          FAIL "RUNTIME STATE: Raycast extension $raycast_link points into the dotfiles repository"
+          FAIL "RUNTIME STATE: Raycast store $raycast_root points into the dotfiles repository"
           bad_raycast_links=$((bad_raycast_links + 1))
           ;;
       esac
-    done < <(find "$raycast_dir" -maxdepth 1 -type l -print0 2>/dev/null)
-    if [[ "$bad_raycast_links" == 0 ]]; then
-      PASS "RUNTIME STATE: Raycast extensions are stored outside the repository"
+    elif [[ -d "$raycast_root" ]]; then
+      while IFS= read -r -d '' raycast_link; do
+        case "$(readlink "$raycast_link")" in
+          "$REPO_ROOT"/*)
+            FAIL "RUNTIME STATE: Raycast extension $raycast_link points into the dotfiles repository"
+            bad_raycast_links=$((bad_raycast_links + 1))
+            ;;
+        esac
+      done < <(find "$raycast_root" -maxdepth 2 -type l -print0 2>/dev/null)
     fi
+  done
+  if [[ "$bad_raycast_links" == 0 ]]; then
+    PASS "RUNTIME STATE: Raycast extensions are stored outside the repository"
   fi
 }
 
