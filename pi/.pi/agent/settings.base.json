@@ -17,6 +17,9 @@
     "npm:@feniix/pi-notion@2.2.2",
     "npm:pi-web-access@0.13.0"
   ],
+  "extensions": [
+    "!advisor.ts"
+  ],
   "hideThinkingBlock": false,
   "doubleEscapeAction": "tree",
   "treeFilterMode": "all",
