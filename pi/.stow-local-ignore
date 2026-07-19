@@ -1,4 +1,4 @@
-# Standard stow ignores (replaces defaults when this file is present)
+# Standard stow ignores (slash-free patterns match the basename, anchored)
 RCS
 CVS
 \.svn
@@ -8,8 +8,26 @@ _darcs
 \.#.*
 #.*
 
+# NOTE on stow 2.4.x semantics: patterns containing "/" are matched against
+# the full package-relative path WITH a leading slash prepended, so anchored
+# path rules must start with "^/". Slash-free patterns match the basename.
+
 # Generated per-machine file — managed by `just pi-settings`, not stowed
-^\.pi/agent/settings\.json$
+^/\.pi/agent/settings\.json$
+
+# Runtime/auth state (mirrors pi/.pi/agent/.gitignore) — must live as real
+# files in $HOME, never as symlinks into this repo.
+^/\.pi/agent/settings\.local\.json$
+^/\.pi/agent/auth\.json$
+^/\.pi/agent/models\.json$
+^/\.pi/agent/intercom$
+^/\.pi/agent/npm$
+^/\.pi/agent/sessions$
+
+# Memory dir is a mix of tracked (MEMORY.md) and per-machine local files.
+# install.sh links MEMORY.md explicitly; don't let stow manage the dir
+# (which would swallow local MEMORY.local.md/SCRATCHPAD/daily into the repo).
+^/\.pi/agent/memory$
 
 # Generated dependencies and local templates are repository-side only.
 node_modules
@@ -23,7 +41,7 @@ package-lock\.json$
 # claim a generic ~/packages name and expose ~1.3 GB of node_modules under $HOME.
 ^packages$
 
-# Memory dir is a mix of tracked (MEMORY.md) and per-machine local files.
-# install.sh / `just pi-memory` symlinks MEMORY.md explicitly; don't let stow
-# fold the whole dir (which would swallow local MEMORY.local.md/SCRATCHPAD/daily).
-^\.pi/agent/memory$
+# Project-local Claude Code dir (created when Claude Code runs in this repo).
+# An empty pi/.claude triggered stow's cross-package directory-collision
+# unfolding once, restowing core's ignored .claude tree. Never stow it.
+^/\.claude$
