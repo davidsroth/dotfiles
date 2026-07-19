@@ -5,6 +5,7 @@ import {
   SessionManager,
   type AgentSession,
   type ExtensionContext,
+  type ModelRuntime,
   type ResourceLoader,
 } from "@earendil-works/pi-coding-agent";
 import type { AssistantMessage, Message as AiMessage } from "@earendil-works/pi-ai";
@@ -98,7 +99,9 @@ export async function answerAside(
     cwd: ctx.cwd,
     sessionManager: SessionManager.inMemory(ctx.cwd),
     model,
-    modelRegistry: ctx.modelRegistry as AgentSession["modelRegistry"],
+    // ExtensionContext exposes only the ModelRegistry facade; unwrap the
+    // underlying ModelRuntime that createAgentSession expects (pi >=0.80.7).
+    modelRuntime: (ctx.modelRegistry as unknown as { runtime: ModelRuntime }).runtime,
     tools: [...ASIDE_TOOLS],
     resourceLoader: createAsideResourceLoader(ctx),
   });
