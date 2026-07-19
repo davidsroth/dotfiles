@@ -8,6 +8,7 @@ import {
   type ExtensionAPI,
   type ExtensionCommandContext,
   type ExtensionContext,
+  type ModelRuntime,
   type ResourceLoader,
 } from "@earendil-works/pi-coding-agent";
 import { type AssistantMessage, type Message, type ThinkingLevel as AiThinkingLevel, type UserMessage } from "@earendil-works/pi-ai";
@@ -1637,7 +1638,9 @@ export default function (pi: ExtensionAPI) {
     const { session } = await createAgentSession({
       sessionManager: SessionManager.inMemory(),
       model: settings.model,
-      modelRegistry: ctx.modelRegistry as AgentSession["modelRegistry"],
+      // ExtensionContext exposes only the ModelRegistry facade; unwrap the
+      // underlying ModelRuntime that createAgentSession expects (pi >=0.80.7).
+      modelRuntime: (ctx.modelRegistry as unknown as { runtime: ModelRuntime }).runtime,
       thinkingLevel: settings.thinkingLevel,
       // Match pi's default coding-agent toolset (read/bash/edit/write).
       tools: ["read", "bash", "edit", "write"],
@@ -2226,7 +2229,9 @@ export default function (pi: ExtensionAPI) {
     const { session } = await createAgentSession({
       sessionManager: SessionManager.inMemory(),
       model,
-      modelRegistry: ctx.modelRegistry as AgentSession["modelRegistry"],
+      // ExtensionContext exposes only the ModelRegistry facade; unwrap the
+      // underlying ModelRuntime that createAgentSession expects (pi >=0.80.7).
+      modelRuntime: (ctx.modelRegistry as unknown as { runtime: ModelRuntime }).runtime,
       thinkingLevel: "off",
       tools: [],
       resourceLoader: createBtwResourceLoader(ctx, [BTW_SUMMARIZE_SYSTEM_PROMPT]),

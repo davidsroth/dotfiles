@@ -578,6 +578,9 @@ function createHarness(
     ui: ui as any,
     sessionManager: sessionManager as any,
     modelRegistry: {
+      // Sentinel standing in for the ModelRuntime wrapped by the ModelRegistry
+      // facade; the extension unwraps it and passes it as `modelRuntime`.
+      runtime: { marker: "test-model-runtime" },
       getApiKeyAndHeaders: vi.fn(async (requestedModel: { provider: string; id: string; api: string }) => {
         if (credentialResolver) {
           const key = credentialResolver(requestedModel);
@@ -709,7 +712,7 @@ describe("btw runtime behavior", () => {
 
     const options = createAgentSessionMock.mock.calls[0][0];
     expect(options.model).toBe(harness.baseCtx.model);
-    expect(options.modelRegistry).toBe(harness.baseCtx.modelRegistry);
+    expect(options.modelRuntime).toBe(harness.baseCtx.modelRegistry.runtime);
     expect(options.tools).toEqual(["read", "bash", "edit", "write"]);
     expect(options.resourceLoader.getAppendSystemPrompt()[0]).toContain(
       "You are having an aside conversation with the user, separate from their main working session.",
