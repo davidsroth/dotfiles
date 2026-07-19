@@ -10,6 +10,7 @@ import {
   createAgentSession,
   DefaultResourceLoader,
   type ExtensionAPI,
+  type ModelRuntime,
   getAgentDir,
   SessionManager,
   SettingsManager,
@@ -264,12 +265,14 @@ export async function runAgent(
   // Resolve thinking level: explicit option > agent config > undefined (inherit)
   const thinkingLevel = options.thinkingLevel ?? agentConfig?.thinking;
 
-  const sessionOpts: Parameters<typeof createAgentSession>[0] = {
+  const sessionOpts: NonNullable<Parameters<typeof createAgentSession>[0]> = {
     cwd: effectiveCwd,
     agentDir,
     sessionManager: SessionManager.inMemory(effectiveCwd),
     settingsManager: SettingsManager.create(effectiveCwd, agentDir),
-    modelRegistry: ctx.modelRegistry,
+    // ExtensionContext exposes only the ModelRegistry facade; unwrap the
+    // underlying ModelRuntime that createAgentSession expects (pi >=0.80.7).
+    modelRuntime: (ctx.modelRegistry as unknown as { runtime: ModelRuntime }).runtime,
     model,
     // NOTE: do NOT pass `tools: toolNames` here. The SDK treats `tools` as a
     // strict `allowedToolNames` allowlist (see pi-coding-agent sdk.js where
