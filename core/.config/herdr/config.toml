@@ -128,8 +128,29 @@ command = "${SHELL:-/bin/sh} -ic 'opencode'"
 [ui]
 mouse_capture = true
 pane_gaps = false
+sidebar_width = 28
+sidebar_min_width = 22
+sidebar_max_width = 34
+agent_panel_sort = "spaces"
 # Create tabs immediately with Herdr's generated names; rename manually when useful.
 prompt_new_tab_name = false
+
+# Keep agent entries compact: Alt+1..9 position, native theme-aware workspace,
+# and state icon on the first line; session-oriented title on the second. The
+# $shortcut metadata is maintained by local.agent-indexes.
+[ui.sidebar.agents]
+row_gap = 0
+rows = [
+  [{ token = "$shortcut", bold = true }, { token = "workspace", bold = true }, "state_icon"],
+  [{ token = "terminal_title_stripped", dim = true }],
+]
+
+# Collapse each workspace to one information-dense row.
+[ui.sidebar.spaces]
+row_gap = 0
+rows = [
+  ["state_icon", { token = "workspace", bold = true }, { token = "branch", dim = true }, "git_status"],
+]
 
 [ui.toast]
 delivery = "off"
