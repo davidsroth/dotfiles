@@ -222,6 +222,57 @@ describe("AgentManager — Bug 3 clearCompleted", () => {
     expect(disposeSpy).toHaveBeenCalledOnce();
   });
 
+  it("emits session_shutdown before disposing a child extension runtime", async () => {
+    manager = new AgentManager();
+    const order: string[] = [];
+    const emit = vi.fn(async (event: unknown) => {
+      order.push("shutdown");
+      expect(event).toEqual({ type: "session_shutdown", reason: "quit" });
+    });
+    const dispose = vi.fn(() => order.push("dispose"));
+    vi.mocked(runAgent).mockResolvedValue({
+      responseText: "done",
+      session: { extensionRunner: { emit }, dispose } as any,
+      aborted: false,
+      steered: false,
+    });
+
+    const id = manager.spawn(mockPi, mockCtx, "general-purpose", "test", {
+      description: "test",
+      isBackground: true,
+    });
+    await manager.getRecord(id)!.promise;
+
+    manager.clearCompleted();
+    expect(manager.getRecord(id)).toBeUndefined();
+    await vi.waitFor(() => expect(dispose).toHaveBeenCalledOnce());
+
+    expect(emit).toHaveBeenCalledOnce();
+    expect(order).toEqual(["shutdown", "dispose"]);
+  });
+
+  it("still disposes the child session when an extension shutdown hook fails", async () => {
+    manager = new AgentManager();
+    const emit = vi.fn().mockRejectedValue(new Error("shutdown failed"));
+    const dispose = vi.fn();
+    vi.mocked(runAgent).mockResolvedValue({
+      responseText: "done",
+      session: { extensionRunner: { emit }, dispose } as any,
+      aborted: false,
+      steered: false,
+    });
+
+    const id = manager.spawn(mockPi, mockCtx, "general-purpose", "test", {
+      description: "test",
+      isBackground: true,
+    });
+    await manager.getRecord(id)!.promise;
+
+    manager.clearCompleted();
+    await vi.waitFor(() => expect(dispose).toHaveBeenCalledOnce());
+    expect(emit).toHaveBeenCalledOnce();
+  });
+
   it("clearCompleted removes error and stopped records", async () => {
     manager = new AgentManager();
     vi.mocked(runAgent).mockRejectedValue(new Error("boom"));

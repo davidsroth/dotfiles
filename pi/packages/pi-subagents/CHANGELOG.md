@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Child extension runtimes now receive `session_shutdown` before their SDK session is disposed, preventing external registrations such as intercom presence from surviving as zombies. Disposal still runs when an extension shutdown hook fails.
+
 ## [0.7.2] - 2026-05-12
 
 > **Heads-up — behavior changes in skill preloading:**

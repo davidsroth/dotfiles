@@ -394,10 +394,32 @@ export class AgentManager {
     return true;
   }
 
+  /**
+   * Shut down a child session's extensions before disposing the SDK session.
+   *
+   * AgentSession.dispose() invalidates the extension runtime but does not emit
+   * session_shutdown. Extensions with external registrations (notably
+   * pi-intercom's broker presence) otherwise survive as zombies after this
+   * manager forgets the record.
+   */
+  private disposeRecordSession(record: AgentRecord): void {
+    const session = record.session;
+    record.session = undefined;
+    if (!session) return;
+
+    const runner = session.extensionRunner;
+    if (runner?.emit) {
+      void runner.emit({ type: "session_shutdown", reason: "quit" }).catch(() => {
+        // Extension teardown is best-effort; disposal must still happen.
+      }).finally(() => session.dispose());
+      return;
+    }
+    session.dispose();
+  }
+
   /** Dispose a record's session and remove it from the map. */
   private removeRecord(id: string, record: AgentRecord): void {
-    record.session?.dispose?.();
-    record.session = undefined;
+    this.disposeRecordSession(record);
     this.agents.delete(id);
   }
 
@@ -473,7 +495,7 @@ export class AgentManager {
     // Clear queue
     this.queue = [];
     for (const record of this.agents.values()) {
-      record.session?.dispose();
+      this.disposeRecordSession(record);
     }
     this.agents.clear();
     // Prune any orphaned git worktrees (crash recovery)
