@@ -1,0 +1,49 @@
+id = "local.agent-indexes"
+name = "Agent Indexes"
+version = "0.1.0"
+min_herdr_version = "0.7.5"
+description = "Expose Alt+1..9 agent positions as sidebar metadata"
+platforms = ["macos", "linux"]
+
+[[startup]]
+command = ["python3", "refresh.py"]
+
+[[events]]
+on = "pane.agent_detected"
+command = ["python3", "refresh.py"]
+
+[[events]]
+on = "pane.created"
+command = ["python3", "refresh.py"]
+
+[[events]]
+on = "pane.closed"
+command = ["python3", "refresh.py"]
+
+[[events]]
+on = "pane.moved"
+command = ["python3", "refresh.py"]
+
+[[events]]
+on = "tab.created"
+command = ["python3", "refresh.py"]
+
+[[events]]
+on = "tab.closed"
+command = ["python3", "refresh.py"]
+
+[[events]]
+on = "tab.moved"
+command = ["python3", "refresh.py"]
+
+[[events]]
+on = "workspace.created"
+command = ["python3", "refresh.py"]
+
+[[events]]
+on = "workspace.closed"
+command = ["python3", "refresh.py"]
+
+[[events]]
+on = "workspace.moved"
+command = ["python3", "refresh.py"]

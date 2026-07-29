@@ -55,6 +55,8 @@ class StowIgnoreTest(unittest.TestCase):
                 ".config/opencode/opencode.json",
                 ".config/herdr/config.toml",
                 ".config/herdr/bin/workspace-picker.sh",
+                ".config/herdr/plugins/agent-indexes/herdr-plugin.toml",
+                ".config/herdr/plugins/agent-indexes/refresh.py",
                 # Gitignored machine-local input, intentionally linked into the
                 # active config so init.lua can actually load the overrides.
                 ".hammerspoon/init.local.lua",
