@@ -36,7 +36,7 @@ export function isMessage(value: unknown): value is Message {
 
   const message = value as Record<string, unknown>;
 
-  if (typeof message.id !== "string" || typeof message.timestamp !== "number") {
+  if (typeof message.id !== "string" || typeof message.timestamp !== "number" || !Number.isFinite(message.timestamp)) {
     return false;
   }
 
@@ -49,6 +49,10 @@ export function isMessage(value: unknown): value is Message {
   }
 
   if (message.aside !== undefined && typeof message.aside !== "boolean") {
+    return false;
+  }
+
+  if (message.replyError !== undefined && typeof message.replyError !== "string") {
     return false;
   }
 
@@ -73,6 +77,15 @@ function hasValidSessionFields(session: Record<string, unknown>): boolean {
     || typeof session.pid !== "number"
     || typeof session.startedAt !== "number"
     || typeof session.lastActivity !== "number"
+  ) {
+    return false;
+  }
+
+  if (
+    !Number.isInteger(session.pid)
+    || (session.pid as number) <= 0
+    || !Number.isFinite(session.startedAt)
+    || !Number.isFinite(session.lastActivity)
   ) {
     return false;
   }

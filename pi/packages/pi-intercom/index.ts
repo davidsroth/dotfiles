@@ -23,6 +23,9 @@ const SUBAGENT_RESULT_INTERCOM_EVENT = "subagent:result-intercom";
 const SUBAGENT_RESULT_INTERCOM_DELIVERY_EVENT = "subagent:result-intercom-delivery";
 const INBOUND_FLUSH_DELAY_MS = 200;
 const INBOUND_IDLE_RETRY_MS = 500;
+const REPLY_TIMEOUT_MS = 10 * 60 * 1000;
+const MAX_SETTLED_REPLY_IDS = 1000;
+const MAX_ACTIVE_ASIDES = 3;
 // Trailing debounce for presence status writes. A tool-heavy turn fires
 // tool_execution_start/end (and agent_start/end) rapidly; coalescing these into
 // one trailing write per quiet window collapses the 2M+2-per-turn chatter the
@@ -56,6 +59,7 @@ interface InboundMessageEntry {
   message: Message;
   replyCommand?: string;
   bodyText: string;
+  receivedAt: number;
 }
 
 type ContactSupervisorReason = "need_decision" | "progress_update" | "interview_request";
@@ -461,6 +465,19 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
     reject: (error: Error) => void;
   }
   const replyWaiters = new Map<string, ActiveReplyWaiter>();
+  // Recently settled request IDs prevent late/duplicate replies from becoming
+  // unsolicited agent turns after their waiter has gone away.
+  const settledReplyIds = new Map<string, number>();
+  function rememberSettledReply(questionId: string): void {
+    const now = Date.now();
+    for (const [id, expiresAt] of settledReplyIds) {
+      if (expiresAt <= now) settledReplyIds.delete(id);
+    }
+    settledReplyIds.set(questionId, now + REPLY_TIMEOUT_MS);
+    while (settledReplyIds.size > MAX_SETTLED_REPLY_IDS) {
+      settledReplyIds.delete(settledReplyIds.keys().next().value!);
+    }
+  }
   function waitForReply(target: string, questionId: string, signal?: AbortSignal): Promise<Message> {
     // Throw synchronously rather than returning a rejected promise. A dangling
     // rejected promise (assigned but not yet awaited) trips Node's default
@@ -472,11 +489,12 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
         rejectReplyWaiter(questionId, new Error(`No reply from "${target}" within 10 minutes`));
-      }, 10 * 60 * 1000);
+      }, REPLY_TIMEOUT_MS);
       const cleanup = () => {
         clearTimeout(timeout);
         signal?.removeEventListener("abort", onAbort);
         replyWaiters.delete(questionId);
+        rememberSettledReply(questionId);
       };
       const onAbort = () => {
         cleanup();
@@ -711,7 +729,19 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
       return;
     }
 
-    const entries = pendingIdleMessages.splice(0, pendingIdleMessages.length);
+    const now = Date.now();
+    const entries = pendingIdleMessages.splice(0, pendingIdleMessages.length)
+      .filter((entry) => {
+        if (!entry.message.expectsReply || now - entry.receivedAt < REPLY_TIMEOUT_MS) return true;
+        replyTracker.markReplied(entry.message.id);
+        pi.appendEntry("intercom_request_dropped", {
+          reason: "expired while recipient was busy",
+          messageId: entry.message.id,
+          from: entry.from.id,
+          timestamp: now,
+        });
+        return false;
+      });
     entries.forEach((entry, index) => {
       sendIncomingMessage(entry, index === 0 ? "trigger" : "followUp");
     });
@@ -719,7 +749,10 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
   function queueIdleMessage(entry: InboundMessageEntry): void {
     pendingIdleMessages.push(entry);
     if (pendingIdleMessages.length > MAX_PENDING_IDLE_MESSAGES) {
-      pendingIdleMessages.splice(0, pendingIdleMessages.length - MAX_PENDING_IDLE_MESSAGES);
+      const dropped = pendingIdleMessages.splice(0, pendingIdleMessages.length - MAX_PENDING_IDLE_MESSAGES);
+      for (const stale of dropped) {
+        if (stale.message.expectsReply) replyTracker.markReplied(stale.message.id);
+      }
     }
     scheduleInboundFlush();
   }
@@ -730,6 +763,14 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
   // interrupting the recipient or polluting its transcript.
   function answerAsideQuestion(ctx: ExtensionContext, from: SessionInfo, message: Message, generation = runtimeGeneration): void {
     const senderDisplay = from.name || from.id.slice(0, 8);
+    if (activeAsides.size >= MAX_ACTIVE_ASIDES) {
+      const replyClient = client;
+      if (replyClient?.isConnected()) {
+        const error = `Aside capacity reached (${MAX_ACTIVE_ASIDES} active)`;
+        void replyClient.send(from.id, { text: error, replyTo: message.id, replyError: error }).catch(() => undefined);
+      }
+      return;
+    }
     const attachmentText = message.content.attachments?.length
       ? formatAttachments(message.content.attachments)
       : "";
@@ -752,7 +793,11 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
       const replyClient = client;
       if (!replyClient?.isConnected()) return;
       try {
-        await replyClient.send(from.id, { text: answer, replyTo: message.id });
+        await replyClient.send(from.id, {
+          text: answer,
+          replyTo: message.id,
+          ...(failed ? { replyError: answer } : {}),
+        });
       } catch {
         // Best-effort; the asker's wait will time out if the reply can't be sent.
       }
@@ -769,10 +814,30 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
     }
     if (message.replyTo) {
       const waiter = replyWaiters.get(message.replyTo);
-      if (waiter && replyResolvesWaiter(waiter, from, message)) {
-        waiter.resolve(message);
+      if (waiter) {
+        if (replyResolvesWaiter(waiter, from, message)) {
+          waiter.resolve(message);
+        } else {
+          pi.appendEntry("intercom_reply_dropped", {
+            reason: "sender mismatch",
+            replyTo: message.replyTo,
+            from: from.id,
+            timestamp: Date.now(),
+          });
+        }
         return;
       }
+      const settledUntil = settledReplyIds.get(message.replyTo);
+      if (settledUntil && settledUntil > Date.now()) {
+        pi.appendEntry("intercom_reply_dropped", {
+          reason: "late or duplicate reply",
+          replyTo: message.replyTo,
+          from: from.id,
+          timestamp: Date.now(),
+        });
+        return;
+      }
+      if (settledUntil) settledReplyIds.delete(message.replyTo);
     }
     // An inbound aside question is answered out of band and never enters the
     // timeline/history. (Its eventual reply is a normal message that the
@@ -789,7 +854,7 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
       ? `intercom({ action: "reply", message: "..." })`
       : undefined;
     replyTracker.recordIncomingMessage(from, message);
-    const entry = { from, message, replyCommand, bodyText };
+    const entry = { from, message, replyCommand, bodyText, receivedAt: Date.now() };
     void (async () => {
       const activeContext = getLiveContext(liveContext, messageGeneration);
       if (!activeContext) {
@@ -798,7 +863,7 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
       if (!activeContext.isIdle()) {
         if (!activeContext.hasUI) {
           const activeClient = client;
-          if (!message.replyTo && activeClient?.isConnected()) {
+          if (message.expectsReply && !message.replyTo && activeClient?.isConnected()) {
             try {
               const result = await activeClient.send(from.id, {
                 text: "This agent is running in non-interactive mode and cannot respond to intercom messages while it is working. It will continue its current task and exit when done.",
@@ -876,7 +941,10 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
       }
       reconnectAttempt += 1;
       void ensureConnected("background").catch(() => {
-        // ensureConnected("background") already queued the next retry.
+        // The in-flight reconnect promise is cleared in ensureConnected's
+        // finally block before this continuation runs, so the next backoff can
+        // actually be scheduled.
+        scheduleReconnect();
       });
     }, getReconnectDelayMs());
   }
@@ -921,9 +989,6 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
       } catch (error) {
         if (client === nextClient) {
           client = null;
-        }
-        if (reason === "background" && getLiveContext(contextAtStart, generationAtStart)) {
-          scheduleReconnect();
         }
         throw toError(error);
       } finally {
@@ -983,6 +1048,7 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
         content: { text: messageText },
       },
       bodyText: messageText,
+      receivedAt: now,
     }, "trigger");
   }
   function recordSubagentDeliveryError(entryType: string, to: string, message: string, error: unknown): void {
@@ -1135,12 +1201,15 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
     // orphaning a live broker connection. Null first, then disconnect the old.
     const dyingClient = client;
     client = null;
-    if (dyingClient) {
-      await dyingClient.disconnect();
-    }
+    // Clear the old runtime before awaiting network teardown. A reload may
+    // start the replacement runtime while disconnect() yields; clearing these
+    // fields afterward would erase the replacement's state.
     runtimeContext = null;
     currentSessionId = null;
     sessionStartedAt = null;
+    if (dyingClient) {
+      await dyingClient.disconnect();
+    }
   });
   pi.on("turn_end", () => {
     if (!getLiveContext()) {
@@ -1401,6 +1470,13 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
             subagent: { runId: metadata.runId, agent: metadata.agent, index: metadata.index },
           });
           const replyMessage = await replyPromise;
+          if (replyMessage.replyError) {
+            return {
+              content: [{ type: "text", text: `Supervisor reply failed: ${replyMessage.replyError}` }],
+              isError: true,
+              details: { error: true },
+            };
+          }
           const replyText = replyMessage.content.text;
           const replyAttachments = replyMessage.content.attachments?.length
             ? formatAttachments(replyMessage.content.attachments)
@@ -1525,6 +1601,9 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
     lines.push(`Pending outbound: ${activeClient?.pendingSendCount ?? 0} send(s), ${activeClient?.pendingListCount ?? 0} list(s)`);
     lines.push(`Pending inbound asks: ${pendingAsks.length}`);
     lines.push(`Awaiting replies: ${replyWaiters.size}`);
+    lines.push(`Settled reply guards: ${settledReplyIds.size}`);
+    lines.push(`Queued inbound: ${pendingIdleMessages.length}`);
+    lines.push(`Active asides: ${activeAsides.size}/${MAX_ACTIVE_ASIDES}`);
     // Broker process liveness, read from the pid file (no network needed).
     try {
       const pid = Number(readFileSync(getBrokerPidPath(), "utf-8").trim());
@@ -1734,6 +1813,13 @@ Usage:
             };
           }
 
+          if (replyTo) {
+            return {
+              content: [{ type: "text", text: "Nested ask/aside threading is not supported" }],
+              isError: true,
+              details: { error: true },
+            };
+          }
           if (_signal?.aborted) {
             return {
               content: [{ type: "text", text: "Cancelled" }],
@@ -1766,6 +1852,10 @@ Usage:
             // recipientId (from the delivered ack below) lets session_left
             // fast-cancel this wait and asserts the reply's sender.
             replyPromise = waitForReply(to, questionId, _signal);
+            // Cancellation may reject the waiter while send() is still waiting
+            // for its broker acknowledgement. Attach a handler immediately so
+            // Node never observes a temporarily unhandled rejection.
+            void replyPromise.catch(() => undefined);
             const sendResult = await connectedClient.send(to, {
               messageId: questionId,
               text: message,
@@ -1799,6 +1889,13 @@ Usage:
               timestamp: Date.now(),
             });
             const replyMessage = await replyPromise;
+            if (replyMessage.replyError) {
+              return {
+                content: [{ type: "text", text: `${isAside ? "Aside" : "Reply"} failed: ${replyMessage.replyError}` }],
+                isError: true,
+                details: { error: true },
+              };
+            }
             const replyText = replyMessage.content.text;
             const replyAttachments = replyMessage.content.attachments?.length
               ? formatAttachments(replyMessage.content.attachments)

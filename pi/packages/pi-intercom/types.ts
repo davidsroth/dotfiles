@@ -8,7 +8,7 @@
  * fatal (see the client/broker message dispatch defaults), so a newer peer can
  * introduce a new event type without disconnecting older peers.
  */
-export const PROTOCOL_VERSION = 1;
+export const PROTOCOL_VERSION = 2;
 
 export interface SessionInfo {
   id: string;
@@ -44,6 +44,8 @@ export interface Message {
    * predate this field simply treat the message as a normal send.
    */
   aside?: boolean;
+  /** Machine-readable failure for a reply (not successful answer text). */
+  replyError?: string;
   content: {
     text: string;
     attachments?: Attachment[];

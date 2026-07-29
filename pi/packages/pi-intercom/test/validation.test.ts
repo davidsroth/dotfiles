@@ -34,9 +34,13 @@ test("isMessage requires id/timestamp/content.text and validates attachments", (
   );
   assert.equal(isMessage({ id: "m1", timestamp: 1, content: { text: 5 } }), false);
   assert.equal(isMessage({ id: "m1", content: { text: "hi" } }), false);
+  assert.equal(isMessage({ id: "m1", timestamp: Number.NaN, content: { text: "hi" } }), false);
+  assert.equal(isMessage({ id: "m1", timestamp: Number.POSITIVE_INFINITY, content: { text: "hi" } }), false);
   assert.equal(isMessage({ id: "m1", timestamp: 1, expectsReply: "yes", content: { text: "hi" } }), false);
   assert.equal(isMessage({ id: "m1", timestamp: 1, aside: true, expectsReply: true, content: { text: "hi" } }), true);
   assert.equal(isMessage({ id: "m1", timestamp: 1, aside: "yes", content: { text: "hi" } }), false);
+  assert.equal(isMessage({ id: "m1", timestamp: 1, replyTo: "q", replyError: "failed", content: { text: "failed" } }), true);
+  assert.equal(isMessage({ id: "m1", timestamp: 1, replyError: 5, content: { text: "hi" } }), false);
   assert.equal(
     isMessage({ id: "m1", timestamp: 1, content: { text: "hi", attachments: [{ type: "bad" }] } }),
     false,
@@ -56,6 +60,11 @@ test("isSessionRegistration accepts the shared fields without an id", () => {
   assert.equal(isSessionRegistration(validRegistration), true);
   assert.equal(isSessionRegistration({ ...validRegistration, originSessionId: "o" }), true);
   assert.equal(isSessionRegistration({ ...validRegistration, lastActivity: "x" }), false);
+  assert.equal(isSessionRegistration({ ...validRegistration, pid: 0 }), false);
+  assert.equal(isSessionRegistration({ ...validRegistration, pid: -1 }), false);
+  assert.equal(isSessionRegistration({ ...validRegistration, pid: 1.5 }), false);
+  assert.equal(isSessionRegistration({ ...validRegistration, startedAt: Number.NaN }), false);
+  assert.equal(isSessionRegistration({ ...validRegistration, lastActivity: Number.POSITIVE_INFINITY }), false);
   assert.equal(isSessionRegistration(null), false);
   assert.equal(isSessionRegistration([validRegistration]), false);
 });

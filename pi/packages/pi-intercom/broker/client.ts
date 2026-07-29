@@ -17,6 +17,7 @@ interface SendOptions {
   /** Mark this as an out-of-band "aside" question (see Message.aside). */
   aside?: boolean;
   messageId?: string;
+  replyError?: string;
 }
 
 interface SendResult {
@@ -438,12 +439,16 @@ export class IntercomClient extends EventEmitter {
     }
     
     const messageId = options.messageId ?? randomUUID();
+    if (this.pendingSends.has(messageId)) {
+      return Promise.reject(new Error(`Send already pending for message ID "${messageId}"`));
+    }
     const message: Message = {
       id: messageId,
       timestamp: Date.now(),
       replyTo: options.replyTo,
       expectsReply: options.expectsReply,
       aside: options.aside,
+      replyError: options.replyError,
       content: {
         text: options.text,
         attachments: options.attachments,

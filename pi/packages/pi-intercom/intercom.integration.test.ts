@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, unlinkSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, unlinkSync } from "node:fs";
 import net from "node:net";
 import path from "node:path";
 import { tmpdir } from "node:os";
@@ -296,6 +296,61 @@ async function waitForSessionModel(client: InstanceType<typeof IntercomClient>, 
   const sessions = await client.listSessions();
   throw new Error(`Timed out waiting for ${name} model ${model}; saw ${JSON.stringify(sessions.map((session) => ({ name: session.name, model: session.model })))}`);
 }
+
+test("an old broker cannot remove a replacement broker's socket or PID file", { concurrency: false }, async () => {
+  const env = { ...process.env, HOME: sharedHomeDir, USERPROFILE: sharedHomeDir };
+  const brokerA = spawn(process.execPath, brokerSpawnArgs, { cwd: repoDir, env, stdio: ["ignore", "pipe", "pipe"] });
+  let brokerB: ChildProcessWithoutNullStreams | undefined;
+  const socketPath = getBrokerSocketPath();
+  const pidPath = path.join(sharedHomeDir, ".pi", "agent", "intercom", "broker.pid");
+
+  try {
+    await waitForBrokerReady(brokerA);
+    unlinkSync(socketPath);
+    brokerB = spawn(process.execPath, brokerSpawnArgs, { cwd: repoDir, env, stdio: ["ignore", "pipe", "pipe"] });
+    await waitForBrokerReady(brokerB);
+    const replacementPid = readFileSync(pidPath, "utf8").trim();
+
+    brokerA.kill("SIGTERM");
+    await once(brokerA, "exit");
+    assert.equal(existsSync(socketPath), true);
+    assert.equal(readFileSync(pidPath, "utf8").trim(), replacementPid);
+
+    const client = new IntercomClient();
+    await client.connect({
+      name: "replacement-check",
+      cwd: repoDir,
+      model: "test-model",
+      pid: process.pid,
+      startedAt: Date.now(),
+      lastActivity: Date.now(),
+    });
+    await client.disconnect();
+  } finally {
+    if (brokerA.exitCode === null && brokerA.signalCode === null) brokerA.kill("SIGTERM");
+    if (brokerB && brokerB.exitCode === null && brokerB.signalCode === null) brokerB.kill("SIGTERM");
+    await Promise.all([
+      brokerA.exitCode === null ? once(brokerA, "exit").catch(() => undefined) : undefined,
+      brokerB && brokerB.exitCode === null ? once(brokerB, "exit").catch(() => undefined) : undefined,
+    ]);
+  }
+});
+
+test("client rejects duplicate in-flight message IDs", { concurrency: false }, async () => {
+  const { planner, orchestrator, cleanup } = await setupClients();
+  const pending = (planner as unknown as { pendingSends: Map<string, unknown> }).pendingSends;
+  pending.set("duplicate-id", { resolve: () => undefined, reject: () => undefined });
+
+  try {
+    await assert.rejects(
+      planner.send(orchestrator.sessionId!, { messageId: "duplicate-id", text: "duplicate" }),
+      /already pending/,
+    );
+  } finally {
+    pending.delete("duplicate-id");
+    await cleanup();
+  }
+});
 
 test("broker routes messages addressed by unique session ID prefix", { concurrency: false }, async () => {
   const { planner, orchestrator, cleanup } = await setupClients();
@@ -824,6 +879,9 @@ test("intercom status reports diagnostics when connected", { concurrency: false 
     assert.match(text, /Connected: Yes/);
     assert.match(text, /Active sessions: \d+/);
     assert.match(text, /Reconnect attempts: \d+/);
+    assert.match(text, /Settled reply guards: \d+/);
+    assert.match(text, /Queued inbound: \d+/);
+    assert.match(text, /Active asides: \d+\/3/);
     assert.match(text, /Broker: pid \d+ \(alive\)/);
     assert.match(text, /Socket: /);
     assert.match(text, /Log: /);
@@ -913,6 +971,27 @@ test("deferred startup connect is cancelled on shutdown", { concurrency: false }
   }
 });
 
+test("overlapping shutdown and restart preserves the replacement runtime", { concurrency: false }, async () => {
+  const { default: piIntercomExtension } = await import("./index.ts");
+  const { planner, cleanup } = await setupClients();
+  const harness = createExtensionHarness("overlap-worker", { hasUI: true });
+
+  try {
+    piIntercomExtension(harness.pi as never);
+    await harness.emitLifecycle("session_start");
+    await waitForSessionByName(planner, "overlap-worker");
+
+    const shutdown = harness.emitLifecycle("session_shutdown");
+    await harness.emitLifecycle("session_start");
+    await shutdown;
+
+    await waitForSessionByName(planner, "overlap-worker");
+  } finally {
+    await harness.emitLifecycle("session_shutdown");
+    await cleanup();
+  }
+});
+
 test("stale overlay work stops after same-session restart", { concurrency: false }, async () => {
   const { default: piIntercomExtension } = await import("./index.ts");
   const { planner, cleanup } = await setupClients();
@@ -987,6 +1066,32 @@ test("queued inbound messages are discarded after shutdown", { concurrency: fals
 
     assert.equal(harness.sentMessages.length, 0);
   } finally {
+    await cleanup();
+  }
+});
+
+test("busy non-interactive sessions do not reply to fire-and-forget sends", { concurrency: false }, async () => {
+  const { default: piIntercomExtension } = await import("./index.ts");
+  const { planner, cleanup } = await setupClients();
+  const harness = createExtensionHarness("pipe-send-worker", {
+    hasUI: false,
+    isIdle: () => false,
+  });
+  let replies = 0;
+  const onMessage = () => { replies += 1; };
+  planner.on("message", onMessage);
+
+  try {
+    piIntercomExtension(harness.pi as never);
+    await harness.emitLifecycle("session_start");
+    const target = await waitForSessionByName(planner, "pipe-send-worker");
+    const delivered = await planner.send(target.id, { text: "FYI only" });
+    assert.equal(delivered.delivered, true);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    assert.equal(replies, 0);
+  } finally {
+    planner.off("message", onMessage);
+    await harness.emitLifecycle("session_shutdown");
     await cleanup();
   }
 });
@@ -1313,6 +1418,96 @@ test("child supervisor tool clears reply waiter when cancelled", { concurrency: 
       await harness.emitLifecycle("session_shutdown");
     });
   } finally {
+    await cleanup();
+  }
+});
+
+test("ask and aside reject nested reply threading", { concurrency: false }, async () => {
+  const { default: piIntercomExtension } = await import("./index.ts");
+  const { cleanup } = await setupClients();
+  const harness = createExtensionHarness("nested-request-worker", { hasUI: true });
+
+  try {
+    piIntercomExtension(harness.pi as never);
+    await harness.emitLifecycle("session_start");
+    const intercomTool = harness.tools.find((tool) => tool.name === "intercom")!;
+
+    for (const action of ["ask", "aside"] as const) {
+      const result = await intercomTool.execute(`nested-${action}`, {
+        action,
+        to: "orchestrator",
+        message: "nested request",
+        replyTo: "parent-question",
+      }, new AbortController().signal, undefined, harness.ctx);
+      assert.equal(result.isError, true);
+      assert.match(result.content[0]?.text ?? "", /Nested ask\/aside threading is not supported/);
+    }
+  } finally {
+    await harness.emitLifecycle("session_shutdown");
+    await cleanup();
+  }
+});
+
+test("remote reply failures propagate as tool errors", { concurrency: false }, async () => {
+  const { default: piIntercomExtension } = await import("./index.ts");
+  const { orchestrator, cleanup } = await setupClients();
+  const harness = createExtensionHarness("reply-error-worker", { hasUI: true });
+
+  try {
+    piIntercomExtension(harness.pi as never);
+    await harness.emitLifecycle("session_start");
+    const intercomTool = harness.tools.find((tool) => tool.name === "intercom")!;
+    const inbound = once(orchestrator, "message") as Promise<[SessionInfo, Message]>;
+    const ask = intercomTool.execute("error-ask", {
+      action: "aside",
+      to: "orchestrator",
+      message: "fail this request",
+    }, new AbortController().signal, undefined, harness.ctx);
+    const [worker, request] = await inbound;
+    await orchestrator.send(worker.id, {
+      text: "model unavailable",
+      replyTo: request.id,
+      replyError: "model unavailable",
+    });
+    const result = await ask;
+    assert.equal(result.isError, true);
+    assert.match(result.content.map((part) => part.text).join("\n"), /model unavailable/);
+  } finally {
+    await harness.emitLifecycle("session_shutdown");
+    await cleanup();
+  }
+});
+
+test("late and wrong-sender replies are dropped instead of triggering turns", { concurrency: false }, async () => {
+  const { default: piIntercomExtension } = await import("./index.ts");
+  const { planner, orchestrator, cleanup } = await setupClients();
+  const harness = createExtensionHarness("reply-guard-worker", { hasUI: true });
+
+  try {
+    piIntercomExtension(harness.pi as never);
+    await harness.emitLifecycle("session_start");
+    const intercomTool = harness.tools.find((tool) => tool.name === "intercom")!;
+    const abort = new AbortController();
+    const inbound = once(orchestrator, "message") as Promise<[SessionInfo, Message]>;
+    const ask = intercomTool.execute("guard-ask", {
+      action: "ask",
+      to: "orchestrator",
+      message: "guard this request",
+    }, abort.signal, undefined, harness.ctx);
+    const [worker, request] = await inbound;
+
+    await planner.send(worker.id, { text: "forged", replyTo: request.id });
+    await orchestrator.send(worker.id, { text: "valid", replyTo: request.id });
+    const answer = await ask;
+    assert.match(answer.content.map((part) => part.text).join("\n"), /valid/);
+    assert.equal(harness.sentMessages.length, 0);
+
+    await orchestrator.send(worker.id, { text: "duplicate", replyTo: request.id });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.equal(harness.sentMessages.length, 0);
+    assert.equal(harness.entries.filter((entry) => entry.type === "intercom_reply_dropped").length, 2);
+  } finally {
+    await harness.emitLifecycle("session_shutdown");
     await cleanup();
   }
 });

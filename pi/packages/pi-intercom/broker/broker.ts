@@ -1,10 +1,10 @@
 import net from "net";
-import { writeFileSync, unlinkSync, mkdirSync, chmodSync } from "fs";
+import { writeFileSync, unlinkSync, mkdirSync, chmodSync, readFileSync, statSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
 import { randomUUID } from "crypto";
 import { writeMessage, writeFrame, encodeMessage, createMessageReader, MAX_FRAME_BYTES } from "./framing.js";
-import { getBrokerSocketPath } from "./paths.js";
+import { classifySocketProbeError, getBrokerSocketPath } from "./paths.js";
 import { isMessage, isSessionRegistration } from "./validation.js";
 import type { SessionInfo, BrokerMessage } from "../types.js";
 import { PROTOCOL_VERSION } from "../types.js";
@@ -69,6 +69,7 @@ class IntercomBroker {
   private server: net.Server;
   private shutdownTimer: NodeJS.Timeout | null = null;
   private reapTimer: NodeJS.Timeout | null = null;
+  private boundSocketIdentity: { dev: number; ino: number } | null = null;
 
   constructor() {
     mkdirSync(INTERCOM_DIR, { recursive: true });
@@ -147,6 +148,14 @@ class IntercomBroker {
         }
         writeFileSync(PID_PATH, String(process.pid), { mode: 0o600 });
         chmodSync(PID_PATH, 0o600);
+        if (process.platform !== "win32") {
+          try {
+            const stat = statSync(SOCKET_PATH);
+            this.boundSocketIdentity = { dev: stat.dev, ino: stat.ino };
+          } catch {
+            this.boundSocketIdentity = null;
+          }
+        }
         console.log(`Intercom broker started (pid: ${process.pid})`);
       });
     };
@@ -159,13 +168,17 @@ class IntercomBroker {
 
     let settled = false;
     const probe = net.connect(SOCKET_PATH);
-    const finish = (liveBrokerPresent: boolean): void => {
+    const finish = (result: "live" | "stale" | "indeterminate"): void => {
       if (settled) return;
       settled = true;
       probe.destroy();
-      if (liveBrokerPresent) {
+      if (result === "live") {
         console.log("Intercom broker already running; exiting");
         process.exit(0);
+      }
+      if (result === "indeterminate") {
+        console.error("Intercom broker socket probe failed or timed out; refusing to replace an unverified socket");
+        process.exit(1);
       }
       try {
         unlinkSync(SOCKET_PATH);
@@ -174,11 +187,10 @@ class IntercomBroker {
       }
       listen();
     };
-    probe.once("connect", () => finish(true));
-    probe.once("error", () => finish(false));
-    // Safety net: a probe that neither connects nor errors quickly is treated
-    // as "no live broker" so startup can't hang.
-    probe.setTimeout(1000, () => finish(false));
+    probe.once("connect", () => finish("live"));
+    probe.once("error", (error: NodeJS.ErrnoException) => finish(classifySocketProbeError(error)));
+    // A timeout is inconclusive: unlinking here could split a slow live broker.
+    probe.setTimeout(1000, () => finish("indeterminate"));
   }
 
   private reapDeadSessions(): void {
@@ -575,24 +587,46 @@ class IntercomBroker {
       session.socket.end();
     }
     this.sessions.clear();
-    if (process.platform !== "win32") {
+    if (process.platform !== "win32" && this.ownsSocketPath()) {
       try {
         unlinkSync(SOCKET_PATH);
       } catch {
         // The socket may already be gone if shutdown started after a disconnect.
       }
     }
-    try {
-      unlinkSync(PID_PATH);
-    } catch {
-      // The PID file may already be gone if startup never completed.
+    if (this.ownsPidFile()) {
+      try {
+        unlinkSync(PID_PATH);
+      } catch {
+        // The PID file may already be gone if startup never completed.
+      }
     }
     if (this.reapTimer) {
       clearInterval(this.reapTimer);
       this.reapTimer = null;
     }
-    this.server.close();
+    // Do not call server.close(): Node may unlink SOCKET_PATH even when that
+    // pathname has since been replaced by another broker. process.exit closes
+    // our listening descriptor without touching an unowned replacement path.
     process.exit(0);
+  }
+
+  private ownsSocketPath(): boolean {
+    if (!this.boundSocketIdentity) return false;
+    try {
+      const stat = statSync(SOCKET_PATH);
+      return stat.dev === this.boundSocketIdentity.dev && stat.ino === this.boundSocketIdentity.ino;
+    } catch {
+      return false;
+    }
+  }
+
+  private ownsPidFile(): boolean {
+    try {
+      return readFileSync(PID_PATH, "utf8").trim() === String(process.pid);
+    } catch {
+      return false;
+    }
   }
 }
 
