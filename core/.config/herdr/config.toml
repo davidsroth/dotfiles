@@ -28,8 +28,8 @@ open_worktree = "prefix+shift+g"
 remove_worktree = "prefix+shift+x"
 rename_workspace = "prefix+shift+r"
 close_workspace = "prefix+shift+d"
-previous_workspace = ["ctrl+s", "prefix+(", "cmd+shift+["]
-next_workspace = ["prefix+)", "cmd+shift+]"]
+previous_workspace = ["ctrl+shift+s", "prefix+(", "cmd+shift+["]
+next_workspace = ["ctrl+s", "prefix+)", "cmd+shift+]"]
 
 # Cycle the sidebar's agent rows without opening the picker, or jump directly
 # to agents 1-9 with Alt+number.
