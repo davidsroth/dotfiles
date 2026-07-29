@@ -7,7 +7,7 @@ A [pi](https://pi.dev) package for lightweight human review flows:
 - `/markup` command: opens the last assistant message in the same browser markup UI.
 - `/plan-status` command: shows the active plan path.
 
-The plan/markup UI supports highlighting text, adding inline comments, writing general feedback, approving, sending replies back to pi, and rendering Mermaid fenced diagrams. The draft UI is a focused single-textarea editor with two distinct outcomes (copy to clipboard vs. approve for the agent to post).
+The plan/markup UI supports highlighting text, adding inline comments, writing general feedback, approving, sending replies back to pi, and rendering Mermaid fenced diagrams. The draft UI is a focused editor with three distinct outcomes (reject with feedback, copy to clipboard, or approve for the agent to post).
 
 ## Install
 
@@ -61,20 +61,22 @@ For short messages the agent has drafted on the user's behalf. The agent calls:
 submit_draft({ text: "Hey team — quick update on …" })
 ```
 
-The browser opens a focused review page with the draft loaded into an editable textarea. The user picks one of two distinct outcomes:
+The browser opens a focused review page with the draft loaded into an editable textarea and a compact feedback field below it. The user picks one of three distinct outcomes:
 
 | Action | Shortcut | What happens |
 |---|---|---|
-| **Copy & Close** | `⌘↵` | Text → clipboard via `pbcopy`. User will post it themselves. Tool result tells the agent **not** to call any posting tool. |
-| **Approve & Post** | `⇧⌘↵` | Final text returned to the agent (no clipboard). User is authorising the agent to post. Tool result instructs the agent to call the appropriate channel-specific posting tool. |
-| Cancel | `esc` or close tab | Tool returns `(draft cancelled)`. No clipboard write, no posting. |
+| **Reject & Send Feedback** | `⌘↵` while the feedback field is focused | Requires non-empty feedback. Tool result tells the agent not to post, to revise according to the feedback, and to call `submit_draft` again. |
+| **Copy & Close** | `⌘↵` outside the feedback field | Text → clipboard via `pbcopy`. User will post it themselves. Tool result tells the agent **not** to call any posting tool. |
+| **Approve & Post** | `⇧⌘↵` outside the feedback field | Final text returned to the agent (no clipboard). User is authorising the agent to post. Tool result instructs the agent to call the appropriate channel-specific posting tool. |
+| Cancel | `esc` or close tab | Tool returns `(draft cancelled)`. No feedback submission, clipboard write, or posting. |
 
-If the user edits the draft inline before approving, a **word-level diff** of original→final (LCS over tokens, rendered in `git diff --word-diff` style — `{-deleted-}` and `{+inserted+}`) is included in the tool result so the agent sees the delta directly.
+If the user edits the draft inline before copying, approving, or rejecting, a **word-level diff** of original→final (LCS over tokens, rendered in `git diff --word-diff` style — `{-deleted-}` and `{+inserted+}`) is included in the tool result so the agent sees the delta directly. Rejection includes both this diff and the feedback so inline edits are not lost.
 
 The tool itself never posts anywhere. It exists as the explicit-approval channel between "draft something" and "actually send something on the user's behalf".
 
 Return shape:
 
+- `REJECTED — … Do NOT post it. … call submit_draft again.` + `Feedback:` block (optionally + edits made before rejection)
 - `COPY — … do NOT call a posting tool.` (optionally + `Edits:` block)
 - `APPROVE — … Call the appropriate channel-specific posting tool now.` + `Final text:` block (optionally + `Edits:` block)
 - `(draft cancelled)`

@@ -4,13 +4,15 @@
  *
  * Agent calls submit_draft({ text }) with a proposed message body.
  * Browser opens a focused review page with the draft loaded into an editable
- * textarea. The user picks one of two distinct actions:
+ * textarea. The user picks one of three distinct actions:
  *
  *   1. Copy (⌘↵)        — text → clipboard; user posts it themselves.
  *                          Agent should NOT call any posting tool.
  *   2. Approve (⇧⌘↵)    — text returned to agent (no clipboard);
  *                          user is authorising the agent to post via
  *                          the appropriate channel-specific tool.
+ *   3. Reject (⌘↵ while focused in feedback) — feedback returned to the
+ *                          agent so it can revise and submit again.
  *
  * If the user edited the draft, the word-level diff of original→final is
  * included in the tool result so the agent sees what changed directly.
@@ -20,8 +22,8 @@
  * submit_draft is the explicit-approval channel.
  *
  * Design notes:
- *   - Two CTAs only (Copy / Approve). esc or tab-close → cancel.
- *   - No iterative "send feedback" loop. No editor manipulation.
+ *   - Three CTAs (Reject / Copy / Approve). esc or tab-close → cancel.
+ *   - Rejection requires feedback; cancellation is the no-feedback dismissal.
  *   - No inline annotations — edit the textarea directly.
  *   - Shared theme/server/browser/clipboard helpers live in ../_review.
  */
@@ -36,19 +38,22 @@ import { wordDiff } from "./diff";
 
 // ── Types ──────────────────────────────────────────────────────────────
 
-type DraftAction = "copy" | "approve" | "cancel";
+type DraftAction = "copy" | "approve" | "reject" | "cancel";
 
 interface DraftResult {
 	action: DraftAction;
-	text?: string;       // final draft contents on copy/approve (incl. user edits)
-	edited?: boolean;    // true iff text !== original after trimEnd()
+	text?: string;       // final draft contents on copy/approve/reject (incl. user edits)
+	feedback?: string;   // required for reject
 }
 
 // ── CSS ────────────────────────────────────────────────────────────────
 
 function buildCss(palette: Palette): string {
 	return `
-${rootVarsBlock(palette)}
+${rootVarsBlock(palette, `
+  --danger: ${palette.error};
+  --danger-hover: color-mix(in oklab, var(--danger) 12%, transparent);
+`)}
 
 * { box-sizing: border-box; margin: 0; }
 html, body { height: 100%; }
@@ -105,17 +110,29 @@ main {
 }
 #draft:focus { border-color: var(--interactive); }
 
+.feedback-field { margin-top: 12px; }
+#feedback {
+  display: block; width: 100%; min-height: 72px; max-height: 160px; resize: vertical;
+  font-family: inherit; font-size: .9rem; line-height: 1.45;
+  padding: 9px 11px;
+  background: var(--surface-elevated); color: var(--text);
+  border: 1px solid var(--border); border-radius: 4px; outline: none;
+}
+#feedback:focus { border-color: var(--danger); }
+
 footer {
-  display: flex; gap: 10px; padding: 14px 32px 20px;
+  display: flex; flex-wrap: wrap; gap: 10px; padding: 14px 32px 20px;
   border-top: 1px solid var(--border);
 }
 footer button {
-  flex: 1; padding: 12px 14px;
+  flex: 1 1 210px; min-width: 0; padding: 12px 14px;
   font-family: inherit; font-size: .95rem; font-weight: 600;
   border: none; border-radius: 4px; cursor: pointer;
   letter-spacing: -0.01em;
   display: inline-flex; align-items: center; justify-content: center; gap: 8px;
 }
+footer button.reject { background: transparent; color: var(--danger); border: 1px solid var(--danger); }
+footer button.reject:hover { background: var(--danger-hover); }
 footer button.copy { background: var(--success); color: var(--success-text); }
 footer button.copy:hover { background: var(--success-hover); }
 footer button.approve { background: var(--interactive); color: var(--interactive-text); }
@@ -124,6 +141,10 @@ footer button[disabled] { opacity: .55; cursor: not-allowed; }
 footer button kbd {
   background: rgba(0,0,0,.18); border: none; color: inherit;
   padding: 1px 5px; border-radius: 3px; font-size: .78rem;
+}
+@media (max-width: 520px) {
+  footer { padding-left: 16px; padding-right: 16px; }
+  footer button { flex-basis: 100%; }
 }
 
 #status {
@@ -153,14 +174,19 @@ function buildPage(text: string, palette: Palette, nonce: string): string {
 <body>
 <header>
   <h1>Draft Review</h1>
-  <div class="hint"><kbd>⌘</kbd><kbd>↵</kbd> copy to clipboard (you post) · <kbd>⇧</kbd><kbd>⌘</kbd><kbd>↵</kbd> approve (I post for you) · <kbd>esc</kbd> cancel</div>
+  <div class="hint"><kbd>⌘</kbd><kbd>↵</kbd> copy (or reject in feedback) · <kbd>⇧</kbd><kbd>⌘</kbd><kbd>↵</kbd> approve (I post for you) · <kbd>esc</kbd> cancel</div>
 </header>
 <main>
   <div class="label"><span>Draft</span><span class="count" id="chars">0 chars</span></div>
   <textarea id="draft" spellcheck="true"></textarea>
+  <div class="feedback-field">
+    <label class="label" for="feedback"><span>Feedback (required to reject)</span></label>
+    <textarea id="feedback" rows="3" spellcheck="true" required placeholder="What should the agent revise?"></textarea>
+  </div>
 </main>
 <div id="status"></div>
 <footer>
+  <button id="rejectBtn" class="reject" data-action="reject" data-done="Rejected. Closing..." disabled>Reject &amp; Send Feedback</button>
   <button id="copyBtn" class="copy" data-action="copy" data-done="Copied. Closing...">Copy &amp; Close <kbd>⌘↵</kbd></button>
   <button id="approveBtn" class="approve" data-action="approve" data-done="Approved. Closing...">Approve &amp; Post <kbd>⇧⌘↵</kbd></button>
 </footer>
@@ -171,11 +197,18 @@ const initialText = ${initialText};
 const $ = (id) => document.getElementById(id);
 
 const draft = $('draft');
+const feedback = $('feedback');
 const chars = $('chars');
 draft.value = initialText;
 const updateChars = () => { chars.textContent = draft.value.length + ' chars'; };
+const updateRejectState = () => {
+  feedback.setCustomValidity('');
+  $('rejectBtn').disabled = !feedback.value.trim();
+};
 updateChars();
+updateRejectState();
 draft.addEventListener('input', updateChars);
+feedback.addEventListener('input', updateRejectState);
 
 window.addEventListener('load', () => {
   draft.focus();
@@ -187,6 +220,7 @@ let sent = false;
 const actionButtons = () => document.querySelectorAll('footer button[data-action]');
 function setButtonsDisabled(disabled) {
   actionButtons().forEach((b) => { b.disabled = disabled; });
+  if (!disabled) updateRejectState();
 }
 
 async function send(action, doneText) {
@@ -195,11 +229,9 @@ async function send(action, doneText) {
   // here doesn't leave the page locked with sent=true and no way to retry.
   setButtonsDisabled(true);
   sent = true;
-  const payload = {
-    nonce: pageOptions.nonce,
-    action,
-    text: draft.value,
-  };
+  const payload = { nonce: pageOptions.nonce, action };
+  if (action !== 'cancel') payload.text = draft.value;
+  if (action === 'reject') payload.feedback = feedback.value;
   try {
     const r = await fetch('/decision', {
       method: 'POST',
@@ -237,6 +269,12 @@ window.addEventListener('unhandledrejection', (ev) => {
 });
 
 function sendFromButton(btn) {
+  if (btn.dataset.action === 'reject' && !feedback.value.trim()) {
+    feedback.setCustomValidity('Add feedback before rejecting, or press esc to cancel.');
+    feedback.reportValidity();
+    feedback.focus();
+    return;
+  }
   send(btn.dataset.action, btn.dataset.done);
 }
 document.querySelectorAll('footer button[data-action]').forEach((btn) => {
@@ -244,13 +282,17 @@ document.querySelectorAll('footer button[data-action]').forEach((btn) => {
 });
 
 // Keyboard shortcuts:
-//   ⌘↵         → copy
-//   ⇧⌘↵       → approve
-//   esc        → cancel
+//   ⌘↵ in feedback → reject
+//   ⌘↵ elsewhere   → copy
+//   ⇧⌘↵ elsewhere  → approve
+//   esc             → cancel
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
     e.preventDefault();
-    sendFromButton(e.shiftKey ? $('approveBtn') : $('copyBtn'));
+    const btn = document.activeElement === feedback
+      ? $('rejectBtn')
+      : (e.shiftKey ? $('approveBtn') : $('copyBtn'));
+    sendFromButton(btn);
   } else if (e.key === 'Escape') {
     e.preventDefault();
     send('cancel', '');
@@ -261,7 +303,7 @@ document.addEventListener('keydown', (e) => {
 window.addEventListener('beforeunload', () => {
   if (sent) return;
   try {
-    const blob = new Blob([JSON.stringify({ nonce: pageOptions.nonce, action: 'cancel', text: draft.value })], { type: 'application/json' });
+    const blob = new Blob([JSON.stringify({ nonce: pageOptions.nonce, action: 'cancel' })], { type: 'application/json' });
     navigator.sendBeacon('/decision', blob);
   } catch (e) {}
 });
@@ -272,12 +314,22 @@ window.addEventListener('beforeunload', () => {
 
 /** Validate + normalize the posted draft decision. */
 export function parseDraftDecision(data: Record<string, unknown>): DraftResult {
+	const feedback = typeof data.feedback === "string" ? data.feedback.trim() : "";
 	const action: DraftAction =
 		data.action === "approve" ? "approve" :
 		data.action === "copy" ? "copy" :
+		data.action === "reject" && feedback ? "reject" :
 		"cancel";
 	const text = typeof data.text === "string" ? data.text : "";
-	return { action, text };
+	return action === "reject" ? { action, text, feedback } : { action, text };
+}
+
+/** Format the agent instructions for a feedback-backed rejection. */
+export function formatDraftRejection(originalText: string, finalText: string, feedback: string): string {
+	const edited = finalText !== originalText;
+	const edits = edited ? wordDiff(originalText, finalText) : "";
+	const editsBlock = edited ? `\n\nEdits made before rejection:\n\n${edits || "(no diff)"}` : "";
+	return `REJECTED — user rejected the draft. Do NOT post it. Revise it according to the feedback below, then call submit_draft again.\n\nFeedback:\n\n${feedback}${editsBlock}`;
 }
 
 // ── Extension ──────────────────────────────────────────────────────────
@@ -289,12 +341,13 @@ export default function draft(pi: ExtensionAPI): void {
 		description:
 			"Whenever you're about to send or post a message on the user's behalf (Slack reply, PR " +
 			"comment, email, DM, etc.), route it through this tool instead of posting directly. " +
-			"The user reviews and may edit the text, then chooses one of two outcomes: " +
+			"The user reviews and may edit the text, then chooses one of three outcomes: " +
 			"COPY — the text goes to the user's clipboard and they post it themselves, so do NOT " +
 			"call any posting tool afterward. " +
 			"APPROVE — the final text is returned to you and the user is authorising you to post it, " +
 			"so call the appropriate channel-specific posting tool (Slack, GitHub, email, etc.) with " +
-			"that text. If the user edited the draft, a word-level diff of original→final is included " +
+			"that text. REJECT — do not post; revise according to the user's required feedback and " +
+			"call submit_draft again. If the user edited the draft, a word-level diff of original→final is included " +
 			"in the result. This tool itself never posts anywhere.",
 		parameters: {
 			type: "object",
@@ -343,6 +396,10 @@ export default function draft(pi: ExtensionAPI): void {
 			const originalText = text.replace(/\s+$/, "");
 			const edited = finalText !== originalText;
 			const diff = edited ? wordDiff(originalText, finalText) : "";
+
+			if (result.action === "reject") {
+				return toolText(formatDraftRejection(originalText, finalText, result.feedback ?? ""));
+			}
 
 			if (result.action === "copy") {
 				let clipboardPrefix = "";

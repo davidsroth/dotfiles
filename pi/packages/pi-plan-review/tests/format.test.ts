@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseDraftDecision } from "../extensions/draft/index";
+import { formatDraftRejection, parseDraftDecision } from "../extensions/draft/index";
 import {
 	findLastAssistantText,
 	formatLastReply,
@@ -98,13 +98,36 @@ describe("parseDraftDecision", () => {
 	it("maps known actions", () => {
 		expect(parseDraftDecision({ action: "approve", text: "x" })).toEqual({ action: "approve", text: "x" });
 		expect(parseDraftDecision({ action: "copy", text: "x" })).toEqual({ action: "copy", text: "x" });
+		expect(parseDraftDecision({ action: "reject", text: "x", feedback: " revise this " })).toEqual({
+			action: "reject",
+			text: "x",
+			feedback: "revise this",
+		});
 	});
-	it("falls back to cancel for unknown actions", () => {
+	it("falls back to cancel for unknown actions or rejection without feedback", () => {
 		expect(parseDraftDecision({ action: "evil" }).action).toBe("cancel");
 		expect(parseDraftDecision({}).action).toBe("cancel");
+		expect(parseDraftDecision({ action: "reject", feedback: "  " }).action).toBe("cancel");
 	});
 	it("defaults missing text to empty string", () => {
 		expect(parseDraftDecision({ action: "copy" }).text).toBe("");
+	});
+});
+
+describe("formatDraftRejection", () => {
+	it("instructs the agent not to post and to revise and resubmit", () => {
+		const out = formatDraftRejection("hello", "hello", "Make it warmer.");
+		expect(out).toContain("REJECTED — user rejected the draft");
+		expect(out).toContain("Do NOT post it");
+		expect(out).toContain("Revise it according to the feedback below");
+		expect(out).toContain("call submit_draft again");
+		expect(out).toContain("Feedback:\n\nMake it warmer.");
+		expect(out).not.toContain("Edits made before rejection");
+	});
+
+	it("includes a word-level diff when the draft was edited before rejection", () => {
+		const out = formatDraftRejection("hello world", "hello there", "Use my edit.");
+		expect(out).toContain("Edits made before rejection:\n\nhello {-world-}{+there+}");
 	});
 });
 
