@@ -87,6 +87,11 @@ export NVM_DIR="$HOME/.nvm"
 # Application configuration
 export APPLICATION_CONFIG_PROFILE="local"
 
+# The npm-distributed Google Workspace CLI is ad-hoc signed, making its macOS
+# Keychain encryption key unreliable across processes. Use the durable local
+# 0600 key file for both authentication and subsequent gws commands.
+export GOOGLE_WORKSPACE_CLI_KEYRING_BACKEND="file"
+
 # History configuration
 export HISTFILE="$XDG_STATE_HOME/zsh/history"
 export HISTSIZE=100000
