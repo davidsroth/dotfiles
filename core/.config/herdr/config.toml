@@ -127,6 +127,7 @@ command = "${SHELL:-/bin/sh} -ic 'opencode'"
 
 [ui]
 mouse_capture = true
+pane_gaps = false
 # Create tabs immediately with Herdr's generated names; rename manually when useful.
 prompt_new_tab_name = false
 
