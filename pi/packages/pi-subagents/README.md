@@ -343,7 +343,8 @@ Agent lifecycle events are emitted via `pi.events.emit()` so other extensions ca
 |-------|------|------------|
 | `subagents:created` | Background agent registered | `id`, `type`, `description`, `isBackground` |
 | `subagents:started` | Agent transitions to running (including queued→running) | `id`, `type`, `description` |
-| `subagents:completed` | Agent finished successfully | `id`, `type`, `durationMs`, `tokens` (lifetime `{ input, output, total }`), `toolUses`, `result` |
+| `subagents:usage` | An assistant response reports usage | `id`, `type`, `description`, cumulative `usage` (`input`, `output`, `cacheWrite`, `cost`), `cost` |
+| `subagents:completed` | Agent finished successfully | `id`, `type`, `durationMs`, `tokens` (lifetime `{ input, output, total }`), `cost`, `toolUses`, `result` |
 | `subagents:failed` | Agent errored, stopped, or aborted | same as completed + `error`, `status` |
 | `subagents:steered` | Steering message sent | `id`, `message` |
 | `subagents:compacted` | Agent's session successfully compacted | `id`, `type`, `description`, `reason` (`"manual"` / `"threshold"` / `"overflow"`), `tokensBefore`, `compactionCount` |
@@ -353,7 +354,7 @@ Agent lifecycle events are emitted via `pi.events.emit()` so other extensions ca
 | `subagents:settings_loaded` | Persisted settings applied at extension init | `settings` (merged global + project) |
 | `subagents:settings_changed` | `/agents` → Settings mutation was applied | `settings`, `persisted` (`boolean` — `false` on write failure) |
 
-`tokens.total` = `input + output + cacheWrite`. `cacheRead` is excluded — each turn's `cacheRead` is the cumulative cached prefix re-read on that one API call, so summing per-message would over-count it. Use `contextUsage.percent` (surfaced as `(NN%)` in the widget) for current context size.
+`tokens.total` = `input + output + cacheWrite`. `cacheRead` is excluded — each turn's `cacheRead` is the cumulative cached prefix re-read on that one API call, so summing per-message would over-count it. `cost` is lifetime-cumulative in dollars and survives compaction. Final `subagents:record` custom entries persist the same cumulative usage snapshot, allowing branch-aware consumers to reconstruct totals after reload. Use `contextUsage.percent` (surfaced as `(NN%)` in the widget) for current context size.
 
 ## Cross-Extension RPC
 

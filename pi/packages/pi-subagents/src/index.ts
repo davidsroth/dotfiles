@@ -97,7 +97,7 @@ function createActivityTracker(maxTurns?: number, onStreamUpdate?: () => void) {
     onSessionCreated: (session: any) => {
       state.session = session;
     },
-    onAssistantUsage: (usage: { input: number; output: number; cacheWrite: number }) => {
+    onAssistantUsage: (usage: { input: number; output: number; cacheWrite: number; cost?: number }) => {
       addUsage(state.lifetimeUsage, usage);
       onStreamUpdate?.();
     },
@@ -179,6 +179,46 @@ function buildDetails(
     error: record.error,
     cost: record.lifetimeUsage.cost,
     ...overrides,
+  };
+}
+
+/** Build the public lifecycle payload for a terminal agent record. */
+export function buildLifecycleEventData(record: AgentRecord) {
+  const durationMs = record.completedAt ? record.completedAt - record.startedAt : Date.now() - record.startedAt;
+  // All fields are lifetime-accumulated (Σ over every assistant message_end),
+  // so they survive compaction together. tokens is omitted when nothing was
+  // ever produced, preserving the historical lifecycle payload shape.
+  const u = record.lifetimeUsage;
+  const total = getLifetimeTotal(u);
+  const tokens = total > 0
+    ? { input: u.input, output: u.output, total }
+    : undefined;
+  return {
+    id: record.id,
+    type: record.type,
+    description: record.description,
+    result: record.result,
+    error: record.error,
+    status: record.status,
+    toolUses: record.toolUses,
+    durationMs,
+    tokens,
+    cost: u.cost,
+  };
+}
+
+/** Build the durable custom-entry payload used by cross-extension consumers. */
+export function buildPersistedRecordData(record: AgentRecord) {
+  return {
+    id: record.id,
+    type: record.type,
+    description: record.description,
+    status: record.status,
+    result: record.result,
+    error: record.error,
+    startedAt: record.startedAt,
+    completedAt: record.completedAt,
+    usage: { ...record.lifetimeUsage },
   };
 }
 
@@ -347,49 +387,35 @@ export default function (pi: ExtensionAPI) {
     30_000,
   );
 
-  /** Helper: build event data for lifecycle events from an AgentRecord. */
-  function buildEventData(record: AgentRecord) {
-    const durationMs = record.completedAt ? record.completedAt - record.startedAt : Date.now() - record.startedAt;
-    // All three fields are lifetime-accumulated (Σ over every assistant message_end),
-    // so they survive compaction together — input + output ≤ total always.
-    // tokens is omitted when nothing was ever produced (e.g. agent errored before
-    // any message_end fired), preserving prior payload shape.
-    const u = record.lifetimeUsage;
-    const total = getLifetimeTotal(u);
-    const tokens = total > 0
-      ? { input: u.input, output: u.output, total }
-      : undefined;
-    return {
+  /** Persist and publish every terminal run, including foreground and resumed agents. */
+  function recordTerminalRun(record: AgentRecord) {
+    // Persist before publishing so event consumers can immediately reconstruct
+    // the authoritative active-branch total without racing appendEntry().
+    const isError = record.status === "error" || record.status === "stopped" || record.status === "aborted";
+    try {
+      pi.appendEntry("subagents:record", buildPersistedRecordData(record));
+    } finally {
+      // Keep lifecycle delivery best-effort even if persistence is unavailable.
+      pi.events.emit(
+        isError ? "subagents:failed" : "subagents:completed",
+        buildLifecycleEventData(record),
+      );
+    }
+  }
+
+  /** Publish cumulative live usage after every assistant response. */
+  function recordUsage(record: AgentRecord) {
+    pi.events.emit("subagents:usage", {
       id: record.id,
       type: record.type,
       description: record.description,
-      result: record.result,
-      error: record.error,
-      status: record.status,
-      toolUses: record.toolUses,
-      durationMs,
-      tokens,
-    };
+      usage: { ...record.lifetimeUsage },
+      cost: record.lifetimeUsage.cost,
+    });
   }
 
   // Background completion: route through group join or send individual nudge
   const manager = new AgentManager((record) => {
-    // Emit lifecycle event based on terminal status
-    const isError = record.status === "error" || record.status === "stopped" || record.status === "aborted";
-    const eventData = buildEventData(record);
-    if (isError) {
-      pi.events.emit("subagents:failed", eventData);
-    } else {
-      pi.events.emit("subagents:completed", eventData);
-    }
-
-    // Persist final record for cross-extension history reconstruction
-    pi.appendEntry("subagents:record", {
-      id: record.id, type: record.type, description: record.description,
-      status: record.status, result: record.result, error: record.error,
-      startedAt: record.startedAt, completedAt: record.completedAt,
-    });
-
     // Skip notification if result was already consumed via get_subagent_result
     if (record.resultConsumed) {
       agentActivity.delete(record.id);
@@ -429,7 +455,7 @@ export default function (pi: ExtensionAPI) {
       tokensBefore: info.tokensBefore,
       compactionCount: record.compactionCount,
     });
-  });
+  }, recordTerminalRun, recordUsage);
 
   // Expose manager via Symbol.for() global registry for cross-package access.
   // Standard Node.js pattern for cross-package singletons (used by OpenTelemetry, etc.).

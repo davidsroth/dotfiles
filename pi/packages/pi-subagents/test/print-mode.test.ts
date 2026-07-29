@@ -64,10 +64,52 @@ function makeHeadlessCtx() {
   } as any;
 }
 
-describe("print mode background notifications", () => {
+describe("print mode subagents", () => {
   afterEach(() => {
     vi.restoreAllMocks();
     vi.useRealTimers();
+  });
+
+  it("persists and publishes foreground usage for cross-extension totals", async () => {
+    vi.mocked(runAgent).mockImplementation(async (_ctx, _type, _prompt, opts) => {
+      opts.onAssistantUsage?.({ input: 100, output: 25, cacheWrite: 5, cost: 0.42 });
+      return {
+        responseText: "done",
+        session: { dispose: vi.fn() } as any,
+        aborted: false,
+        steered: false,
+      };
+    });
+
+    const { pi, tools, handlers } = makePi();
+    subagentsExtension(pi);
+
+    const agentTool = tools.get("Agent");
+    await agentTool.execute(
+      "tool-call-1",
+      {
+        prompt: "reply done",
+        description: "tiny child",
+        subagent_type: "general-purpose",
+        run_in_background: false,
+      },
+      undefined,
+      undefined,
+      makeHeadlessCtx(),
+    );
+
+    expect(pi.events.emit).toHaveBeenCalledWith("subagents:usage", expect.objectContaining({
+      cost: 0.42,
+      usage: { input: 100, output: 25, cacheWrite: 5, cost: 0.42 },
+    }));
+    expect(pi.appendEntry).toHaveBeenCalledWith("subagents:record", expect.objectContaining({
+      usage: { input: 100, output: 25, cacheWrite: 5, cost: 0.42 },
+    }));
+    expect(pi.events.emit).toHaveBeenCalledWith("subagents:completed", expect.objectContaining({
+      cost: 0.42,
+    }));
+
+    await handlers.get("session_shutdown")?.({}, makeHeadlessCtx());
   });
 
   it("ignores stale-context errors from delayed completion nudges", async () => {

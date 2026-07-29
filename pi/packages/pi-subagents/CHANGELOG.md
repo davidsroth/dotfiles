@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Subagent costs are now available to cross-extension consumers: `subagents:usage` publishes cumulative live usage, terminal lifecycle events include lifetime `cost`, and `subagents:record` entries persist the full cumulative usage snapshot for branch-aware reconstruction after reload.
+
 ### Fixed
 - Child extension runtimes now receive `session_shutdown` before their SDK session is disposed, preventing external registrations such as intercom presence from surviving as zombies. Disposal still runs when an extension shutdown hook fails.
 

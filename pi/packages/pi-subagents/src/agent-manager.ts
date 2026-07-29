@@ -17,6 +17,8 @@ import { cleanupWorktree, createWorktree, pruneWorktrees, } from "./worktree.js"
 export type OnAgentComplete = (record: AgentRecord) => void;
 export type OnAgentStart = (record: AgentRecord) => void;
 export type OnAgentCompact = (record: AgentRecord, info: CompactionInfo) => void;
+export type OnAgentTerminal = (record: AgentRecord) => void;
+export type OnAgentUsage = (record: AgentRecord) => void;
 export type CompactionInfo = { reason: "manual" | "threshold" | "overflow"; tokensBefore: number };
 
 /** Default max concurrent background agents. */
@@ -59,7 +61,7 @@ interface SpawnOptions {
   /** Called at the end of each agentic turn with the cumulative count. */
   onTurnEnd?: (turnCount: number) => void;
   /** Called once per assistant message_end with that message's usage delta. */
-  onAssistantUsage?: (usage: { input: number; output: number; cacheWrite: number }) => void;
+  onAssistantUsage?: (usage: { input: number; output: number; cacheWrite: number; cost?: number }) => void;
   /** Called when the session successfully compacts. */
   onCompaction?: (info: CompactionInfo) => void;
 }
@@ -70,6 +72,8 @@ export class AgentManager {
   private onComplete?: OnAgentComplete;
   private onStart?: OnAgentStart;
   private onCompact?: OnAgentCompact;
+  private onTerminal?: OnAgentTerminal;
+  private onUsage?: OnAgentUsage;
   private maxConcurrent: number;
 
   /** Queue of background agents waiting to start. */
@@ -82,10 +86,14 @@ export class AgentManager {
     maxConcurrent = DEFAULT_MAX_CONCURRENT,
     onStart?: OnAgentStart,
     onCompact?: OnAgentCompact,
+    onTerminal?: OnAgentTerminal,
+    onUsage?: OnAgentUsage,
   ) {
     this.onComplete = onComplete;
     this.onStart = onStart;
     this.onCompact = onCompact;
+    this.onTerminal = onTerminal;
+    this.onUsage = onUsage;
     this.maxConcurrent = maxConcurrent;
     // Cleanup completed agents after 10 minutes (but keep sessions for resume)
     this.cleanupInterval = setInterval(() => this.cleanup(), 60_000);
@@ -198,6 +206,7 @@ export class AgentManager {
       onTextDelta: options.onTextDelta,
       onAssistantUsage: (usage) => {
         addUsage(record.lifetimeUsage, usage);
+        try { this.onUsage?.(record); } catch { /* usage observers must not interrupt the agent */ }
         options.onAssistantUsage?.(usage);
       },
       onCompaction: (info) => {
@@ -244,6 +253,7 @@ export class AgentManager {
           }
         }
 
+        try { this.onTerminal?.(record); } catch { /* ignore terminal side-effect errors */ }
         if (options.isBackground) {
           this.runningBackground--;
           try { this.onComplete?.(record); } catch { /* ignore completion side-effect errors */ }
@@ -275,9 +285,10 @@ export class AgentManager {
           } catch { /* ignore cleanup errors */ }
         }
 
+        try { this.onTerminal?.(record); } catch { /* ignore terminal side-effect errors */ }
         if (options.isBackground) {
           this.runningBackground--;
-          this.onComplete?.(record);
+          try { this.onComplete?.(record); } catch { /* ignore completion side-effect errors */ }
           this.drainQueue();
         }
         return "";
@@ -300,7 +311,8 @@ export class AgentManager {
         record.status = "error";
         record.error = err instanceof Error ? err.message : String(err);
         record.completedAt = Date.now();
-        this.onComplete?.(record);
+        try { this.onTerminal?.(record); } catch { /* ignore terminal side-effect errors */ }
+        try { this.onComplete?.(record); } catch { /* ignore completion side-effect errors */ }
       }
     }
   }
@@ -346,6 +358,7 @@ export class AgentManager {
         },
         onAssistantUsage: (usage) => {
           addUsage(record.lifetimeUsage, usage);
+          try { this.onUsage?.(record); } catch { /* usage observers must not interrupt the agent */ }
         },
         onCompaction: (info) => {
           record.compactionCount++;
@@ -362,6 +375,7 @@ export class AgentManager {
       record.completedAt = Date.now();
     }
 
+    try { this.onTerminal?.(record); } catch { /* ignore terminal side-effect errors */ }
     return record;
   }
 
@@ -384,6 +398,7 @@ export class AgentManager {
       this.queue = this.queue.filter(q => q.id !== id);
       record.status = "stopped";
       record.completedAt = Date.now();
+      try { this.onTerminal?.(record); } catch { /* ignore terminal side-effect errors */ }
       return true;
     }
 

@@ -323,8 +323,8 @@ describe("AgentManager — lifetime usage + compaction count are eagerly initial
     vi.mocked(runAgent).mockImplementation(async (_ctx, _type, _prompt, opts: any) => {
       captured = opts;
       // Two assistant messages with usage
-      opts.onAssistantUsage?.({ input: 100, output: 50, cacheWrite: 10 });
-      opts.onAssistantUsage?.({ input: 200, output: 80, cacheWrite: 20 });
+      opts.onAssistantUsage?.({ input: 100, output: 50, cacheWrite: 10, cost: 0.12 });
+      opts.onAssistantUsage?.({ input: 200, output: 80, cacheWrite: 20, cost: 0.34 });
       return { responseText: "done", session: mockSession(), aborted: false, steered: false };
     });
 
@@ -336,7 +336,7 @@ describe("AgentManager — lifetime usage + compaction count are eagerly initial
 
     expect(captured).toBeDefined();
     expect(manager.getRecord(id)!.lifetimeUsage).toEqual({
-      input: 300, output: 130, cacheWrite: 30, cost: 0,
+      input: 300, output: 130, cacheWrite: 30, cost: 0.46,
     });
   });
 
@@ -403,6 +403,66 @@ describe("AgentManager — lifetime usage + compaction count are eagerly initial
 
     expect(manager.getRecord(id)!.lifetimeUsage).toEqual({ input: 70, output: 30, cacheWrite: 5, cost: 0 });
     expect(manager.getRecord(id)!.compactionCount).toBe(1);
+  });
+});
+
+describe("AgentManager — usage and terminal observers", () => {
+  let manager: AgentManager;
+
+  afterEach(() => {
+    manager?.dispose();
+  });
+
+  it("publishes cumulative usage and terminal state for foreground agents", async () => {
+    const usageCosts: number[] = [];
+    const terminalCosts: number[] = [];
+    manager = new AgentManager(
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      (record) => terminalCosts.push(record.lifetimeUsage.cost),
+      (record) => usageCosts.push(record.lifetimeUsage.cost),
+    );
+    vi.mocked(runAgent).mockImplementation(async (_ctx, _type, _prompt, opts: any) => {
+      opts.onAssistantUsage?.({ input: 10, output: 5, cacheWrite: 0, cost: 0.1 });
+      opts.onAssistantUsage?.({ input: 20, output: 10, cacheWrite: 0, cost: 0.2 });
+      return { responseText: "done", session: mockSession(), aborted: false, steered: false };
+    });
+
+    await manager.spawnAndWait(mockPi, mockCtx, "general-purpose", "test", {
+      description: "test",
+    });
+
+    expect(usageCosts).toEqual([0.1, 0.30000000000000004]);
+    expect(terminalCosts).toEqual([0.30000000000000004]);
+  });
+
+  it("publishes another terminal snapshot after a resumed run", async () => {
+    const terminalStatuses: string[] = [];
+    manager = new AgentManager(
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      (record) => terminalStatuses.push(record.status),
+    );
+    const session = mockSession();
+    vi.mocked(runAgent).mockResolvedValue({
+      responseText: "first",
+      session,
+      aborted: false,
+      steered: false,
+    });
+
+    const record = await manager.spawnAndWait(mockPi, mockCtx, "general-purpose", "test", {
+      description: "test",
+    });
+    const { resumeAgent: resumeMock } = await import("../src/agent-runner.js");
+    vi.mocked(resumeMock).mockResolvedValue("second");
+    await manager.resume(record.id, "more");
+
+    expect(terminalStatuses).toEqual(["completed", "completed"]);
   });
 });
 
