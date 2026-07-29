@@ -11,7 +11,7 @@
  *   - branch:        footerData.getGitBranch() (pi watches .git/HEAD for changes)
  *   - dirty:         our own `git status --porcelain` (cached, refreshed on
  *                    session_start, turn_end, user_bash, and branch change)
- *   - tokens/cost:   summed from assistant messages on the active branch
+ *   - tokens/cost:   assistant usage plus persisted/live subagent cost on the active branch
  *   - context %:     ctx.getContextUsage()
  *   - model:         ctx.model
  *
@@ -33,11 +33,91 @@ interface DirtyState {
 	behind: number;
 }
 
+export interface BranchUsage {
+	input: number;
+	output: number;
+	cacheRead: number;
+	cacheWrite: number;
+	cost: number;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null;
+}
+
+function nonNegativeFinite(value: unknown): number | undefined {
+	return typeof value === "number" && Number.isFinite(value) && value >= 0
+		? value
+		: undefined;
+}
+
+/** Sum parent usage and the latest cumulative record for each subagent on a branch. */
+export function calculateBranchUsage(
+	entries: readonly unknown[],
+	liveSubagentCosts: ReadonlyMap<string, number> = new Map(),
+): BranchUsage {
+	const usage: BranchUsage = {
+		input: 0,
+		output: 0,
+		cacheRead: 0,
+		cacheWrite: 0,
+		cost: 0,
+	};
+	const subagentCosts = new Map<string, number>();
+
+	for (const value of entries) {
+		if (!isRecord(value)) continue;
+
+		if (value.type === "message" && isRecord(value.message) && value.message.role === "assistant") {
+			const message = value.message as unknown as AssistantMessage;
+			usage.input += message.usage.input;
+			usage.output += message.usage.output;
+			usage.cacheRead += message.usage.cacheRead ?? 0;
+			usage.cacheWrite += message.usage.cacheWrite ?? 0;
+			usage.cost += message.usage.cost.total;
+			continue;
+		}
+
+		if (value.type !== "custom" || value.customType !== "subagents:record" || !isRecord(value.data)) {
+			continue;
+		}
+		const id = typeof value.data.id === "string" ? value.data.id : undefined;
+		const persistedUsage = isRecord(value.data.usage) ? value.data.usage : undefined;
+		const cost = nonNegativeFinite(persistedUsage?.cost ?? value.data.cost);
+		if (id && cost !== undefined) subagentCosts.set(id, cost);
+	}
+
+	// Live values are cumulative and override a persisted value for the same ID.
+	for (const [id, cost] of liveSubagentCosts) {
+		if (nonNegativeFinite(cost) !== undefined) subagentCosts.set(id, cost);
+	}
+	for (const cost of subagentCosts.values()) usage.cost += cost;
+
+	return usage;
+}
+
 export default function (pi: ExtensionAPI) {
 	let dirtyState: DirtyState = { dirty: false, ahead: 0, behind: 0 };
 	let lastRefreshCwd = "";
 	let refreshInFlight = false;
 	let installed = true;
+	let requestFooterRender: (() => void) | undefined;
+	const liveSubagentCosts = new Map<string, number>();
+
+	const unsubSubagentUsage = pi.events.on("subagents:usage", (value) => {
+		if (!isRecord(value) || typeof value.id !== "string") return;
+		const cost = nonNegativeFinite(value.cost);
+		if (cost === undefined) return;
+		liveSubagentCosts.set(value.id, cost);
+		requestFooterRender?.();
+	});
+	const clearTerminalSubagent = (value: unknown) => {
+		if (!isRecord(value) || typeof value.id !== "string") return;
+		liveSubagentCosts.delete(value.id);
+		requestFooterRender?.();
+	};
+	const unsubSubagentCompleted = pi.events.on("subagents:completed", clearTerminalSubagent);
+	const unsubSubagentFailed = pi.events.on("subagents:failed", clearTerminalSubagent);
 
 	async function refreshDirty(cwd: string, requestRender?: () => void) {
 		if (refreshInFlight) return;
@@ -91,6 +171,7 @@ export default function (pi: ExtensionAPI) {
 	function install(ctx: ExtensionContext) {
 		ctx.ui.setFooter((tui, theme, footerData: ReadonlyFooterDataProvider) => {
 			const requestRender = () => tui.requestRender();
+			requestFooterRender = requestRender;
 
 			// Re-check dirty whenever the branch changes (commit, checkout, etc.)
 			const unsubBranch = footerData.onBranchChange(() => {
@@ -103,25 +184,15 @@ export default function (pi: ExtensionAPI) {
 			return {
 				dispose: () => {
 					unsubBranch();
+					if (requestFooterRender === requestRender) requestFooterRender = undefined;
 				},
 				invalidate() {},
 				render(width: number): string[] {
 					// --- Token / cost totals from active branch ---
-					let input = 0;
-					let output = 0;
-					let cacheRead = 0;
-					let cacheWrite = 0;
-					let cost = 0;
-					for (const e of ctx.sessionManager.getBranch()) {
-						if (e.type === "message" && e.message.role === "assistant") {
-							const m = e.message as AssistantMessage;
-							input += m.usage.input;
-							output += m.usage.output;
-							cacheRead += m.usage.cacheRead ?? 0;
-							cacheWrite += m.usage.cacheWrite ?? 0;
-							cost += m.usage.cost.total;
-						}
-					}
+					const { input, output, cacheRead, cacheWrite, cost } = calculateBranchUsage(
+						ctx.sessionManager.getBranch(),
+						liveSubagentCosts,
+					);
 
 					const ctxUsage = ctx.getContextUsage();
 					const pct =
@@ -189,6 +260,7 @@ export default function (pi: ExtensionAPI) {
 	}
 
 	pi.on("session_start", async (_event, ctx) => {
+		liveSubagentCosts.clear();
 		if (installed) install(ctx);
 		await refreshDirty(ctx.cwd);
 	});
@@ -202,6 +274,14 @@ export default function (pi: ExtensionAPI) {
 			refreshDirty(ctx.cwd).catch(() => {});
 		}, 100);
 		return undefined;
+	});
+
+	pi.on("session_shutdown", () => {
+		unsubSubagentUsage();
+		unsubSubagentCompleted();
+		unsubSubagentFailed();
+		requestFooterRender = undefined;
+		liveSubagentCosts.clear();
 	});
 
 	// Toggle for debugging / comparison
