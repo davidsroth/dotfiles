@@ -10,9 +10,10 @@ Config file:
 
 ### Global complex modifications
 
-- **Caps Lock → Hyper when held, Escape when tapped**
-- **Hyper+Escape → Caps Lock**
-- **Hyper+Space → input source switch**
+- **Caps Lock → Command+Control+Shift when held, Escape when tapped**
+  - Option remains independent, so holding Caps Lock+Option produces the full Hyper chord
+- **Caps Lock+Escape → Caps Lock**
+- **Caps Lock+Option+Space → input source switch**
 - **`fn`+`h/j/k/l` → arrow keys**
 - **`Tab` held → `fn`, tapped → `Tab`**
 - **Option+`i` / Option+`u` → `F18` / `F19`**
