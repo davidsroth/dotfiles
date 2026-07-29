@@ -1,0 +1,138 @@
+# Herdr keymap adapted from ~/.config/tmux.
+# Herdr 0.7.x supports one key after the prefix, so tmux key tables such as
+# prefix+c+p cannot be reproduced. Popup commands are temporary zoomed panes.
+
+onboarding = false
+
+[terminal]
+new_cwd = "follow"
+
+[keys]
+# Match tmux's prefix.
+prefix = "ctrl+g"
+
+# General / workspace (workspace is the closest Herdr equivalent to session).
+help = "prefix+?"
+settings = "prefix+comma"
+detach = "prefix+q"
+reload_config = "prefix+r"
+open_notification_target = "prefix+shift+o"
+workspace_picker = "prefix+w"
+# prefix+s now opens the workspace/directory picker below (tmux's prefix+s
+# muscle memory). goto is Herdr's built-in agent and pane switcher — searchable,
+# with b/w/i/d/a state filters — so it doubles as the agent picker on prefix+a.
+goto = ["prefix+a", "prefix+ctrl+f"]
+new_workspace = "prefix+ctrl+c"
+new_worktree = "prefix+shift+w"
+open_worktree = "prefix+shift+g"
+remove_worktree = "prefix+shift+x"
+rename_workspace = "prefix+shift+r"
+close_workspace = "prefix+shift+d"
+previous_workspace = ["ctrl+s", "prefix+(", "cmd+shift+["]
+next_workspace = ["prefix+)", "cmd+shift+]"]
+
+# Cycle the sidebar's agent rows without opening the picker, or jump directly
+# to agents 1-9 with Alt+number.
+previous_agent = "prefix+p"
+next_agent = "prefix+n"
+focus_agent = "alt+1..9"
+
+# Windows map to Herdr tabs. Unlike tmux, Herdr cannot bind alt+[ / alt+]:
+# their legacy encodings (ESC [ and ESC ]) are the CSI and OSC introducers, so
+# Herdr's input parser consumes them and the binding never fires. Cmd works
+# instead, via the CSI u super encoding WezTerm sends (see wezterm.lua).
+new_tab = "prefix+c"
+rename_tab = "prefix+shift+t"
+previous_tab = "cmd+["
+next_tab = "cmd+]"
+# Keep Herdr's default prefix+1..9 binding for direct tab switching.
+close_tab = "prefix+d"
+
+# Panes: preserve tmux's prefix+hjkl, split aliases, zoom, and copy entry.
+focus_pane_left = "prefix+h"
+focus_pane_down = "prefix+j"
+focus_pane_up = "prefix+k"
+focus_pane_right = "prefix+l"
+cycle_pane_next = "prefix+tab"
+cycle_pane_previous = "prefix+shift+tab"
+split_vertical = ["prefix+|", "prefix+backslash"]
+split_horizontal = ["prefix+minus", "prefix+_"]
+close_pane = "prefix+x"
+zoom = "prefix+z"
+copy_mode = "prefix+enter"
+edit_scrollback = "prefix+shift+e"
+resize_mode = "prefix+ctrl+r"
+toggle_sidebar = "prefix+["
+
+# Keep direct Ctrl-h/j/k/l available to Vim. Herdr cannot reproduce tmux's
+# process-aware passthrough, so binding them globally would break editor splits.
+
+# tmux prefix+s: workspace/directory picker. Herdr's own new_workspace always
+# starts at $HOME with no prompt, so this covers the missing flow — open a
+# directory that has no workspace yet, resolved through zoxide.
+[[keys.command]]
+key = "prefix+s"
+type = "popup"
+command = "$HOME/.config/herdr/bin/workspace-picker.sh"
+width = "60%"
+height = "50%"
+
+# tmux prefix+g: lazygit popup (temporary zoomed pane in Herdr 0.7.x).
+[[keys.command]]
+key = "prefix+g"
+type = "pane"
+command = "lazygit"
+
+# tmux prefix+e: Yazi picker/editor popup.
+[[keys.command]]
+key = "prefix+e"
+type = "pane"
+command = "env -u NVIM nvim --clean -u ~/.config/yazi/tmux-popup.lua"
+
+# tmux prefix+v: scratch Neovim popup.
+[[keys.command]]
+key = "prefix+v"
+type = "pane"
+command = "env -u NVIM nvim"
+
+# tmux prefix+i: floating shell.
+[[keys.command]]
+key = "prefix+i"
+type = "pane"
+command = "exec ${SHELL:-/bin/sh}"
+
+# tmux prefix+C: Claude popup.
+[[keys.command]]
+key = "prefix+shift+c"
+type = "pane"
+command = "${SHELL:-/bin/sh} -ic 'claude'"
+
+# tmux prefix+o: open the focused pane's directory in Finder.
+[[keys.command]]
+key = "prefix+o"
+type = "shell"
+command = "open ."
+
+# Useful semantic equivalents for tmux's prefix+c chord. Herdr has no nested
+# key tables, so these use single prefix bindings instead.
+[[keys.command]]
+key = "prefix+shift+v"
+type = "pane"
+command = "nvim"
+
+[[keys.command]]
+key = "prefix+shift+i"
+type = "pane"
+command = "${SHELL:-/bin/sh} -ic 'opencode'"
+
+[ui]
+mouse_capture = true
+# Create tabs immediately with Herdr's generated names; rename manually when useful.
+prompt_new_tab_name = false
+
+[ui.toast]
+delivery = "off"
+
+[advanced]
+# tmux uses 50,000 lines; Herdr configures scrollback by retained bytes.
+scrollback_limit_bytes = 10000000

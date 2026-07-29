@@ -46,7 +46,10 @@ Brewfile.lock.json
 # parent-directory symlink, while tracked neighboring configs remain stowable.
 ^/\.claude$
 ^/\.codex$
-^/\.config/(gcloud|gws|herdr|sunsama|op|raycast|aetna-claims|tuxedo)$
+^/\.config/(gcloud|gws|sunsama|op|raycast|aetna-claims|tuxedo)$
+# Herdr mixes tracked config with logs, sockets, and session state. Allow only
+# the canonical config and picker script; ignore every other runtime entry.
+^/\.config/herdr/(?!config\.toml$|bin$|bin/workspace-picker\.sh$).*
 ^/\.config/gh/(config|hosts)\.yml$
 ^/\.config/gh-dash/(config|config\.local)\.yml$
 ^/\.config/espanso/(config|match)/local\.yml$

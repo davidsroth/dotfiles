@@ -32,6 +32,9 @@ class StowIgnoreTest(unittest.TestCase):
                 ".config/gcloud/credentials.db",
                 ".config/gws/auth.json",
                 ".config/herdr/session.json",
+                ".config/herdr/herdr-server.log",
+                ".config/herdr/herdr.sock",
+                ".config/herdr/sessions/workspace.json",
                 ".config/sunsama/session.json",
                 ".config/op/token",
                 ".config/raycast/state.db",
@@ -50,6 +53,8 @@ class StowIgnoreTest(unittest.TestCase):
                 ".config/nvim/init.lua",
                 ".config/espanso/config/default.yml",
                 ".config/opencode/opencode.json",
+                ".config/herdr/config.toml",
+                ".config/herdr/bin/workspace-picker.sh",
                 # Gitignored machine-local input, intentionally linked into the
                 # active config so init.lua can actually load the overrides.
                 ".hammerspoon/init.local.lua",

@@ -98,6 +98,30 @@ config.mouse_bindings = {
 -- Leader key configuration for advanced operations
 config.leader = { key = "a", mods = "CTRL", timeout_milliseconds = 1000 }
 
+-- Cmd bracket chords drive Herdr, which needs a different encoding than
+-- everything else: Herdr's parser treats Alt+[ / Alt+] (ESC [ and ESC ]) as
+-- CSI/OSC introducers and swallows them, and only accepts CSI u with the super
+-- modifier. 91 and 93 are '[' and ']'; modifier 9 = super(8) + 1, and 10 adds
+-- shift(1). Outside Herdr the original action still applies.
+local function herdr_or(csi_u, fallback)
+	return wezterm.action_callback(function(window, pane)
+		local proc = pane:get_foreground_process_name() or ""
+		if proc:match("herdr$") then
+			window:perform_action(wezterm.action.SendString(csi_u), pane)
+		else
+			window:perform_action(fallback, pane)
+		end
+	end)
+end
+
+-- Cmd+[ / Cmd+]: tmux windows (M-[ / M-]) or Herdr tabs.
+local switch_prev_tab = herdr_or("\x1b[91;9u", wezterm.action.SendKey({ key = "[", mods = "ALT" }))
+local switch_next_tab = herdr_or("\x1b[93;9u", wezterm.action.SendKey({ key = "]", mods = "ALT" }))
+
+-- Cmd+Shift+[ / Cmd+Shift+]: Herdr workspaces, or WezTerm's own tabs elsewhere.
+local switch_prev_workspace = herdr_or("\x1b[91;10u", wezterm.action.ActivateTabRelative(-1))
+local switch_next_workspace = herdr_or("\x1b[93;10u", wezterm.action.ActivateTabRelative(1))
+
 config.keys = {
 	-- ============================================================================
 	-- Pane Management
@@ -246,17 +270,15 @@ config.keys = {
 		action = wezterm.action.SendKey({ key = "g", mods = "CTRL" }),
 	},
 
-	-- Switch tmux windows with Cmd+[ / Cmd+] by sending Alt+[ / Alt+]
-	{
-		key = "[",
-		mods = "CMD",
-		action = wezterm.action.SendKey({ key = "[", mods = "ALT" }),
-	},
-	{
-		key = "]",
-		mods = "CMD",
-		action = wezterm.action.SendKey({ key = "]", mods = "ALT" }),
-	},
+	-- Switch tmux windows / Herdr tabs with Cmd+[ / Cmd+].
+	-- tmux binds M-[ and M-] (keybindings.conf), but Herdr cannot: Alt+[ and
+	-- Alt+] encode to ESC [ and ESC ], the CSI and OSC introducers, which
+	-- Herdr's input parser swallows. Herdr does accept the CSI u super
+	-- encoding, so pick the encoding from the pane's foreground process.
+	{ key = "[", mods = "CMD", action = switch_prev_tab },
+	{ key = "]", mods = "CMD", action = switch_next_tab },
+	{ key = "[", mods = "CMD|SHIFT", action = switch_prev_workspace },
+	{ key = "]", mods = "CMD|SHIFT", action = switch_next_workspace },
 
 	-- Force CSI u encoding for Ctrl+Shift+S so tmux can bind it distinctly
 	-- from plain Ctrl+S (which legacy xterm encoding collapses together).
