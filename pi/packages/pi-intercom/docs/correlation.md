@@ -1,17 +1,19 @@
-# Intercom ask/reply correlation — design plan
+# Intercom ask/reply correlation — design record
 
-**Status:** Proposed — not yet implemented
+**Status:** Implemented; retained as historical design context
 **Owner:** David Roth
 **Created:** 2026-05-31
-**Trigger:** Multiple pending asks from the same sender cannot be replied to
-(the `reply` action and `ReplyTracker.resolveReplyTarget` can't disambiguate
-two asks that share a sender id/name). Investigation showed this is one symptom
-of a broader smell: the correlation layer keys off sender identity and turn
-position instead of the unique question id that already exists on the wire.
+
+The implementation now correlates concurrent outbound waits by unique question
+ID, lets inbound replies target a specific `replyTo`, rejects wrong-sender and
+late/duplicate replies, and bounds settled-reply guards. The audit and sharp
+edges below describe the pre-implementation system; the proposed design records
+why the current architecture was chosen and should not be read as current
+runtime behavior.
 
 ---
 
-## 1. Current architecture (read-only audit)
+## 1. Pre-implementation architecture (historical audit)
 
 Ask/reply state lives in **four hand-synchronized structures** spanning two
 files. File references are relative to `pi/packages/pi-intercom/`.
@@ -53,7 +55,7 @@ session at a time.
 
 ---
 
-## 2. Sharp edges (observed)
+## 2. Sharp edges observed before implementation
 
 | # | Symptom | Mechanism | Severity |
 |---|---------|-----------|----------|

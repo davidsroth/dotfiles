@@ -128,9 +128,12 @@ intercom({
 
 ### Pattern 6: Handle Subagent Escalations (Orchestrator Side)
 
-When `pi-subagents` spawns a delegated child and supplies child bridge metadata,
-that child can reach you through `contact_supervisor`. You receive a formatted
-message that includes run metadata:
+When a delegated child process supplies child bridge metadata, that child can
+reach you through `contact_supervisor`. The current in-process `pi-subagents`
+runner cannot safely provide per-child environment metadata for concurrent
+children, so this bridge currently applies only to isolated child processes
+that set the metadata before extensions load. You receive a formatted message
+that includes run metadata:
 
 ```
 **From subagent-worker-78f659a3-1**
@@ -209,7 +212,7 @@ If no suitable intercom-connected peer session already exists and the task benef
 
 Prefer `cmux new-split right` over new surfaces or workspaces so both sessions are visible side by side.
 
-If `cmux` is unavailable, `tmux` is an optional fallback when it is installed and relevant. Use it with a private socket so the session is isolated and observable.
+If `cmux` is unavailable, `tmux` is an optional fallback when it is installed and relevant. Create the peer on the normal tmux server so it appears in the user's session picker. Do not use `tmux -S` or `tmux -L` unless the user explicitly requests an isolated server: sessions on private sockets are invisible to pickers connected to the normal server.
 
 Use spawned peer sessions only for:
 - same-codebase worker/planner splits
@@ -241,27 +244,25 @@ cmux send --surface right 'cd /path/to/reference/repo && pi\n'
 Same codebase:
 
 ```bash
-SOCKET_DIR=${TMPDIR:-/tmp}/pi-tmux-sockets
-mkdir -p "$SOCKET_DIR"
-SOCKET="$SOCKET_DIR/pi.sock"
 SESSION=pi-worker
-tmux -S "$SOCKET" new -d -s "$SESSION" -c "/path/to/current/repo" 'pi'
+tmux new-session -d -s "$SESSION" -c "/path/to/current/repo" 'pi'
 ```
 
 Reference codebase:
 
 ```bash
-SOCKET_DIR=${TMPDIR:-/tmp}/pi-tmux-sockets
-mkdir -p "$SOCKET_DIR"
-SOCKET="$SOCKET_DIR/pi.sock"
 SESSION=pi-reference-auth
-tmux -S "$SOCKET" new -d -s "$SESSION" -c "/path/to/reference/repo" 'pi'
+tmux new-session -d -s "$SESSION" -c "/path/to/reference/repo" 'pi'
 ```
 
-When you use `tmux`, tell the user how to watch it:
+Choose a descriptive session name and verify it is unused before launching (`tmux has-session -t "=$SESSION"`). When you use `tmux`, tell the user that the peer is available in their normal session picker. They can also watch it directly:
 
 ```bash
-tmux -S "$SOCKET" attach -t "$SESSION"
+# From inside tmux
+tmux switch-client -t "=$SESSION"
+
+# From outside tmux
+tmux attach-session -t "=$SESSION"
 ```
 
 After launch, name the new session clearly so it is easy to target:
@@ -302,20 +303,13 @@ If neither `cmux` nor `tmux` is available, skip this path and use normal `interc
 ### `ask` Limitations
 
 - **10-minute timeout**: If no reply comes within 10 minutes, the ask fails
-- **One at a time**: Cannot have multiple pending asks from the same session
+- **Concurrent asks supported**: Requests are correlated independently by message ID
+- **No nested asks**: `ask`/`aside` cannot use `replyTo`; answer the first request before starting another
 - **Cannot self-target**: A session cannot ask itself
-
-```typescript
-// Check if already waiting before asking
-const result = await intercom({ action: "ask", to: "planner", message: "..." });
-if (result.isError && result.content[0].text.includes("Already waiting")) {
-  // Use send instead, or wait for current ask to complete
-}
-```
 
 ### `send` Behavior
 
-- **No timeout**: Message is delivered or fails immediately
+- **10-second delivery timeout**: The broker acknowledgement must arrive within 10 seconds
 - **Confirmation dialogs**: If `confirmSend: true` in config, interactive sessions show a confirmation dialog
 - **Replies skip confirmation**: Messages with `replyTo` never show confirmation dialogs
 
@@ -377,15 +371,6 @@ Use `/name` so others can target you easily:
 ## Error Handling
 
 ### Common Errors and Solutions
-
-**"Already waiting for a reply"**
-```typescript
-// You can only have one pending ask at a time
-// Option 1: Use send instead
-intercom({ action: "send", to: "planner", message: "..." });
-
-// Option 2: Wait for current ask to complete first
-```
 
 **"Cannot message the current session"**
 ```typescript

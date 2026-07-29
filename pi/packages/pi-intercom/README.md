@@ -241,6 +241,8 @@ The planner typically uses `send`. If you prefer manual approval for outgoing no
 
 This workflow requires [`pi-subagents`](https://github.com/nicobailon/pi-subagents) to be installed and to supply child bridge metadata. When `pi-subagents` spawns a delegated child with that metadata, the child session gets a subagent-only `contact_supervisor` tool in addition to the regular `intercom` tool. Normal sessions never see `contact_supervisor`.
 
+> **Current in-process limitation:** the bundled pi-subagents runner creates child sessions in-process and does not currently supply this metadata. Process environment variables cannot safely identify multiple concurrent in-process children. A Pi SDK/session-scoped extension metadata hook is required before that path can be wired without cross-child routing leaks. The environment bridge below remains valid for isolated child processes that set the metadata before loading extensions.
+
 ### When the Tool Appears
 
 `contact_supervisor` only registers when `pi-subagents` sets all of these environment variables:
@@ -363,7 +365,7 @@ Only registered in sessions where `pi-subagents` supplied the required child bri
 
 **`send`** — Sends a message to the specified session. By default it sends immediately, including in interactive sessions. Set `confirmSend: true` in config if you want a confirmation dialog for non-reply sends. Replies that include `replyTo` skip confirmation. Returns delivery confirmation.
 
-**`ask`** — Sends a message and waits for the recipient to reply (10-minute timeout). The reply is returned as the tool result. No confirmation dialog. Only one pending `ask` is allowed per session at a time. Use this when the agent needs the answer to continue working.
+**`ask`** — Sends a message and waits for the recipient to reply (10-minute timeout). The reply is returned as the tool result. No confirmation dialog. Multiple independent asks may be pending concurrently; each is correlated by message ID. Nested asks using `replyTo` are rejected. Use this when the agent needs the answer to continue working.
 
 **`reply`** — Replies to the current intercom-triggered message if there is one. Otherwise it falls back to the single unresolved inbound ask. If multiple asks are pending, pass `to` or inspect them with `pending` first. Under the hood this is still a normal `send` with the exact `replyTo` value.
 
