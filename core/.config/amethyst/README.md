@@ -43,6 +43,8 @@ The config defines reusable modifier groups:
 
 - `mod1 + ,` — focus previous window
 - `mod1 + .` — focus next window
+- `option + j` — focus previous window (Hammerspoon alias for `option + ,`)
+- `option + k` — focus next window (Hammerspoon alias for `option + .`)
 - `mod1 + p` — focus previous screen
 - `mod1 + n` — focus next screen
 - `mod2 + p` — send window to previous screen

@@ -76,6 +76,15 @@ for key, app in pairs(alts) do
     end)
 end
 
+-- Amethyst only accepts one shortcut per action. Preserve its Option+,/.
+-- bindings while adding Vim-style Option+j/k aliases.
+hs.hotkey.bind({ "alt" }, "j", function()
+    hs.eventtap.keyStroke({ "alt" }, ",", 0)
+end)
+hs.hotkey.bind({ "alt" }, "k", function()
+    hs.eventtap.keyStroke({ "alt" }, ".", 0)
+end)
+
 -- Note: ⌥i / ⌥u are bound directly via the launchKeys loop above. They no
 -- longer need a Karabiner dead-key bypass because the "US-NoOption" keyboard
 -- layout (installed by macos-defaults.sh) strips Option's glyph/dead-key plane.
