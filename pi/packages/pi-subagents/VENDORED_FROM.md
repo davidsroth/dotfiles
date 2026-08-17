@@ -10,4 +10,6 @@ Notes:
 - Install runtime dependencies with `npm install --omit=dev` in this directory.
 - Local patches on top of upstream — see `git log -- pi/packages/pi-subagents`
   for the post-vendor commits that add model/usage tracking, cross-extension
-  record persistence, and model-resolver tie-breaking.
+  record persistence, model-resolver tie-breaking, and unlimited agent runs.
+- This vendored variant intentionally removes upstream turn-limit controls.
+  Legacy tool/RPC options are rejected; frontmatter and settings fields are ignored.

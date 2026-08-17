@@ -79,6 +79,7 @@ import {
   CTRL_UNDERSCORE,
   NEWLINE,
   ESC_DOWN,
+  getPiVimNormalLeftArrowRegistry,
 } from "./types.js";
 import {
   reverseCharMotion,
@@ -471,6 +472,17 @@ export class ModalEditor extends CustomEditor {
           return;
         }
         super.handleInput(data);
+        return;
+      }
+
+      // At the start of a line, an optional integration may synchronously
+      // consume the NORMAL-mode Left Arrow. Everywhere else, retain the
+      // underlying editor's existing Left Arrow behavior below.
+      if (
+        matchesKey(data, "left")
+        && this.getCursor().col === 0
+        && getPiVimNormalLeftArrowRegistry().handleNormalLeftArrow()
+      ) {
         return;
       }
 

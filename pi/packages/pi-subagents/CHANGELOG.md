@@ -9,8 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - Subagent costs are now available to cross-extension consumers: `subagents:usage` publishes cumulative live usage, terminal lifecycle events include lifetime `cost`, and `subagents:record` entries persist the full cumulative usage snapshot for branch-aware reconstruction after reload.
+- Session-keyed subagent activity registry for Herdr and other integrations. Root and child Pi sessions now retain independent queued/running snapshots, and a running agent publishes one prompt terminal/stopped lifecycle event when aborted.
+- `/agents` now promotes the existing passive agents widget into a focused active-agent picker/monitor. It updates live, only shows running/queued agents, and restores the passive widget when closed—no duplicate panel or overlay.
+- The conversation monitor moves directly between active runs with `←`/`→` or `h`/`l` and sends steering messages from an inline input with `s`. PgUp/PgDn scroll the transcript, End resumes auto-follow, and Escape returns to the custom picker.
+- `/agent-manage` preserves the broader agent-type, schedule, creation, and settings menu for compatibility.
+- When pi-vim is loaded, its NORMAL-mode literal `Left Arrow` at column 0 opens the existing focused active-agent picker (the same action as `/agents`). The optional hook is registered only by the current root TUI session, safely ignores child/non-TUI sessions, and is removed on switch or shutdown.
+
+### Changed
+- Removed turn limits from the vendored variant. Agents now run until completion, failure, or an explicit stop. The Agent tool and RPC spawn reject legacy turn-limit options (RPC protocol v3), while legacy frontmatter/settings/scheduled-job fields are ignored or scrubbed.
+- Replaced the nested `/agents` management-menu flow and separate picker presentation with an in-place focus transition on the existing agents widget; terminal and historical runs are excluded.
 
 ### Fixed
+- `get_subagent_result({ wait: true })` now stops waiting when the user sends a message to Pi. The background subagent continues running and its completion notification remains deliverable.
 - Child extension runtimes now receive `session_shutdown` before their SDK session is disposed, preventing external registrations such as intercom presence from surviving as zombies. Disposal still runs when an extension shutdown hook fails.
 
 ## [0.7.2] - 2026-05-12

@@ -19,8 +19,9 @@ function record(overrides: Partial<AgentRecord> = {}): AgentRecord {
 }
 
 describe("subagent lifecycle records", () => {
-  it("includes lifetime cost in terminal event data", () => {
-    expect(buildLifecycleEventData(record())).toMatchObject({
+  it("includes lifetime cost and the originating session in terminal event data", () => {
+    expect(buildLifecycleEventData(record({ parentSessionId: "root-a" }))).toMatchObject({
+      sessionId: "root-a",
       id: "agent-1",
       status: "completed",
       durationMs: 150,

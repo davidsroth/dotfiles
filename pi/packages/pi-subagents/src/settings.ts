@@ -1,6 +1,6 @@
 // Persistence for pi-subagents operational settings.
 // - Global:  ~/.pi/agent/subagents.json (via getAgentDir()) — manual defaults, never written here
-// - Project: <cwd>/.pi/subagents.json — written by /agents → Settings; overrides global on load
+// - Project: <cwd>/.pi/subagents.json — written by /agent-manage → Settings; overrides global on load
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -9,19 +9,12 @@ import type { JoinMode } from "./types.js";
 
 export interface SubagentsSettings {
   maxConcurrent?: number;
-  /**
-   * 0 = unlimited — the extension's single source of truth for that convention:
-   * `normalizeMaxTurns()` in agent-runner.ts treats 0 → `undefined`, and the
-   * `/agents` → Settings input prompt explicitly says "0 = unlimited".
-   */
-  defaultMaxTurns?: number;
-  graceTurns?: number;
   defaultJoinMode?: JoinMode;
   /**
    * Master switch for the schedule subagent feature. Defaults to `true`.
    * When `false`: the `Agent` tool's `schedule` param + its guideline are
    * stripped from the tool spec at registration (zero LLM-context cost), the
-   * scheduler doesn't bind to the session, and the `/agents → Scheduled jobs`
+   * scheduler doesn't bind to the session, and the `/agent-manage → Scheduled jobs`
    * menu entry is hidden. Schema-level removal applies at extension load
    * (next pi session); runtime menu/runtime-fire short-circuit is immediate.
    */
@@ -31,8 +24,6 @@ export interface SubagentsSettings {
 /** Setter hooks used by applySettings to wire persisted values into in-memory state. */
 export interface SettingsAppliers {
   setMaxConcurrent: (n: number) => void;
-  setDefaultMaxTurns: (n: number) => void;
-  setGraceTurns: (n: number) => void;
   setDefaultJoinMode: (mode: JoinMode) => void;
   setSchedulingEnabled: (b: boolean) => void;
 }
@@ -46,8 +37,6 @@ const VALID_JOIN_MODES: ReadonlySet<string> = new Set<JoinMode>(["async", "group
 // make no operational sense (e.g. 1e6 concurrent subagents). Permissive enough
 // that any realistic power-user setting passes through.
 const MAX_CONCURRENT_CEILING = 1024;
-const MAX_TURNS_CEILING = 10_000;
-const GRACE_TURNS_CEILING = 1_000;
 
 /** Drop fields that don't match the expected shape. Silent — garbage becomes absent. */
 function sanitize(raw: unknown): SubagentsSettings {
@@ -60,20 +49,6 @@ function sanitize(raw: unknown): SubagentsSettings {
     (r.maxConcurrent as number) <= MAX_CONCURRENT_CEILING
   ) {
     out.maxConcurrent = r.maxConcurrent as number;
-  }
-  if (
-    Number.isInteger(r.defaultMaxTurns) &&
-    (r.defaultMaxTurns as number) >= 0 &&
-    (r.defaultMaxTurns as number) <= MAX_TURNS_CEILING
-  ) {
-    out.defaultMaxTurns = r.defaultMaxTurns as number;
-  }
-  if (
-    Number.isInteger(r.graceTurns) &&
-    (r.graceTurns as number) >= 1 &&
-    (r.graceTurns as number) <= GRACE_TURNS_CEILING
-  ) {
-    out.graceTurns = r.graceTurns as number;
   }
   if (typeof r.defaultJoinMode === "string" && VALID_JOIN_MODES.has(r.defaultJoinMode)) {
     out.defaultJoinMode = r.defaultJoinMode as JoinMode;
@@ -132,8 +107,6 @@ export function saveSettings(s: SubagentsSettings, cwd: string = process.cwd()):
 /** Apply persisted settings to the in-memory state via caller-supplied setters. */
 export function applySettings(s: SubagentsSettings, appliers: SettingsAppliers): void {
   if (typeof s.maxConcurrent === "number") appliers.setMaxConcurrent(s.maxConcurrent);
-  if (typeof s.defaultMaxTurns === "number") appliers.setDefaultMaxTurns(s.defaultMaxTurns);
-  if (typeof s.graceTurns === "number") appliers.setGraceTurns(s.graceTurns);
   if (s.defaultJoinMode) appliers.setDefaultJoinMode(s.defaultJoinMode);
   if (typeof s.schedulingEnabled === "boolean") appliers.setSchedulingEnabled(s.schedulingEnabled);
 }

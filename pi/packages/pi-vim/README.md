@@ -127,6 +127,12 @@ A `{count}` prefix can be prepended to any navigation key (max: `9999`).
 `word` (`w/b/e`) splits punctuation from keyword chars. `WORD` (`W/B/E`)
 treats any non-whitespace run as one token (`foo-bar`, `path/to`, `x.y`).
 
+When `pi-subagents` is loaded, the literal `Left Arrow` in NORMAL mode opens
+the same focused active-agent picker as `/agents` **only at column 0** (the
+start of the current line). Elsewhere, without that optional integration, or
+in INSERT mode, Left Arrow keeps its normal editor behavior. The picker and
+conversation-monitor arrow navigation are unchanged.
+
 Paragraph boundary definition (this extension wave):
 - blank line: matches `^\s*$`
 - paragraph start: non-blank line at BOF, or non-blank line immediately after a blank line
@@ -352,6 +358,25 @@ These are **explicitly deferred** and not planned for this feature:
   `findCharMotionTarget`); no side effects.
 - `types.ts` — shared types and escape-sequence constants.
 - `test/` — Node test runner suite; no browser / full runtime required.
+
+### optional NORMAL-mode Left Arrow contract
+
+Extensions can integrate without importing `pi-vim` through the process-global
+`Symbol.for("pi-vim:normal-left-arrow-registry")` value. Its public structural
+shape is:
+
+```ts
+{
+  register(handler: () => boolean): () => void;
+  handleNormalLeftArrow(): boolean;
+}
+```
+
+At column 0 in NORMAL mode, a handler returns `true` only if it synchronously
+consumes the key; its returned cleanup removes only that registration. Async UI
+work must be started safely by the handler (including rejection handling). At
+other columns, in INSERT mode, or if no handler consumes the key, pi-vim passes
+it to the underlying editor.
 
 Run checks:
 

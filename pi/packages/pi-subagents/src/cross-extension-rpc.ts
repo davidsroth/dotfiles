@@ -21,7 +21,7 @@ export type RpcReply<T = void> =
   | { success: false; error: string };
 
 /** RPC protocol version — bumped when the envelope or method contracts change. */
-export const PROTOCOL_VERSION = 2;
+export const PROTOCOL_VERSION = 3;
 
 /** Minimal AgentManager interface needed by the spawn/stop RPCs. */
 export interface SpawnCapable {
@@ -81,6 +81,9 @@ export function registerRpcHandlers(deps: RpcDeps): RpcHandle {
     events, "subagents:rpc:spawn", ({ type, prompt, options }) => {
       const ctx = getCtx();
       if (!ctx) throw new Error("No active session");
+      if (options && typeof options === "object" && ("maxTurns" in options || "max_turns" in options)) {
+        throw new Error("Turn limits are not supported by this vendored pi-subagents variant");
+      }
       return { id: manager.spawn(pi, ctx, type, prompt, options ?? {}) };
     },
   );

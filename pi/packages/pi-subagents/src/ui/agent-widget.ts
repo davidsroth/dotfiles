@@ -5,7 +5,11 @@
  * Uses the callback form of setWidget for themed rendering.
  */
 
-import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { type Component, type TUI, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import type { AgentManager } from "../agent-manager.js";
+import { getConfig } from "../agent-types.js";
+import type { AgentInvocation, AgentRecord, SubagentType } from "../types.js";
+import { formatCost, getLifetimeTotal, getSessionContextPercent, type LifetimeUsage, type SessionLike } from "../usage.js";
 
 function padRight(text: string, width: number): string {
 	const textWidth = visibleWidth(text);
@@ -25,6 +29,7 @@ function joinLeftRight(left: string, right: string, width: number): string {
 	const lw = visibleWidth(left);
 	const rw = visibleWidth(right);
 	const gap = width - lw - rw;
+	if (rw >= width) return truncateToWidth(right, width, "");
 	if (gap < 2) {
 		// Not enough room for both — truncate the left side to make room.
 		const maxLeft = Math.max(0, width - rw - 1);
@@ -32,10 +37,6 @@ function joinLeftRight(left: string, right: string, width: number): string {
 	}
 	return `${left}${" ".repeat(gap)}${right}`;
 }
-import type { AgentManager } from "../agent-manager.js";
-import { getConfig } from "../agent-types.js";
-import type { AgentInvocation, SubagentType } from "../types.js";
-import { formatCost, getLifetimeTotal, getSessionContextPercent, type LifetimeUsage, type SessionLike } from "../usage.js";
 
 // ---- Constants ----
 
@@ -46,7 +47,7 @@ const MAX_WIDGET_LINES = 12;
 export const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
 /** Statuses that indicate an error/non-success outcome (used for linger behavior and icon rendering). */
-export const ERROR_STATUSES = new Set(["error", "aborted", "steered", "stopped"]);
+export const ERROR_STATUSES = new Set(["error", "stopped"]);
 
 /** Tool name → human-readable action for activity descriptions. */
 const TOOL_DISPLAY: Record<string, string> = {
@@ -66,11 +67,16 @@ export type Theme = {
   bold(text: string): string;
 };
 
+export type FocusedWidgetPresenter = <R>(
+  factory: (tui: TUI, theme: Theme, done: (result: R) => void) => Component,
+) => Promise<R>;
+
 export type UICtx = {
   setStatus(key: string, text: string | undefined): void;
+  notify?(message: string, level?: "info" | "warning" | "error"): void;
   setWidget(
     key: string,
-    content: undefined | ((tui: any, theme: Theme) => { render(): string[]; invalidate(): void }),
+    content: undefined | ((tui: TUI, theme: Theme) => Component),
     options?: { placement?: "aboveEditor" | "belowEditor" },
   ): void;
 };
@@ -83,8 +89,6 @@ export interface AgentActivity {
   session?: SessionLike;
   /** Current turn count. */
   turnCount: number;
-  /** Effective max turns for this agent (undefined = unlimited). */
-  maxTurns?: number;
   /** Lifetime usage breakdown — see LifetimeUsage docs. */
   lifetimeUsage: LifetimeUsage;
 }
@@ -97,7 +101,7 @@ export interface AgentDetails {
   toolUses: number;
   tokens: string;
   durationMs: number;
-  status: "queued" | "running" | "completed" | "steered" | "aborted" | "stopped" | "error" | "background";
+  status: "queued" | "running" | "completed" | "stopped" | "error" | "background";
   /** Human-readable description of what the agent is currently doing. */
   activity?: string;
   /** Current spinner frame index (for animated running indicator). */
@@ -108,8 +112,6 @@ export interface AgentDetails {
   tags?: string[];
   /** Current turn count. */
   turnCount?: number;
-  /** Effective max turns (undefined = unlimited). */
-  maxTurns?: number;
   agentId?: string;
   error?: string;
   cost?: number;
@@ -151,9 +153,9 @@ export function formatSessionTokens(
   return `${tokenStr} (${annot.join(" · ")})`;
 }
 
-/** Format turn count with optional max limit: "⟳5≤30" or "⟳5". */
-export function formatTurns(turnCount: number, maxTurns?: number | null): string {
-  return maxTurns != null ? `⟳${turnCount}≤${maxTurns}` : `⟳${turnCount}`;
+/** Format an agentic turn count. */
+export function formatTurns(turnCount: number): string {
+  return `⟳${turnCount}`;
 }
 
 /** Format milliseconds as compact duration, trimming leading zero units: `42s`, `5m30s`, `1h2m3s`. */
@@ -195,8 +197,55 @@ export function buildInvocationTags(
   if (invocation.isolation === "worktree") tags.push("worktree");
   if (invocation.inheritContext) tags.push("inherit context");
   if (invocation.runInBackground) tags.push("background");
-  if (invocation.maxTurns != null) tags.push(`max turns: ${invocation.maxTurns}`);
   return { modelName: invocation.modelName, tags };
+}
+
+/** Render one agent run in the compact visual style shared by the widget and picker. */
+export function renderAgentRunLine(
+  record: AgentRecord,
+  activity: AgentActivity | undefined,
+  theme: Theme,
+  width: number,
+  selected = false,
+): string {
+  const name = getDisplayName(record.type);
+  const modeLabel = getPromptModeLabel(record.type);
+  const modeTag = modeLabel ? ` ${theme.fg("dim", `(${modeLabel})`)}` : "";
+
+  let icon: string;
+  if (record.status === "running") icon = theme.fg("accent", SPINNER[Math.floor(Date.now() / 80) % SPINNER.length]!);
+  else if (record.status === "queued") icon = theme.fg("muted", "◦");
+  else if (record.status === "completed") icon = theme.fg("success", "✓");
+  else if (record.status === "stopped") icon = theme.fg("dim", "■");
+  else icon = theme.fg("error", "✗");
+
+  const statParts: string[] = [];
+  if (record.invocation?.modelName) statParts.push(theme.fg("dim", record.invocation.modelName));
+  if (activity) statParts.push(theme.fg("dim", formatTurns(activity.turnCount)));
+  const toolUses = activity?.toolUses ?? record.toolUses;
+  if (toolUses > 0) statParts.push(theme.fg("dim", `${toolUses} tool${toolUses === 1 ? "" : "s"}`));
+  const tokens = activity ? getLifetimeTotal(activity.lifetimeUsage) : getLifetimeTotal(record.lifetimeUsage);
+  if (tokens > 0) {
+    const tokenText = formatTokens(tokens);
+    const contextPercent = getSessionContextPercent(activity?.session ?? record.session);
+    const annotations: string[] = [];
+    if (contextPercent !== null) {
+      const level = contextPercent >= 85 ? "error" : contextPercent >= 70 ? "warning" : "dim";
+      annotations.push(theme.fg(level, `${Math.round(contextPercent)}%`));
+    }
+    if (record.compactionCount > 0) annotations.push(theme.fg("dim", `↻${record.compactionCount}`));
+    statParts.push(annotations.length > 0
+      ? theme.fg("dim", `${tokenText} (`) + annotations.join(theme.fg("dim", " · ")) + theme.fg("dim", ")")
+      : theme.fg("dim", tokenText));
+  }
+  const cost = activity?.lifetimeUsage.cost ?? record.lifetimeUsage.cost;
+  if (cost > 0) statParts.push(theme.fg("dim", formatCost(cost)));
+  statParts.push(theme.fg("dim", formatMs((record.completedAt ?? Date.now()) - record.startedAt)));
+
+  const marker = selected ? theme.fg("accent", "›") : " ";
+  const label = selected ? theme.bold(name) : theme.fg("dim", name);
+  const left = `${marker} ${icon} ${label}${modeTag}  ${theme.fg(selected ? "text" : "muted", record.description)}`;
+  return joinLeftRight(left, statParts.join(theme.fg("borderMuted", " · ")), width);
 }
 
 /** Truncate text to a single line, max `len` chars. */
@@ -238,11 +287,10 @@ export function describeActivity(activeTools: Map<string, string>, responseText?
 
 export class AgentWidget {
   private uiCtx: UICtx | undefined;
-  private widgetFrame = 0;
   private widgetInterval: ReturnType<typeof setInterval> | undefined;
   /** Tracks how many turns each finished agent has survived. Key: agent ID, Value: turns since finished. */
   private finishedTurnAge = new Map<string, number>();
-  /** How many extra turns errors/aborted agents linger (completed agents clear after 1 turn). */
+  /** How many extra turns failed/stopped agents linger (completed agents clear after 1 turn). */
   private static readonly ERROR_LINGER_TURNS = 2;
 
   /** Whether the widget callback is currently registered with the TUI. */
@@ -251,6 +299,9 @@ export class AgentWidget {
   private tui: any | undefined;
   /** Last status bar text, used to avoid redundant setStatus calls. */
   private lastStatusText: string | undefined;
+  /** True while the passive widget slot has been promoted into a focused UI. */
+  private interactive = false;
+  private disposed = false;
 
   constructor(
     private manager: AgentManager,
@@ -259,6 +310,7 @@ export class AgentWidget {
 
   /** Set the UI context (grabbed from first tool execution). */
   setUICtx(ctx: UICtx) {
+    if (this.disposed) return;
     if (ctx !== this.uiCtx) {
       // UICtx changed — the widget registered on the old context is gone.
       // Force re-registration on next update().
@@ -289,6 +341,81 @@ export class AgentWidget {
     }
   }
 
+  /**
+   * Temporarily promote the existing `agents` widget slot into a focused,
+   * interactive surface. Every component shown by `present()` replaces the
+   * previous one in the same slot. The passive widget and editor focus are
+   * restored when `run` finishes or throws.
+   *
+   * Older compatible Pi versions do not expose the current focus target. In
+   * that case we leave focus unchanged, show a notification, and resolve the
+   * current presentation as cancelled rather than risking a lost editor focus.
+   */
+  async withFocusedWidget<T>(
+    run: (present: FocusedWidgetPresenter) => Promise<T>,
+  ): Promise<T> {
+    const uiCtx = this.uiCtx;
+    if (!uiCtx || this.disposed) throw new Error("Agent widget UI is not initialized yet.");
+    if (this.interactive) throw new Error("Agent widget is already focused.");
+
+    this.interactive = true;
+    if (this.widgetRegistered) uiCtx.setWidget("agents", undefined);
+    this.widgetRegistered = false;
+    this.tui = undefined;
+
+    let focusedTui: TUI | undefined;
+    let previousFocus: Component | null = null;
+    let capturedPreviousFocus = false;
+
+    const present = <R>(
+      factory: (tui: TUI, theme: Theme, done: (result: R) => void) => Component,
+    ): Promise<R> => new Promise<R>((resolve, reject) => {
+      let component: Component | undefined;
+      try {
+        uiCtx.setWidget("agents", (tui, theme) => {
+          focusedTui = tui;
+          if (!capturedPreviousFocus) {
+            // The public TUI API supports setting focus but not reading it.
+            // Newer Pi versions expose this as an optional runtime method; do
+            // not focus the widget when we cannot restore the previous target.
+            const focusAwareTui = tui as TUI & { getFocusedComponent?: () => Component | null };
+            if (typeof focusAwareTui.getFocusedComponent !== "function") {
+              uiCtx.notify?.(
+                "Active subagent viewer is unavailable in this Pi version; update Pi to use /agents.",
+                "warning",
+              );
+              component = { render: () => [], invalidate: () => {} };
+              resolve(undefined as R);
+              return component;
+            }
+            previousFocus = focusAwareTui.getFocusedComponent();
+            capturedPreviousFocus = true;
+          }
+          component = factory(tui, theme, resolve);
+          return component;
+        }, { placement: "aboveEditor" });
+        if (!focusedTui || !component) throw new Error("Failed to mount focused agent widget.");
+        if (capturedPreviousFocus) {
+          focusedTui.setFocus(component);
+          focusedTui.requestRender();
+        }
+      } catch (error) {
+        reject(error);
+      }
+    });
+
+    try {
+      return await run(present);
+    } finally {
+      uiCtx.setWidget("agents", undefined);
+      if (focusedTui && capturedPreviousFocus) focusedTui.setFocus(previousFocus);
+      this.interactive = false;
+      this.widgetRegistered = false;
+      this.tui = undefined;
+      this.update();
+    }
+  }
+
   /** Check if a finished agent should still be shown in the widget. */
   private shouldShowFinished(agentId: string, status: string): boolean {
     const age = this.finishedTurnAge.get(agentId) ?? 0;
@@ -314,25 +441,18 @@ export class AgentWidget {
     if (a.status === "completed") {
       icon = theme.fg("success", "✓");
       statusText = "";
-    } else if (a.status === "steered") {
-      icon = theme.fg("warning", "✓");
-      statusText = theme.fg("warning", " (turn limit)");
     } else if (a.status === "stopped") {
       icon = theme.fg("dim", "■");
       statusText = theme.fg("dim", " stopped");
-    } else if (a.status === "error") {
+    } else {
       icon = theme.fg("error", "✗");
       const errMsg = a.error ? `: ${a.error.slice(0, 60)}` : "";
       statusText = theme.fg("error", ` error${errMsg}`);
-    } else {
-      // aborted
-      icon = theme.fg("error", "✗");
-      statusText = theme.fg("warning", " aborted");
     }
 
     const statPieces: string[] = [];
     const activity = this.agentActivity.get(a.id);
-    if (activity) statPieces.push(theme.fg("dim", formatTurns(activity.turnCount, activity.maxTurns)));
+    if (activity) statPieces.push(theme.fg("dim", formatTurns(activity.turnCount)));
     if (a.toolUses > 0) statPieces.push(theme.fg("dim", `${a.toolUses} tool use${a.toolUses === 1 ? "" : "s"}`));
     const cost = activity?.lifetimeUsage?.cost ?? 0;
     if (cost > 0) statPieces.push(theme.fg("dim", formatCost(cost)));
@@ -386,53 +506,12 @@ export class AgentWidget {
     }
 
     const runningLines: string[][] = []; // each entry is [header, activity]
-    for (const a of running) {
-      const name = getDisplayName(a.type);
-      const modeLabel = getPromptModeLabel(a.type);
-      const modeTag = modeLabel ? ` ${theme.fg("dim", `(${modeLabel})`)}` : "";
-      const elapsed = formatMs(Date.now() - a.startedAt);
-
-      const bg = this.agentActivity.get(a.id);
-      const toolUses = bg?.toolUses ?? a.toolUses;
-      const tokens = getLifetimeTotal(bg?.lifetimeUsage);
-      const contextPercent = getSessionContextPercent(bg?.session);
-
-      // Build stat line with colored context-percent annotation
-      const statParts: string[] = [];
-      if (a.invocation?.modelName) statParts.push(theme.fg("dim", a.invocation.modelName));
-      if (bg) statParts.push(theme.fg("dim", formatTurns(bg.turnCount, bg.maxTurns)));
-      if (toolUses > 0) statParts.push(theme.fg("dim", `${toolUses} tool use${toolUses === 1 ? "" : "s"}`));
-
-      if (tokens > 0) {
-        const tokenStr = formatTokens(tokens);
-        const hasAnnot = contextPercent !== null || a.compactionCount > 0;
-        if (hasAnnot) {
-          const annotInner: string[] = [];
-          if (contextPercent !== null) {
-            const level = contextPercent >= 85 ? "error" : contextPercent >= 70 ? "warning" : "dim";
-            annotInner.push(theme.fg(level, `${Math.round(contextPercent)}%`));
-          }
-          if (a.compactionCount > 0) {
-            annotInner.push(theme.fg("dim", `↻${a.compactionCount}`));
-          }
-          statParts.push(theme.fg("dim", `${tokenStr} (`) + annotInner.join(theme.fg("dim", " · ")) + theme.fg("dim", ")"));
-        } else {
-          statParts.push(theme.fg("dim", tokenStr));
-        }
-      }
-
-      const cost = bg?.lifetimeUsage?.cost ?? 0;
-      if (cost > 0) statParts.push(theme.fg("dim", formatCost(cost)));
-      statParts.push(theme.fg("dim", elapsed));
-      const statsText = statParts.join(theme.fg("dim", "·"));
-
-      const activity = bg ? describeActivity(bg.activeTools, bg.responseText) : "thinking…";
-
-      const headerLeft = `  ${theme.bold(name)}${modeTag}  ${theme.fg("muted", a.description)}`;
-      const headerRight = statsText;
+    for (const agent of running) {
+      const activity = this.agentActivity.get(agent.id);
+      const activityText = activity ? describeActivity(activity.activeTools, activity.responseText) : "thinking…";
       runningLines.push([
-        joinLeftRight(headerLeft, headerRight, contentWidth),
-        truncate(`    ${theme.fg("dim", `⎿  ${activity}`)}`),
+        renderAgentRunLine(agent, activity, theme, contentWidth),
+        truncate(`    ${theme.fg("dim", `⎿  ${activityText}`)}`),
       ]);
     }
 
@@ -502,7 +581,7 @@ export class AgentWidget {
 
   /** Force an immediate widget update. */
   update() {
-    if (!this.uiCtx) return;
+    if (!this.uiCtx || this.interactive || this.disposed) return;
     const allAgents = this.manager.listAgents();
 
     // Lightweight existence checks — full categorization happens in renderWidget()
@@ -549,8 +628,6 @@ export class AgentWidget {
       this.lastStatusText = newStatusText;
     }
 
-    this.widgetFrame++;
-
     // Register widget callback once; subsequent updates use requestRender()
     // which re-invokes render() without replacing the component (avoids layout thrashing).
     if (!this.widgetRegistered) {
@@ -573,6 +650,7 @@ export class AgentWidget {
   }
 
   dispose() {
+    this.disposed = true;
     if (this.widgetInterval) {
       clearInterval(this.widgetInterval);
       this.widgetInterval = undefined;
@@ -581,6 +659,7 @@ export class AgentWidget {
       this.uiCtx.setWidget("agents", undefined);
       this.uiCtx.setStatus("subagents", undefined);
     }
+    this.interactive = false;
     this.widgetRegistered = false;
     this.tui = undefined;
     this.lastStatusText = undefined;

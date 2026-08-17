@@ -99,6 +99,25 @@ describe("cross-extension RPC", () => {
       );
     });
 
+    it.each(["maxTurns", "max_turns"])("rejects the removed %s option", async (field) => {
+      registerRpcHandlers(deps);
+      const reply = vi.fn();
+      events.on("subagents:rpc:spawn:reply:req-limited", reply);
+      events.emit("subagents:rpc:spawn", {
+        requestId: "req-limited",
+        type: "general-purpose",
+        prompt: "x",
+        options: { description: "limited", [field]: 5 },
+      });
+
+      await vi.waitFor(() => expect(reply).toHaveBeenCalled());
+      expect(reply).toHaveBeenCalledWith({
+        success: false,
+        error: "Turn limits are not supported by this vendored pi-subagents variant",
+      });
+      expect(manager.spawn).not.toHaveBeenCalled();
+    });
+
     it("returns error when no active session", async () => {
       ctx = undefined;
       registerRpcHandlers(deps);
@@ -161,7 +180,7 @@ describe("cross-extension RPC", () => {
   // --- stop ---
 
   describe("stop RPC", () => {
-    it("returns success when agent is aborted", async () => {
+    it("returns success when agent is stopped", async () => {
       registerRpcHandlers(deps);
       const reply = vi.fn();
       events.on("subagents:rpc:stop:reply:req-st1", reply);

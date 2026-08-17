@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
-import { formatMs, formatSessionTokens } from "../src/ui/agent-widget.js";
+import { visibleWidth } from "@earendil-works/pi-tui";
+import { describe, expect, it, vi } from "vitest";
+import { AgentWidget, formatMs, formatSessionTokens, renderAgentRunLine } from "../src/ui/agent-widget.js";
 
 describe("formatSessionTokens", () => {
   const theme = { fg: (_c: string, s: string) => s, bold: (s: string) => s };
@@ -22,6 +23,115 @@ describe("formatSessionTokens", () => {
     expect(formatSessionTokens(1234, 88, theme, 4)).toBe("1.2k token (88% · ↻4)");
     // compactions=0 omitted
     expect(formatSessionTokens(1234, 45, theme, 0)).toBe("1.2k token (45%)");
+  });
+});
+
+describe("renderAgentRunLine", () => {
+  it("never exceeds the requested width when statistics are wider than the row", () => {
+    const theme = { fg: (_c: string, s: string) => s, bold: (s: string) => s };
+    const line = renderAgentRunLine({
+      id: "agent",
+      type: "general-purpose",
+      description: "very long task description",
+      status: "completed",
+      toolUses: 123456,
+      startedAt: 0,
+      completedAt: 9_999_999,
+      lifetimeUsage: { input: 10_000_000, output: 10_000_000, cacheWrite: 0, cost: 1234.56 },
+      compactionCount: 0,
+    }, undefined, theme, 12);
+
+    expect(visibleWidth(line)).toBeLessThanOrEqual(12);
+  });
+});
+
+describe("AgentWidget focused mode", () => {
+  it("notifies and cancels without changing focus when prior focus is unavailable", async () => {
+    const setFocus = vi.fn();
+    const notify = vi.fn();
+    const tui = {
+      terminal: { rows: 30, columns: 100 },
+      setFocus,
+      requestRender: vi.fn(),
+    } as any;
+    const theme = { fg: (_c: string, s: string) => s, bold: (s: string) => s };
+    const setWidget = vi.fn((_key: string, content: any) => {
+      content?.(tui, theme);
+    });
+    const widget = new AgentWidget({ listAgents: () => [] } as any, new Map());
+    widget.setUICtx({ setWidget, setStatus: vi.fn(), notify });
+
+    await expect(widget.withFocusedWidget(async (present) => present((_tui, _theme, _done) => ({
+      render: () => [],
+      invalidate: () => {},
+    })))).resolves.toBeUndefined();
+
+    expect(notify).toHaveBeenCalledWith(
+      "Active subagent viewer is unavailable in this Pi version; update Pi to use /agents.",
+      "warning",
+    );
+    expect(setFocus).not.toHaveBeenCalled();
+    widget.dispose();
+  });
+
+  it("mounts the interactive component in the agents widget and restores editor focus", async () => {
+    const editor = { render: () => [], invalidate: () => {} };
+    const setFocus = vi.fn();
+    const tui = {
+      terminal: { rows: 30, columns: 100 },
+      getFocusedComponent: () => editor,
+      setFocus,
+      requestRender: vi.fn(),
+    } as any;
+    const theme = { fg: (_c: string, s: string) => s, bold: (s: string) => s };
+    let mounted: any;
+    const setWidget = vi.fn((_key: string, content: any) => {
+      mounted?.dispose?.();
+      mounted = content?.(tui, theme);
+    });
+    const widget = new AgentWidget({
+      listAgents: () => [{
+        id: "active",
+        type: "general-purpose",
+        description: "active",
+        status: "running",
+        toolUses: 0,
+        startedAt: Date.now(),
+        lifetimeUsage: { input: 0, output: 0, cacheWrite: 0, cost: 0 },
+        compactionCount: 0,
+      }],
+    } as any, new Map());
+    widget.setUICtx({ setWidget, setStatus: vi.fn() });
+
+    let finishFirst!: (value: string) => void;
+    let finishSecond!: (value: string) => void;
+    const first = { render: () => ["picker"], invalidate: () => {}, dispose: vi.fn() };
+    const second = { render: () => ["monitor"], invalidate: () => {}, dispose: vi.fn() };
+    const resultPromise = widget.withFocusedWidget(async (present) => {
+      const picked = await present<string>((_tui, _theme, done) => {
+        finishFirst = done;
+        return first;
+      });
+      const watched = await present<string>((_tui, _theme, done) => {
+        finishSecond = done;
+        return second;
+      });
+      return `${picked}:${watched}`;
+    });
+
+    expect(mounted).toBe(first);
+    expect(setFocus).toHaveBeenCalledWith(first);
+    finishFirst("selected");
+    await vi.waitFor(() => expect(mounted).toBe(second));
+    expect(first.dispose).toHaveBeenCalledOnce();
+    expect(setFocus).toHaveBeenCalledWith(second);
+    finishSecond("closed");
+    await expect(resultPromise).resolves.toBe("selected:closed");
+
+    expect(second.dispose).toHaveBeenCalledOnce();
+    expect(setFocus).toHaveBeenLastCalledWith(editor);
+    expect(setWidget.mock.calls.every(([key]) => key === "agents")).toBe(true);
+    widget.dispose();
   });
 });
 

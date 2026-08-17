@@ -321,3 +321,206 @@ describe("ConversationViewer", () => {
     });
   });
 });
+
+describe("ConversationViewer monitor controls", () => {
+  it("moves between live agent records and swaps session subscriptions", () => {
+    const firstUnsubscribe = vi.fn();
+    const secondUnsubscribe = vi.fn();
+    const firstSession = {
+      ...mockSession([{ role: "user", content: "first" }]),
+      subscribe: vi.fn(() => firstUnsubscribe),
+    };
+    const secondSession = {
+      ...mockSession([{ role: "user", content: "second" }]),
+      subscribe: vi.fn(() => secondUnsubscribe),
+    };
+    const first = mockRecord({ id: "first", session: firstSession });
+    const second = mockRecord({ id: "second", session: secondSession });
+    const viewer = new ConversationViewer(
+      mockTui(),
+      firstSession,
+      first,
+      undefined,
+      ansiTheme(),
+      vi.fn(),
+      { getAgents: () => [first, second], getActivity: () => undefined },
+    );
+
+    viewer.handleInput("\x1b[C");
+    const rendered = viewer.render(80).join("\n");
+
+    expect(firstUnsubscribe).toHaveBeenCalledOnce();
+    expect(secondSession.subscribe).toHaveBeenCalledOnce();
+    expect(rendered).toContain("2/2");
+    expect(rendered).toContain("second");
+    viewer.dispose();
+    expect(secondUnsubscribe).toHaveBeenCalledOnce();
+  });
+
+  it("composes and sends a steering message inline", async () => {
+    const onSteer = vi.fn(async () => ({ ok: true, message: "Steering message sent." }));
+    const record = mockRecord({ id: "running", lifetimeUsage: { input: 0, output: 0, cacheWrite: 0, cost: 0 } });
+    const tui = mockTui();
+    const viewer = new ConversationViewer(
+      tui,
+      mockSession(),
+      record,
+      undefined,
+      ansiTheme(),
+      vi.fn(),
+      { onSteer },
+    );
+    viewer.focused = true;
+
+    viewer.handleInput("s");
+    expect((viewer as any).steerInput.focused).toBe(true);
+    const composeView = viewer.render(100).join("\n")
+      .replace(/\x1b\[[0-9;]*m/g, "")
+      .replace(/\x1b_[^\x07]*\x07/g, "");
+    expect(composeView).toContain("steer >");
+    expect(composeView).not.toContain("› >");
+    for (const char of "focus tests") viewer.handleInput(char);
+    viewer.handleInput("\r");
+
+    await vi.waitFor(() => expect(onSteer).toHaveBeenCalledWith(record, "focus tests"));
+    expect(viewer.render(100).join("\n")).toContain("Steering message sent.");
+    expect((viewer as any).composingSteer).toBe(false);
+    viewer.dispose();
+  });
+
+  it("does not enter steering mode for a completed agent", () => {
+    const onSteer = vi.fn();
+    const record = mockRecord({
+      status: "completed",
+      lifetimeUsage: { input: 0, output: 0, cacheWrite: 0, cost: 0 },
+    });
+    const viewer = new ConversationViewer(
+      mockTui(), mockSession(), record, undefined, ansiTheme(), vi.fn(), { onSteer },
+    );
+
+    viewer.handleInput("s");
+
+    expect((viewer as any).composingSteer).toBe(false);
+    expect(viewer.render(100).join("\n")).toContain("Cannot steer a completed agent.");
+    expect(onSteer).not.toHaveBeenCalled();
+    viewer.dispose();
+  });
+
+  it("attaches when an in-place queued record receives its session", () => {
+    const record = mockRecord({ id: "queued", status: "queued", session: undefined });
+    const session = mockSession([{ role: "user", content: "started" }]);
+    const viewer = new ConversationViewer(
+      mockTui(),
+      undefined,
+      record,
+      undefined,
+      ansiTheme(),
+      vi.fn(),
+      { getAgents: () => [record], getActivity: () => undefined },
+    );
+
+    record.status = "running";
+    record.session = session;
+    const rendered = viewer.render(80).join("\n");
+
+    expect(session.subscribe).toHaveBeenCalledOnce();
+    expect(rendered).toContain("started");
+    viewer.dispose();
+  });
+
+  it("detaches from a session when the live record list becomes empty", () => {
+    const unsubscribe = vi.fn();
+    const session = { ...mockSession(), subscribe: vi.fn(() => unsubscribe) };
+    const record = mockRecord({ id: "removed", session });
+    let agents = [record];
+    const viewer = new ConversationViewer(
+      mockTui(),
+      session,
+      record,
+      undefined,
+      ansiTheme(),
+      vi.fn(),
+      { getAgents: () => agents, getActivity: () => undefined },
+    );
+
+    agents = [];
+    viewer.render(80);
+
+    expect(unsubscribe).toHaveBeenCalledOnce();
+    expect((viewer as any).session).toBeUndefined();
+    viewer.dispose();
+  });
+
+  it("falls back to another active agent when the selected one completes", () => {
+    const firstSession = mockSession([{ role: "user", content: "first" }]);
+    const secondSession = mockSession([{ role: "user", content: "second" }]);
+    const first = mockRecord({ id: "first", session: firstSession });
+    const second = mockRecord({ id: "second", session: secondSession });
+    let agents = [first, second];
+    const viewer = new ConversationViewer(
+      mockTui(),
+      firstSession,
+      first,
+      undefined,
+      ansiTheme(),
+      vi.fn(),
+      { getAgents: () => agents, getActivity: () => undefined },
+    );
+
+    first.status = "completed";
+    agents = [second];
+    const rendered = viewer.render(80).join("\n");
+
+    expect(rendered).toContain("1/1");
+    expect(rendered).toContain("second");
+    expect(secondSession.subscribe).toHaveBeenCalledOnce();
+    viewer.dispose();
+  });
+
+  it("closes when the final active agent completes", () => {
+    vi.useFakeTimers();
+    const session = mockSession();
+    const record = mockRecord({ id: "only", session });
+    let agents = [record];
+    const done = vi.fn();
+    const viewer = new ConversationViewer(
+      mockTui(),
+      session,
+      record,
+      undefined,
+      ansiTheme(),
+      done,
+      { getAgents: () => agents, getActivity: () => undefined },
+    );
+
+    record.status = "completed";
+    agents = [];
+    vi.advanceTimersByTime(100);
+
+    expect(done).toHaveBeenCalledWith(undefined);
+    viewer.dispose();
+    vi.useRealTimers();
+  });
+
+  it("preserves the steering draft when delivery fails", async () => {
+    const onSteer = vi.fn(async () => ({ ok: false, message: "Agent is no longer running." }));
+    const record = mockRecord({
+      status: "running",
+      lifetimeUsage: { input: 0, output: 0, cacheWrite: 0, cost: 0 },
+    });
+    const viewer = new ConversationViewer(
+      mockTui(), mockSession(), record, undefined, ansiTheme(), vi.fn(), { onSteer },
+    );
+    viewer.focused = true;
+
+    viewer.handleInput("s");
+    for (const char of "keep this") viewer.handleInput(char);
+    viewer.handleInput("\r");
+
+    await vi.waitFor(() => expect(onSteer).toHaveBeenCalled());
+    expect((viewer as any).composingSteer).toBe(true);
+    expect((viewer as any).steerInput.getValue()).toBe("keep this");
+    expect(viewer.render(100).join("\n")).toContain("Agent is no longer running.");
+    viewer.dispose();
+  });
+});

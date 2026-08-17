@@ -34,7 +34,6 @@ export interface AgentConfig {
   skills: true | string[] | false;
   model?: string;
   thinking?: ThinkingLevel;
-  maxTurns?: number;
   systemPrompt: string;
   promptMode: "replace" | "append";
   /** Default for spawn: fork parent conversation. undefined = caller decides. */
@@ -59,9 +58,11 @@ export type JoinMode = 'async' | 'group' | 'smart';
 
 export interface AgentRecord {
   id: string;
+  /** Root Pi session that created this run; retained when that run is resumed. Active runs stop on session shutdown. */
+  parentSessionId?: string;
   type: SubagentType;
   description: string;
-  status: "queued" | "running" | "completed" | "steered" | "aborted" | "stopped" | "error";
+  status: "queued" | "running" | "completed" | "stopped" | "error";
   result?: string;
   error?: string;
   toolUses: number;
@@ -96,13 +97,14 @@ export interface AgentRecord {
   compactionCount: number;
   /** Resolved spawn params, captured for UI display. Fixed at spawn time. */
   invocation?: AgentInvocation;
+  /** Internal guard: one terminal lifecycle publication per run. */
+  terminalPublished?: boolean;
 }
 
 export interface AgentInvocation {
   /** Short display name, e.g. "haiku" — only set when different from parent. */
   modelName?: string;
   thinking?: ThinkingLevel;
-  maxTurns?: number;
   isolated?: boolean;
   inheritContext?: boolean;
   runInBackground?: boolean;
@@ -116,7 +118,6 @@ export interface NotificationDetails {
   status: string;
   toolUses: number;
   turnCount: number;
-  maxTurns?: number;
   totalTokens: number;
   durationMs: number;
   outputFile?: string;
@@ -155,7 +156,6 @@ export interface ScheduledSubagent {
   prompt: string;
   model?: string;
   thinking?: ThinkingLevel;
-  max_turns?: number;
   isolated?: boolean;
   isolation?: IsolationMode;
 

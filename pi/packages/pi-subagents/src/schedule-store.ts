@@ -77,7 +77,13 @@ export class ScheduleStore {
     try {
       const data: ScheduleStoreData = JSON.parse(readFileSync(this.filePath, "utf-8"));
       this.jobs.clear();
-      for (const j of data.jobs ?? []) this.jobs.set(j.id, j);
+      for (const rawJob of data.jobs ?? []) {
+        // Scrub the removed turn-limit field from legacy schedule files. It is
+        // dropped from memory immediately and from disk on the next mutation.
+        const job = { ...rawJob } as ScheduledSubagent & { max_turns?: unknown };
+        delete job.max_turns;
+        this.jobs.set(job.id, job);
+      }
     } catch { /* corrupt — start fresh, next save rewrites */ }
   }
 

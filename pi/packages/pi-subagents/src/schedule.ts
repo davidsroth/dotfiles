@@ -40,7 +40,6 @@ export interface NewJobInput {
   prompt: string;
   model?: string;
   thinking?: ThinkingLevel;
-  max_turns?: number;
   isolated?: boolean;
   isolation?: IsolationMode;
 }
@@ -103,7 +102,6 @@ export class SubagentScheduler {
       prompt: input.prompt,
       model: input.model,
       thinking: input.thinking,
-      max_turns: input.max_turns,
       isolated: input.isolated,
       isolation: input.isolation,
       enabled: true,
@@ -243,7 +241,6 @@ export class SubagentScheduler {
         isBackground: true,
         bypassQueue: true,
         model: resolvedModel,
-        maxTurns: job.max_turns,
         isolated: job.isolated,
         thinkingLevel: job.thinking,
         isolation: job.isolation,
@@ -271,12 +268,11 @@ export class SubagentScheduler {
 
     // AgentManager's promise resolves either way (its .catch returns ""), so we
     // can't infer success/failure from the promise — read record.status instead.
-    // Terminal states: completed/steered = success; error/aborted/stopped = error.
     if (record?.promise) {
       record.promise
         .then(() => {
           const r = manager.getRecord(agentId);
-          const failed = r?.status === "error" || r?.status === "aborted" || r?.status === "stopped";
+          const failed = r?.status === "error" || r?.status === "stopped";
           finalize(failed ? "error" : "success");
         })
         .catch(() => finalize("error"));

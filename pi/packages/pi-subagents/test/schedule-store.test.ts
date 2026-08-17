@@ -57,6 +57,19 @@ describe("ScheduleStore", () => {
     expect(fresh.list()).toEqual([job]);
   });
 
+  it("scrubs max_turns from legacy scheduled jobs", () => {
+    const file = join(tmp, "s.json");
+    const legacyJob = { ...makeJob({ id: "legacy" }), max_turns: 12 };
+    writeFileSync(file, JSON.stringify({ version: 1, jobs: [legacyJob] }));
+
+    const store = new ScheduleStore(file);
+    expect(store.list()[0]).not.toHaveProperty("max_turns");
+
+    store.update("legacy", { runCount: 1 });
+    const persisted = JSON.parse(readFileSync(file, "utf-8"));
+    expect(persisted.jobs[0]).not.toHaveProperty("max_turns");
+  });
+
   it("creates and repairs private store permissions", () => {
     const dir = join(tmp, "private");
     const file = join(dir, "s.json");

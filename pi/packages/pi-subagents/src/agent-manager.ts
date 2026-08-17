@@ -15,6 +15,7 @@ import { addUsage } from "./usage.js";
 import { cleanupWorktree, createWorktree, pruneWorktrees, } from "./worktree.js";
 
 export type OnAgentComplete = (record: AgentRecord) => void;
+export type OnAgentCreated = (record: AgentRecord, isBackground: boolean) => void;
 export type OnAgentStart = (record: AgentRecord) => void;
 export type OnAgentCompact = (record: AgentRecord, info: CompactionInfo) => void;
 export type OnAgentTerminal = (record: AgentRecord) => void;
@@ -23,6 +24,16 @@ export type CompactionInfo = { reason: "manual" | "threshold" | "overflow"; toke
 
 /** Default max concurrent background agents. */
 const DEFAULT_MAX_CONCURRENT = 4;
+
+/** Read the root session identity once at spawn; a later /resume must not reassign the run. */
+function parentSessionId(ctx: ExtensionContext): string | undefined {
+  try {
+    const sessionId = ctx.sessionManager?.getSessionId?.();
+    return typeof sessionId === "string" && sessionId.length > 0 ? sessionId : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 interface SpawnArgs {
   pi: ExtensionAPI;
@@ -35,7 +46,6 @@ interface SpawnArgs {
 interface SpawnOptions {
   description: string;
   model?: Model<any>;
-  maxTurns?: number;
   isolated?: boolean;
   inheritContext?: boolean;
   thinkingLevel?: ThinkingLevel;
@@ -70,6 +80,7 @@ export class AgentManager {
   private agents = new Map<string, AgentRecord>();
   private cleanupInterval: ReturnType<typeof setInterval>;
   private onComplete?: OnAgentComplete;
+  private onCreated?: OnAgentCreated;
   private onStart?: OnAgentStart;
   private onCompact?: OnAgentCompact;
   private onTerminal?: OnAgentTerminal;
@@ -88,8 +99,10 @@ export class AgentManager {
     onCompact?: OnAgentCompact,
     onTerminal?: OnAgentTerminal,
     onUsage?: OnAgentUsage,
+    onCreated?: OnAgentCreated,
   ) {
     this.onComplete = onComplete;
+    this.onCreated = onCreated;
     this.onStart = onStart;
     this.onCompact = onCompact;
     this.onTerminal = onTerminal;
@@ -111,6 +124,13 @@ export class AgentManager {
     return this.maxConcurrent;
   }
 
+  /** Publish terminal activity once, including promptly after an explicit stop. */
+  private publishTerminal(record: AgentRecord): void {
+    if (record.terminalPublished) return;
+    record.terminalPublished = true;
+    try { this.onTerminal?.(record); } catch { /* terminal observers must not interrupt agents */ }
+  }
+
   /**
    * Spawn an agent and return its ID immediately (for background use).
    * If the concurrency limit is reached, the agent is queued.
@@ -126,6 +146,7 @@ export class AgentManager {
     const abortController = new AbortController();
     const record: AgentRecord = {
       id,
+      parentSessionId: parentSessionId(ctx),
       type,
       description: options.description,
       status: options.isBackground ? "queued" : "running",
@@ -137,6 +158,7 @@ export class AgentManager {
       invocation: options.invocation,
     };
     this.agents.set(id, record);
+    try { this.onCreated?.(record, Boolean(options.isBackground)); } catch { /* activity observers must not interrupt spawning */ }
 
     const args: SpawnArgs = { pi, ctx, type, prompt, options };
 
@@ -151,6 +173,10 @@ export class AgentManager {
     try {
       this.startAgent(id, record, args);
     } catch (err) {
+      record.status = "error";
+      record.error = err instanceof Error ? err.message : String(err);
+      record.completedAt = Date.now();
+      this.publishTerminal(record);
       this.agents.delete(id);
       throw err;
     }
@@ -176,6 +202,7 @@ export class AgentManager {
     }
 
     record.status = "running";
+    record.terminalPublished = false;
     record.startedAt = Date.now();
     if (options.isBackground) this.runningBackground++;
     this.onStart?.(record);
@@ -192,7 +219,6 @@ export class AgentManager {
     const promise = runAgent(ctx, type, prompt, {
       pi,
       model: options.model,
-      maxTurns: options.maxTurns,
       isolated: options.isolated,
       inheritContext: options.inheritContext,
       thinkingLevel: options.thinkingLevel,
@@ -226,10 +252,10 @@ export class AgentManager {
         options.onSessionCreated?.(session);
       },
     })
-      .then(({ responseText, session, aborted, steered }) => {
+      .then(({ responseText, session }) => {
         // Don't overwrite status if externally stopped via abort()
         if (record.status !== "stopped") {
-          record.status = aborted ? "aborted" : steered ? "steered" : "completed";
+          record.status = "completed";
         }
         record.result = responseText;
         record.session = session;
@@ -253,7 +279,7 @@ export class AgentManager {
           }
         }
 
-        try { this.onTerminal?.(record); } catch { /* ignore terminal side-effect errors */ }
+        this.publishTerminal(record);
         if (options.isBackground) {
           this.runningBackground--;
           try { this.onComplete?.(record); } catch { /* ignore completion side-effect errors */ }
@@ -285,7 +311,7 @@ export class AgentManager {
           } catch { /* ignore cleanup errors */ }
         }
 
-        try { this.onTerminal?.(record); } catch { /* ignore terminal side-effect errors */ }
+        this.publishTerminal(record);
         if (options.isBackground) {
           this.runningBackground--;
           try { this.onComplete?.(record); } catch { /* ignore completion side-effect errors */ }
@@ -311,7 +337,7 @@ export class AgentManager {
         record.status = "error";
         record.error = err instanceof Error ? err.message : String(err);
         record.completedAt = Date.now();
-        try { this.onTerminal?.(record); } catch { /* ignore terminal side-effect errors */ }
+        this.publishTerminal(record);
         try { this.onComplete?.(record); } catch { /* ignore completion side-effect errors */ }
       }
     }
@@ -346,10 +372,12 @@ export class AgentManager {
     if (!record?.session) return undefined;
 
     record.status = "running";
+    record.terminalPublished = false;
     record.startedAt = Date.now();
     record.completedAt = undefined;
     record.result = undefined;
     record.error = undefined;
+    try { this.onStart?.(record); } catch { /* activity observers must not interrupt resuming */ }
 
     try {
       const responseText = await resumeAgent(record.session, prompt, {
@@ -375,7 +403,7 @@ export class AgentManager {
       record.completedAt = Date.now();
     }
 
-    try { this.onTerminal?.(record); } catch { /* ignore terminal side-effect errors */ }
+    this.publishTerminal(record);
     return record;
   }
 
@@ -383,10 +411,11 @@ export class AgentManager {
     return this.agents.get(id);
   }
 
-  listAgents(): AgentRecord[] {
-    return [...this.agents.values()].sort(
-      (a, b) => b.startedAt - a.startedAt,
-    );
+  /** List records, optionally scoped to the root session that created them. */
+  listAgents(sessionId?: string): AgentRecord[] {
+    return [...this.agents.values()]
+      .filter((record) => sessionId === undefined || record.parentSessionId === sessionId)
+      .sort((a, b) => b.startedAt - a.startedAt);
   }
 
   abort(id: string): boolean {
@@ -398,7 +427,7 @@ export class AgentManager {
       this.queue = this.queue.filter(q => q.id !== id);
       record.status = "stopped";
       record.completedAt = Date.now();
-      try { this.onTerminal?.(record); } catch { /* ignore terminal side-effect errors */ }
+      this.publishTerminal(record);
       return true;
     }
 
@@ -406,6 +435,9 @@ export class AgentManager {
     record.abortController?.abort();
     record.status = "stopped";
     record.completedAt = Date.now();
+    // Do not wait for the child promise to settle: activity observers need the
+    // stopped transition now, while publishTerminal prevents a later duplicate.
+    this.publishTerminal(record);
     return true;
   }
 
@@ -474,6 +506,7 @@ export class AgentManager {
       if (record) {
         record.status = "stopped";
         record.completedAt = Date.now();
+        this.publishTerminal(record);
         count++;
       }
     }
@@ -484,6 +517,7 @@ export class AgentManager {
         record.abortController?.abort();
         record.status = "stopped";
         record.completedAt = Date.now();
+        this.publishTerminal(record);
         count++;
       }
     }

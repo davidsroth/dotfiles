@@ -13,7 +13,7 @@ vi.mock("../src/worktree.js", () => ({
   pruneWorktrees: vi.fn(),
 }));
 
-import { runAgent } from "../src/agent-runner.js";
+import { resumeAgent, runAgent } from "../src/agent-runner.js";
 
 const mockPi = {} as any;
 const mockCtx = { cwd: "/tmp" } as any;
@@ -128,6 +128,92 @@ describe("AgentManager — completion callbacks", () => {
     await expect(manager.getRecord(id)!.promise).resolves.toBe("done");
 
     expect(manager.getRecord(id)!.status).toBe("completed");
+  });
+});
+
+describe("AgentManager — stopped lifecycle", () => {
+  let manager: AgentManager;
+
+  afterEach(() => {
+    manager?.dispose();
+  });
+
+  it("publishes a running abort promptly and exactly once after settlement", async () => {
+    let settle: ((value: any) => void) | undefined;
+    vi.mocked(runAgent).mockImplementation(() => new Promise((resolve) => {
+      settle = resolve;
+    }) as any);
+    const terminal: AgentRecord[] = [];
+    manager = new AgentManager(undefined, undefined, undefined, undefined, (record) => {
+      terminal.push(record);
+    });
+
+    const id = manager.spawn(mockPi, mockCtx, "general-purpose", "test", {
+      description: "test",
+      isBackground: true,
+    });
+    const record = manager.getRecord(id)!;
+
+    expect(manager.abort(id)).toBe(true);
+    expect(terminal).toEqual([record]);
+    expect(terminal[0]!.status).toBe("stopped");
+
+    settle!({ responseText: "late result", session: mockSession(), aborted: true, steered: false });
+    await record.promise;
+    expect(terminal).toHaveLength(1);
+    expect(record.status).toBe("stopped");
+  });
+});
+
+describe("AgentManager — parent session ownership", () => {
+  let manager: AgentManager;
+
+  afterEach(() => {
+    manager?.dispose();
+  });
+
+  it("keeps active records with their originating root session after a switch", () => {
+    manager = new AgentManager();
+    vi.mocked(runAgent).mockImplementation(() => new Promise(() => {}) as any);
+    const rootA = { ...mockCtx, sessionManager: { getSessionId: () => "root-a" } };
+    const rootB = { ...mockCtx, sessionManager: { getSessionId: () => "root-b" } };
+
+    const a = manager.spawn(mockPi, rootA, "general-purpose", "for A", {
+      description: "A activity",
+      isBackground: true,
+    });
+
+    expect(manager.getRecord(a)?.parentSessionId).toBe("root-a");
+    expect(manager.listAgents("root-a").map((record) => record.id)).toEqual([a]);
+    expect(manager.listAgents("root-b")).toEqual([]);
+
+    const b = manager.spawn(mockPi, rootB, "general-purpose", "for B", {
+      description: "B activity",
+      isBackground: true,
+    });
+
+    expect(manager.listAgents("root-a").map((record) => record.id)).toEqual([a]);
+    expect(manager.listAgents("root-b").map((record) => record.id)).toEqual([b]);
+    manager.abort(a);
+    manager.abort(b);
+  });
+
+  it("preserves origin ownership when an existing run is resumed", async () => {
+    manager = new AgentManager();
+    resolvedRun();
+    vi.mocked(resumeAgent).mockResolvedValue("resumed");
+    const rootA = { ...mockCtx, sessionManager: { getSessionId: () => "root-a" } };
+
+    const id = manager.spawn(mockPi, rootA, "general-purpose", "for A", {
+      description: "A activity",
+      isBackground: true,
+    });
+    await manager.getRecord(id)!.promise;
+    await manager.resume(id, "continue");
+
+    expect(manager.getRecord(id)?.parentSessionId).toBe("root-a");
+    expect(manager.listAgents("root-a").map((record) => record.id)).toEqual([id]);
+    expect(manager.listAgents("root-b")).toEqual([]);
   });
 });
 
@@ -491,5 +577,64 @@ describe("AgentManager — isolation: worktree fails loud, no silent fallback", 
     expect(manager.listAgents()).toEqual([]);
     // runAgent never invoked — strict, no silent fallback
     expect(runAgent).not.toHaveBeenCalled();
+  });
+});
+
+describe("AgentManager — activity lifecycle callbacks", () => {
+  let manager: AgentManager;
+
+  afterEach(() => {
+    manager?.dispose();
+  });
+
+  it("reports creation before immediate starts and preserves queued activity", () => {
+    const events: string[] = [];
+    vi.mocked(runAgent).mockImplementation(() => new Promise(() => {}));
+    manager = new AgentManager(
+      undefined,
+      1,
+      (record) => events.push(`started:${record.id}`),
+      undefined,
+      undefined,
+      undefined,
+      (record, isBackground) => events.push(`created:${record.id}:${isBackground}`),
+    );
+
+    const first = manager.spawn(mockPi, mockCtx, "general-purpose", "first", {
+      description: "first",
+      isBackground: true,
+    });
+    const second = manager.spawn(mockPi, mockCtx, "general-purpose", "second", {
+      description: "second",
+      isBackground: true,
+    });
+
+    expect(events).toEqual([
+      `created:${first}:true`,
+      `started:${first}`,
+      `created:${second}:true`,
+    ]);
+    expect(manager.getRecord(second)?.status).toBe("queued");
+  });
+
+  it("reports an immediate spawn failure as terminal after creation", () => {
+    const events: string[] = [];
+    manager = new AgentManager(
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      (record) => events.push(`terminal:${record.status}`),
+      undefined,
+      () => events.push("created"),
+    );
+
+    expect(() => manager.spawn(mockPi, mockCtx, "general-purpose", "test", {
+      description: "test",
+      isolation: "worktree",
+    })).toThrow(/Cannot run with isolation/);
+
+    expect(events).toEqual(["created", "terminal:error"]);
+    expect(manager.listAgents()).toEqual([]);
   });
 });

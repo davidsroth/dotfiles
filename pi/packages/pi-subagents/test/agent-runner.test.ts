@@ -125,6 +125,24 @@ describe("agent-runner final output capture", () => {
     expect(result.responseText).toBe("LOCKED");
   });
 
+  it("tracks turns without steering or aborting the agent", async () => {
+    const { session, listeners } = createSession("UNLIMITED");
+    createAgentSession.mockResolvedValue({ session });
+    session.prompt = vi.fn(async () => {
+      for (let i = 0; i < 100; i++) {
+        for (const listener of listeners) listener({ type: "turn_end" });
+      }
+      session.messages.push({ role: "assistant", content: [{ type: "text", text: "UNLIMITED" }] });
+    });
+    const onTurnEnd = vi.fn();
+
+    await runAgent(ctx, "Explore", "keep going", { pi, onTurnEnd });
+
+    expect(onTurnEnd).toHaveBeenLastCalledWith(100);
+    expect(session.steer).not.toHaveBeenCalled();
+    expect(session.abort).not.toHaveBeenCalled();
+  });
+
   it("binds extensions before prompting", async () => {
     const { session } = createSession("BOUND");
     createAgentSession.mockResolvedValue({ session });

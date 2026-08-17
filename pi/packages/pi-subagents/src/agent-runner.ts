@@ -10,8 +10,8 @@ import {
   createAgentSession,
   DefaultResourceLoader,
   type ExtensionAPI,
-  type ModelRuntime,
   getAgentDir,
+  type ModelRuntime,
   SessionManager,
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
@@ -26,28 +26,6 @@ import type { SubagentType, ThinkingLevel } from "./types.js";
 
 /** Names of tools registered by this extension that subagents must NOT inherit. */
 const EXCLUDED_TOOL_NAMES = ["Agent", "get_subagent_result", "steer_subagent"];
-
-/** Default max turns. undefined = unlimited (no turn limit). */
-let defaultMaxTurns: number | undefined;
-
-/** Normalize max turns. undefined or 0 = unlimited, otherwise minimum 1. */
-export function normalizeMaxTurns(n: number | undefined): number | undefined {
-  if (n == null || n === 0) return undefined;
-  return Math.max(1, n);
-}
-
-/** Get the default max turns value. undefined = unlimited. */
-export function getDefaultMaxTurns(): number | undefined { return defaultMaxTurns; }
-/** Set the default max turns value. undefined or 0 = unlimited, otherwise minimum 1. */
-export function setDefaultMaxTurns(n: number | undefined): void { defaultMaxTurns = normalizeMaxTurns(n); }
-
-/** Additional turns allowed after the soft limit steer message. */
-let graceTurns = 5;
-
-/** Get the grace turns value. */
-export function getGraceTurns(): number { return graceTurns; }
-/** Set the grace turns value (minimum 1). */
-export function setGraceTurns(n: number): void { graceTurns = Math.max(1, n); }
 
 /**
  * Try to find the right model for an agent type.
@@ -90,7 +68,6 @@ export interface RunOptions {
   /** ExtensionAPI instance — used for pi.exec() instead of execSync. */
   pi: ExtensionAPI;
   model?: Model<any>;
-  maxTurns?: number;
   signal?: AbortSignal;
   isolated?: boolean;
   inheritContext?: boolean;
@@ -120,10 +97,6 @@ export interface RunOptions {
 export interface RunResult {
   responseText: string;
   session: AgentSession;
-  /** True if the agent was hard-aborted (max_turns + grace exceeded). */
-  aborted: boolean;
-  /** True if the agent was steered to wrap up (hit soft turn limit) but finished in time. */
-  steered: boolean;
 }
 
 /**
@@ -348,26 +321,12 @@ export async function runAgent(
 
   options.onSessionCreated?.(session);
 
-  // Track turns for graceful max_turns enforcement
   let turnCount = 0;
-  const maxTurns = normalizeMaxTurns(options.maxTurns ?? agentConfig?.maxTurns ?? defaultMaxTurns);
-  let softLimitReached = false;
-  let aborted = false;
-
   let currentMessageText = "";
   const unsubTurns = session.subscribe((event: AgentSessionEvent) => {
     if (event.type === "turn_end") {
       turnCount++;
       options.onTurnEnd?.(turnCount);
-      if (maxTurns != null) {
-        if (!softLimitReached && turnCount >= maxTurns) {
-          softLimitReached = true;
-          session.steer("You have reached your turn limit. Wrap up immediately — provide your final answer now.");
-        } else if (softLimitReached && turnCount >= maxTurns + graceTurns) {
-          aborted = true;
-          session.abort();
-        }
-      }
     }
     if (event.type === "message_start") {
       currentMessageText = "";
@@ -417,7 +376,7 @@ export async function runAgent(
   }
 
   const responseText = collector.getText().trim() || getLastAssistantText(session);
-  return { responseText, session, aborted, steered: softLimitReached };
+  return { responseText, session };
 }
 
 /**

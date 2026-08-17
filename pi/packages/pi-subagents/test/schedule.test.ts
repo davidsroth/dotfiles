@@ -388,28 +388,21 @@ describe("SubagentScheduler — fire path", () => {
       expect(scheduler.list().find(j => j.id === job.id)?.lastStatus).toBe("success");
     });
 
-    it("treats aborted and stopped as errors (terminal failure states)", async () => {
+    it("treats stopped as an error (terminal failure state)", async () => {
       const records = installFaithfulMock();
-      const a = scheduler.addJob({
-        name: "abort-job", description: "x", schedule: "+1s",
-        subagent_type: "general-purpose", prompt: "x",
-      });
-      const b = scheduler.addJob({
-        name: "stop-job", description: "x", schedule: "+2s",
+      const job = scheduler.addJob({
+        name: "stop-job", description: "x", schedule: "+1s",
         subagent_type: "general-purpose", prompt: "x",
       });
 
-      vi.advanceTimersByTime(3_000);
-      const recs = [...records.values()];
-      recs[0].status = "aborted";
-      recs[0].resolve();
-      recs[1].status = "stopped";
-      recs[1].resolve();
+      vi.advanceTimersByTime(2_000);
+      const record = [...records.values()][0];
+      record.status = "stopped";
+      record.resolve();
 
       await vi.advanceTimersByTimeAsync(0);
 
-      expect(scheduler.list().find(j => j.id === a.id)?.lastStatus).toBe("error");
-      expect(scheduler.list().find(j => j.id === b.id)?.lastStatus).toBe("error");
+      expect(scheduler.list().find(j => j.id === job.id)?.lastStatus).toBe("error");
     });
   });
 });

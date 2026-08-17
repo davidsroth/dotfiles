@@ -7,7 +7,8 @@
  *   steer_subagent       — LLM-callable: send a steering message to a running agent
  *
  * Commands:
- *   /agents                 — Interactive agent management menu
+ *   /agents                 — Focused active-agent picker and monitor
+ *   /agent-manage           — Agent types, schedules, and settings
  */
 
 import { existsSync, mkdirSync, readFileSync, unlinkSync } from "node:fs";
@@ -16,7 +17,25 @@ import { defineTool, type ExtensionAPI, type ExtensionCommandContext, type Exten
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "@sinclair/typebox";
 import { AgentManager } from "./agent-manager.js";
-import { getAgentConversation, getDefaultMaxTurns, getGraceTurns, normalizeMaxTurns, setDefaultMaxTurns, setGraceTurns, steerAgent } from "./agent-runner.js";
+import {
+  registerSubagentActivityProvider,
+  type ActiveSubagentSnapshot,
+} from "./activity.js";
+import { getAgentConversation, steerAgent } from "./agent-runner.js";
+
+export {
+  getSubagentActivityProvider,
+  getSubagentActivityRegistry,
+  registerSubagentActivityProvider,
+  SUBAGENT_ACTIVITY_PROVIDER_KEY,
+  SUBAGENT_ACTIVITY_REGISTRY_KEY,
+} from "./activity.js";
+export type {
+  ActiveSubagentSnapshot,
+  ActiveSubagentStatus,
+  SubagentActivityProvider,
+  SubagentActivityRegistry,
+} from "./activity.js";
 import { BUILTIN_TOOL_NAMES, getAgentConfig, getAllTypes, getAvailableTypes, getDefaultAgentNames, getUserAgentNames, registerAgents, resolveType } from "./agent-types.js";
 import { registerRpcHandlers } from "./cross-extension-rpc.js";
 import { loadCustomAgents } from "./custom-agents.js";
@@ -24,16 +43,19 @@ import { GroupJoinManager } from "./group-join.js";
 import { resolveAgentInvocationConfig, resolveJoinMode } from "./invocation-config.js";
 import { type ModelRegistry, resolveModel } from "./model-resolver.js";
 import { createOutputFilePath, streamToOutputFile, writeInitialEntry } from "./output-file.js";
+import { registerPiVimNormalLeftArrowHandler } from "./pi-vim-left-arrow.js";
 import { SubagentScheduler } from "./schedule.js";
 import { resolveStorePath, ScheduleStore } from "./schedule-store.js";
 import { applyAndEmitLoaded, type SubagentsSettings, saveAndEmitChanged } from "./settings.js";
 import { type AgentConfig, type AgentInvocation, type AgentRecord, type JoinMode, type NotificationDetails, type SubagentType } from "./types.js";
+import { AgentRunPicker, isActiveAgentRecord } from "./ui/agent-run-picker.js";
 import {
   type AgentActivity,
   type AgentDetails,
   AgentWidget,
   buildInvocationTags,
   describeActivity,
+  type FocusedWidgetPresenter,
   formatDuration,
   formatMs,
   formatTokens,
@@ -43,6 +65,7 @@ import {
   SPINNER,
   type UICtx,
 } from "./ui/agent-widget.js";
+import { ConversationViewer } from "./ui/conversation-viewer.js";
 import { showSchedulesMenu } from "./ui/schedule-menu.js";
 import { addUsage, formatCost, getLifetimeTotal, getSessionContextPercent, type LifetimeUsage } from "./usage.js";
 
@@ -51,6 +74,46 @@ import { addUsage, formatCost, getLifetimeTotal, getSessionContextPercent, type 
 /** Tool execute return value for a text response. */
 function textResult(msg: string, details?: AgentDetails) {
   return { content: [{ type: "text" as const, text: msg }], details: details as any };
+}
+
+/**
+ * Wait for a promise unless Pi aborts the enclosing tool call first.
+ *
+ * A user message steers the parent agent, which aborts its active tool calls.
+ * The optional callback runs synchronously with that abort, before the caller
+ * returns control to Pi.
+ */
+export function waitForCompletionOrAbort(
+  promise: Promise<unknown>,
+  signal?: AbortSignal,
+  onAbort?: () => void,
+): Promise<boolean> {
+  if (!signal) return promise.then(() => true);
+  if (signal.aborted) {
+    onAbort?.();
+    return Promise.resolve(false);
+  }
+
+  return new Promise((resolve, reject) => {
+    const cleanup = () => signal.removeEventListener("abort", handleAbort);
+    const handleAbort = () => {
+      cleanup();
+      onAbort?.();
+      resolve(false);
+    };
+
+    signal.addEventListener("abort", handleAbort, { once: true });
+    promise.then(
+      () => {
+        cleanup();
+        resolve(true);
+      },
+      (error) => {
+        cleanup();
+        reject(error);
+      },
+    );
+  });
 }
 
 /** Format an agent's lifetime token total, or "" when zero. */
@@ -63,12 +126,11 @@ function formatLifetimeTokens(o: { lifetimeUsage: LifetimeUsage }): string {
  * Create an AgentActivity state and spawn callbacks for tracking tool usage.
  * Used by both foreground and background paths to avoid duplication.
  */
-function createActivityTracker(maxTurns?: number, onStreamUpdate?: () => void) {
+function createActivityTracker(onStreamUpdate?: () => void) {
   const state: AgentActivity = {
     activeTools: new Map(),
     toolUses: 0,
     turnCount: 1,
-    maxTurns,
     responseText: "",
     session: undefined,
     lifetimeUsage: { input: 0, output: 0, cacheWrite: 0, cost: 0 },
@@ -110,8 +172,6 @@ function createActivityTracker(maxTurns?: number, onStreamUpdate?: () => void) {
 function getStatusLabel(status: string, error?: string): string {
   switch (status) {
     case "error": return `Error: ${error ?? "unknown"}`;
-    case "aborted": return "Aborted (max turns exceeded)";
-    case "steered": return "Wrapped up (turn limit)";
     case "stopped": return "Stopped";
     default: return "Done";
   }
@@ -120,8 +180,6 @@ function getStatusLabel(status: string, error?: string): string {
 /** Parenthetical status note for completed agent result text. */
 function getStatusNote(status: string): string {
   switch (status) {
-    case "aborted": return " (aborted — max turns exceeded, output may be incomplete)";
-    case "steered": return " (wrapped up — reached turn limit)";
     case "stopped": return " (stopped by user)";
     default: return "";
   }
@@ -172,7 +230,6 @@ function buildDetails(
     toolUses: record.toolUses,
     tokens: formatLifetimeTokens(record),
     turnCount: activity?.turnCount,
-    maxTurns: activity?.maxTurns,
     durationMs: (record.completedAt ?? Date.now()) - record.startedAt,
     status: record.status as AgentDetails["status"],
     agentId: record.id,
@@ -195,6 +252,7 @@ export function buildLifecycleEventData(record: AgentRecord) {
     : undefined;
   return {
     id: record.id,
+    sessionId: record.parentSessionId,
     type: record.type,
     description: record.description,
     result: record.result,
@@ -232,7 +290,6 @@ function buildNotificationDetails(record: AgentRecord, resultMaxLen: number, act
     status: record.status,
     toolUses: record.toolUses,
     turnCount: activity?.turnCount ?? 0,
-    maxTurns: activity?.maxTurns,
     totalTokens,
     durationMs: record.completedAt ? record.completedAt - record.startedAt : 0,
     outputFile: record.outputFile,
@@ -255,18 +312,28 @@ export default function (pi: ExtensionAPI) {
       if (!d) return undefined;
 
       function renderOne(d: NotificationDetails): string {
-        const isError = d.status === "error" || d.status === "stopped" || d.status === "aborted";
-        const icon = isError ? theme.fg("error", "✗") : theme.fg("success", "✓");
-        const statusText = isError ? d.status
-          : d.status === "steered" ? "completed (steered)"
-          : "completed";
+        // Session history can contain terminal statuses from before this fork
+        // removed turn limits. Render those historical outcomes accurately.
+        const legacyAborted = d.status === "aborted";
+        const legacySteered = d.status === "steered";
+        const isError = d.status === "error" || d.status === "stopped" || legacyAborted;
+        const icon = isError
+          ? theme.fg("error", "✗")
+          : legacySteered
+            ? theme.fg("warning", "✓")
+            : theme.fg("success", "✓");
+        const statusText = legacyAborted
+          ? "aborted (legacy turn limit)"
+          : legacySteered
+            ? "completed (legacy turn limit)"
+            : isError ? d.status : "completed";
 
         // Line 1: icon + agent description + status
         let line = `${icon} ${theme.bold(d.description)} ${theme.fg("dim", statusText)}`;
 
         // Line 2: stats
         const parts: string[] = [];
-        if (d.turnCount > 0) parts.push(formatTurns(d.turnCount, d.maxTurns));
+        if (d.turnCount > 0) parts.push(formatTurns(d.turnCount));
         if (d.toolUses > 0) parts.push(`${d.toolUses} tool use${d.toolUses === 1 ? "" : "s"}`);
         if (d.totalTokens > 0) parts.push(formatTokens(d.totalTokens));
         if (d.cost != null && d.cost > 0) parts.push(formatCost(d.cost));
@@ -308,6 +375,18 @@ export default function (pi: ExtensionAPI) {
 
   // ---- Agent activity tracking + widget ----
   const agentActivity = new Map<string, AgentActivity>();
+
+  // A steering user message normally waits until the current tool batch ends.
+  // Result waits are intentionally different: end them now, while allowing the
+  // background subagent itself to continue independently.
+  const resultWaitControllers = new Set<AbortController>();
+  const USER_MESSAGE_INTERRUPT = "user-message";
+  pi.on("input", (event) => {
+    if (event.source === "extension" || event.streamingBehavior !== "steer") return;
+    for (const controller of resultWaitControllers) {
+      controller.abort(USER_MESSAGE_INTERRUPT);
+    }
+  });
 
   // ---- Cancellable pending notifications ----
   // Holds notifications briefly so get_subagent_result can cancel them
@@ -391,7 +470,7 @@ export default function (pi: ExtensionAPI) {
   function recordTerminalRun(record: AgentRecord) {
     // Persist before publishing so event consumers can immediately reconstruct
     // the authoritative active-branch total without racing appendEntry().
-    const isError = record.status === "error" || record.status === "stopped" || record.status === "aborted";
+    const isError = record.status === "error" || record.status === "stopped";
     try {
       pi.appendEntry("subagents:record", buildPersistedRecordData(record));
     } finally {
@@ -442,6 +521,7 @@ export default function (pi: ExtensionAPI) {
     // Emit started event when agent transitions to running (including from queue)
     pi.events.emit("subagents:started", {
       id: record.id,
+      sessionId: record.parentSessionId,
       type: record.type,
       description: record.description,
     });
@@ -449,16 +529,47 @@ export default function (pi: ExtensionAPI) {
     // Emit compacted event when agent's session compacts (preserves count on record).
     pi.events.emit("subagents:compacted", {
       id: record.id,
+      sessionId: record.parentSessionId,
       type: record.type,
       description: record.description,
       reason: info.reason,
       tokensBefore: info.tokensBefore,
       compactionCount: record.compactionCount,
     });
-  }, recordTerminalRun, recordUsage);
+  }, recordTerminalRun, recordUsage, (record, isBackground) => {
+    // Publish before a synchronous start so observers also see queued work.
+    pi.events.emit("subagents:created", {
+      id: record.id,
+      sessionId: record.parentSessionId,
+      type: record.type,
+      description: record.description,
+      isBackground,
+    });
+  });
 
-  // Expose manager via Symbol.for() global registry for cross-package access.
-  // Standard Node.js pattern for cross-package singletons (used by OpenTelemetry, etc.).
+  /** Send a steering message with one validation path shared by the tool and TUI. */
+  async function sendSteeringMessage(record: AgentRecord, message: string): Promise<{ ok: boolean; message: string; queued?: boolean }> {
+    if (record.status !== "running") {
+      return { ok: false, message: `Agent is no longer running (status: ${record.status}).` };
+    }
+
+    if (!record.session) {
+      record.pendingSteers ??= [];
+      record.pendingSteers.push(message);
+      pi.events.emit("subagents:steered", { id: record.id, message });
+      return { ok: true, queued: true, message: "Steering queued until the session starts." };
+    }
+
+    try {
+      await steerAgent(record.session, message);
+      pi.events.emit("subagents:steered", { id: record.id, message });
+      return { ok: true, message: "Steering message sent." };
+    } catch (err) {
+      return { ok: false, message: `Failed to steer: ${err instanceof Error ? err.message : String(err)}` };
+    }
+  }
+
+  // Expose manager via Symbol.for() global registry for existing cross-package callers.
   const MANAGER_KEY = Symbol.for("pi-subagents:manager");
   (globalThis as any)[MANAGER_KEY] = {
     waitForAll: () => manager.waitForAll(),
@@ -468,8 +579,89 @@ export default function (pi: ExtensionAPI) {
     getRecord: (id: string) => manager.getRecord(id),
   };
 
+  // Public, documented read-only activity snapshot for integrations such as
+  // Herdr. Lifecycle events remain the incremental update channel. Scope the
+  // provider to its registered root so active runs do not move on /resume.
+  let unregisterActivityProvider: (() => void) | undefined;
+  let activitySessionId: string | undefined;
+  const activityProvider = {
+    getActiveSubagents: (): ActiveSubagentSnapshot[] => manager.listAgents(activitySessionId)
+      .filter((record): record is AgentRecord & { status: "queued" | "running" } =>
+        record.status === "queued" || record.status === "running",
+      )
+      .map((record) => ({
+        id: record.id,
+        type: record.type,
+        description: record.description,
+        status: record.status,
+      })),
+  };
+
+  function unregisterSessionActivity(): void {
+    unregisterActivityProvider?.();
+    unregisterActivityProvider = undefined;
+    activitySessionId = undefined;
+  }
+
+  function registerSessionActivity(ctx: ExtensionContext): void {
+    const sessionId = ctx.sessionManager?.getSessionId?.();
+    if (typeof sessionId !== "string" || sessionId.length === 0) return;
+    unregisterSessionActivity();
+    activitySessionId = sessionId;
+    unregisterActivityProvider = registerSubagentActivityProvider(sessionId, activityProvider);
+    // Emit after registration so listeners can always reconcile the registry.
+    pi.events.emit("subagents:ready", {
+      sessionId,
+      activeSubagents: activityProvider.getActiveSubagents(),
+    });
+  }
+
   // --- Cross-extension RPC via pi.events ---
   let currentCtx: ExtensionContext | undefined;
+
+  // pi-vim owns the key and exposes this optional Symbol.for() contract. Only
+  // this root TUI runtime registers: subagent child sessions bind extensions in
+  // print mode and must never open UI in their parent terminal.
+  let unregisterPiVimLeftArrow: (() => void) | undefined;
+  let piVimRootTuiCtx: ExtensionContext | undefined;
+  let piVimRootTuiSessionId: string | undefined;
+
+  function unregisterPiVimLeftArrowHandler(): void {
+    unregisterPiVimLeftArrow?.();
+    unregisterPiVimLeftArrow = undefined;
+    piVimRootTuiCtx = undefined;
+    piVimRootTuiSessionId = undefined;
+  }
+
+  function registerPiVimLeftArrowHandler(ctx: ExtensionContext): void {
+    if (ctx.mode !== "tui") return;
+    const sessionId = ctx.sessionManager?.getSessionId?.();
+    if (typeof sessionId !== "string" || sessionId.length === 0) return;
+
+    unregisterPiVimLeftArrowHandler();
+    piVimRootTuiCtx = ctx;
+    piVimRootTuiSessionId = sessionId;
+    unregisterPiVimLeftArrow = registerPiVimNormalLeftArrowHandler(() => {
+      // The closure can survive a session switch until its ownership-safe
+      // cleanup runs. Never let it present UI for a stale or child session.
+      if (
+        piVimRootTuiCtx !== ctx
+        || piVimRootTuiSessionId !== ctx.sessionManager?.getSessionId?.()
+        || ctx.mode !== "tui"
+      ) {
+        return false;
+      }
+
+      // showRunningAgents provides the same no-active-agents toast as /agents
+      // and internally suppresses reentrant picker presentation. It begins
+      // asynchronously, so contain failures here rather than leaking them from
+      // a terminal key handler.
+      void showRunningAgents(ctx).catch((err) => {
+        console.warn("[pi-subagents] Failed to open active-agent picker:", err);
+      });
+      return true;
+    });
+  }
 
   // ---- Subagent scheduler ----
   // Session-scoped: store is constructed inside session_start once sessionId
@@ -495,11 +687,16 @@ export default function (pi: ExtensionAPI) {
   // Capture ctx from session_start for RPC spawn handler + start the scheduler.
   pi.on("session_start", async (_event, ctx) => {
     currentCtx = ctx;
+    widget.setUICtx(ctx.ui as UICtx);
     manager.clearCompleted();
+    registerSessionActivity(ctx);
+    registerPiVimLeftArrowHandler(ctx);
     if (isSchedulingEnabled() && !scheduler.isActive()) startScheduler(ctx);
   });
 
   pi.on("session_before_switch", () => {
+    unregisterSessionActivity();
+    unregisterPiVimLeftArrowHandler();
     manager.clearCompleted();
     scheduler.stop();
   });
@@ -511,9 +708,6 @@ export default function (pi: ExtensionAPI) {
     manager,
   });
 
-  // Broadcast readiness so extensions loaded after us can discover us
-  pi.events.emit("subagents:ready", {});
-
   // On shutdown, abort all agents immediately and clean up.
   // If the session is going down, there's nothing left to consume agent results.
   pi.on("session_shutdown", async () => {
@@ -521,8 +715,11 @@ export default function (pi: ExtensionAPI) {
     unsubStopRpc();
     unsubPingRpc();
     currentCtx = undefined;
+    unregisterSessionActivity();
+    unregisterPiVimLeftArrowHandler();
     delete (globalThis as any)[MANAGER_KEY];
     scheduler.stop();
+    widget.dispose();
     manager.abortAll();
     for (const timer of pendingNudges.values()) clearTimeout(timer);
     pendingNudges.clear();
@@ -539,7 +736,7 @@ export default function (pi: ExtensionAPI) {
 
   // Master switch for the schedule subagent feature. Defaults to enabled.
   // Read once at extension init (before tool registration) so the Agent tool's
-  // param schema reflects the persisted setting. Runtime toggles via /agents
+  // param schema reflects the persisted setting. Runtime toggles via /agent-manage
   // → Settings short-circuit the menu entry + the execute-time addJob path
   // immediately, but the schema-level removal only takes effect on next
   // extension load (next pi session). Documented in CHANGELOG/README.
@@ -637,8 +834,6 @@ export default function (pi: ExtensionAPI) {
   applyAndEmitLoaded(
     {
       setMaxConcurrent: (n) => manager.setMaxConcurrent(n),
-      setDefaultMaxTurns,
-      setGraceTurns,
       setDefaultJoinMode,
       setSchedulingEnabled,
     },
@@ -714,12 +909,6 @@ Guidelines:
           description: "Thinking level: off, minimal, low, medium, high, xhigh. Overrides agent default.",
         }),
       ),
-      max_turns: Type.Optional(
-        Type.Number({
-          description: "Maximum number of agentic turns before stopping. Omit for unlimited (default).",
-          minimum: 1,
-        }),
-      ),
       run_in_background: Type.Optional(
         Type.Boolean({
           description: "Set to true to run in background. Returns agent ID immediately. You will be notified on completion.",
@@ -763,13 +952,13 @@ Guidelines:
         return new Text(text, 0, 0);
       }
 
-      // Helper: build "haiku · thinking: high · ⟳5≤30 · 3 tool uses · 33.8k tokens · $0.12" stats string
+      // Helper: build "haiku · thinking: high · ⟳5 · 3 tool uses · 33.8k tokens · $0.12" stats string
       const stats = (d: AgentDetails) => {
         const parts: string[] = [];
         if (d.modelName) parts.push(d.modelName);
         if (d.tags) parts.push(...d.tags);
         if (d.turnCount != null && d.turnCount > 0) {
-          parts.push(formatTurns(d.turnCount, d.maxTurns));
+          parts.push(formatTurns(d.turnCount));
         }
         if (d.toolUses > 0) parts.push(`${d.toolUses} tool use${d.toolUses === 1 ? "" : "s"}`);
         if (d.tokens) parts.push(d.tokens);
@@ -790,12 +979,17 @@ Guidelines:
         return new Text(theme.fg("dim", `  ⎿  Running in background (ID: ${details.agentId})`), 0, 0);
       }
 
-      // ---- Completed / Steered ----
-      if (details.status === "completed" || details.status === "steered") {
+      // Historical session entries may still carry the removed `steered` /
+      // `aborted` turn-limit statuses. They are render-only compatibility.
+      const runtimeStatus = details.status as string;
+      const legacySteered = runtimeStatus === "steered";
+      const legacyAborted = runtimeStatus === "aborted";
+
+      // ---- Completed ----
+      if (details.status === "completed" || legacySteered) {
         const duration = formatMs(details.durationMs);
-        const isSteered = details.status === "steered";
-        const icon = isSteered ? theme.fg("warning", "✓") : theme.fg("success", "✓");
         const s = stats(details);
+        const icon = legacySteered ? theme.fg("warning", "✓") : theme.fg("success", "✓");
         let line = icon + (s ? " " + s : "");
         line += " " + theme.fg("dim", "·") + " " + theme.fg("dim", duration);
 
@@ -811,7 +1005,7 @@ Guidelines:
             }
           }
         } else {
-          const doneText = isSteered ? "Wrapped up (turn limit)" : "Done";
+          const doneText = legacySteered ? "Wrapped up (legacy turn limit)" : "Done";
           line += "\n" + theme.fg("dim", `  ⎿  ${doneText}`);
         }
         return new Text(line, 0, 0);
@@ -825,22 +1019,23 @@ Guidelines:
         return new Text(line, 0, 0);
       }
 
-      // ---- Error / Aborted (hard max_turns) ----
+      // ---- Error ----
       const s = stats(details);
       let line = theme.fg("error", "✗") + (s ? " " + s : "");
-
-      if (details.status === "error") {
-        line += "\n" + theme.fg("error", `  ⎿  Error: ${details.error ?? "unknown"}`);
-      } else {
-        line += "\n" + theme.fg("warning", "  ⎿  Aborted (max turns exceeded)");
-      }
-
+      line += legacyAborted
+        ? "\n" + theme.fg("warning", "  ⎿  Aborted (legacy turn limit)")
+        : "\n" + theme.fg("error", `  ⎿  Error: ${details.error ?? "unknown"}`);
       return new Text(line, 0, 0);
     },
 
     // ---- Execute ----
 
     execute: async (toolCallId, params, signal, onUpdate, ctx) => {
+      const rawParams = params as unknown as Record<string, unknown>;
+      if ("max_turns" in rawParams || "maxTurns" in rawParams) {
+        return textResult("Turn limits are not supported by this vendored pi-subagents variant.");
+      }
+
       // Ensure we have UI context for widget rendering
       widget.setUICtx(ctx.ui as UICtx);
 
@@ -882,13 +1077,9 @@ Guidelines:
       const modelName = effectiveModelId && effectiveModelId !== parentModelId
         ? (model?.name ?? effectiveModelId).replace(/^Claude\s+/i, "").toLowerCase()
         : undefined;
-      const effectiveMaxTurns = normalizeMaxTurns(resolvedConfig.maxTurns ?? getDefaultMaxTurns());
       const agentInvocation: AgentInvocation = {
         modelName,
         thinking,
-        // Explicit value only — the default fallback would just add noise.
-        // Normalize so `0` (unlimited) doesn't surface as a misleading "max turns: 0".
-        maxTurns: normalizeMaxTurns(resolvedConfig.maxTurns),
         isolated,
         inheritContext,
         runInBackground,
@@ -909,7 +1100,7 @@ Guidelines:
       // ---- Schedule: register a job, don't spawn now ----
       if (params.schedule) {
         if (!isSchedulingEnabled()) {
-          return textResult("Scheduling is disabled in this project. Enable via /agents → Settings → Scheduling.");
+          return textResult("Scheduling is disabled in this project. Enable via /agent-manage → Settings → Scheduling.");
         }
         if (params.resume) {
           return textResult("Cannot combine `schedule` with `resume` — schedules create fresh agents.");
@@ -932,7 +1123,6 @@ Guidelines:
             prompt: params.prompt as string,
             model: params.model as string | undefined,
             thinking: thinking,
-            max_turns: effectiveMaxTurns,
             isolated: isolated,
             isolation: isolation,
           });
@@ -940,7 +1130,7 @@ Guidelines:
           return textResult(
             `Scheduled "${job.name}" (id: ${job.id}, type: ${job.scheduleType}). ` +
             `Next run: ${next ?? "(unknown)"}. ` +
-            `Manage via /agents → Scheduled jobs.`,
+            `Manage via /agent-manage → Scheduled jobs.`,
           );
         } catch (err) {
           return textResult(err instanceof Error ? err.message : String(err));
@@ -968,7 +1158,7 @@ Guidelines:
 
       // Background execution
       if (runInBackground) {
-        const { state: bgState, callbacks: bgCallbacks } = createActivityTracker(effectiveMaxTurns);
+        const { state: bgState, callbacks: bgCallbacks } = createActivityTracker();
 
         // Wrap onSessionCreated to wire output file streaming.
         // The callback lazily reads record.outputFile (set right after spawn)
@@ -987,7 +1177,6 @@ Guidelines:
           id = manager.spawn(pi, ctx, subagentType, params.prompt, {
             description: params.description,
             model,
-            maxTurns: effectiveMaxTurns,
             isolated,
             inheritContext,
             thinkingLevel: thinking,
@@ -1026,14 +1215,6 @@ Guidelines:
         widget.ensureTimer();
         widget.update();
 
-        // Emit created event
-        pi.events.emit("subagents:created", {
-          id,
-          type: subagentType,
-          description: params.description,
-          isBackground: true,
-        });
-
         const isQueued = record?.status === "queued";
         return textResult(
           `Agent ${isQueued ? "queued" : "started"} in background.\n` +
@@ -1060,7 +1241,6 @@ Guidelines:
           toolUses: fgState.toolUses,
           tokens: formatLifetimeTokens(fgState),
           turnCount: fgState.turnCount,
-          maxTurns: fgState.maxTurns,
           durationMs: Date.now() - startedAt,
           status: "running",
           activity: describeActivity(fgState.activeTools, fgState.responseText),
@@ -1072,7 +1252,7 @@ Guidelines:
         });
       };
 
-      const { state: fgState, callbacks: fgCallbacks } = createActivityTracker(effectiveMaxTurns, streamUpdate);
+      const { state: fgState, callbacks: fgCallbacks } = createActivityTracker(streamUpdate);
 
       // Wire session creation to register in widget
       const origOnSession = fgCallbacks.onSessionCreated;
@@ -1101,7 +1281,6 @@ Guidelines:
         record = await manager.spawnAndWait(pi, ctx, subagentType, params.prompt, {
           description: params.description,
           model,
-          maxTurns: effectiveMaxTurns,
           isolated,
           inheritContext,
           thinkingLevel: thinking,
@@ -1169,7 +1348,7 @@ Guidelines:
         }),
       ),
     }),
-    execute: async (_toolCallId, params, _signal, _onUpdate, _ctx) => {
+    execute: async (_toolCallId, params, signal, _onUpdate, _ctx) => {
       const record = manager.getRecord(params.agent_id);
       if (!record) {
         return textResult(`Agent not found: "${params.agent_id}". It may have been cleaned up.`);
@@ -1179,10 +1358,31 @@ Guidelines:
       // Pre-mark resultConsumed BEFORE awaiting: onComplete fires inside .then()
       // (attached earlier at spawn time) and always runs before this await resumes.
       // Setting the flag here prevents a redundant follow-up notification.
+      let waitInterrupted = false;
+      let waitInterruptedByUser = false;
       if (params.wait && record.status === "running" && record.promise) {
         record.resultConsumed = true;
         cancelNudge(params.agent_id);
-        await record.promise;
+
+        const waitController = new AbortController();
+        const forwardToolAbort = () => waitController.abort();
+        if (signal?.aborted) forwardToolAbort();
+        else signal?.addEventListener("abort", forwardToolAbort, { once: true });
+        resultWaitControllers.add(waitController);
+
+        try {
+          const completed = await waitForCompletionOrAbort(record.promise, waitController.signal, () => {
+            // The background agent still owns its result. Restore completion
+            // delivery immediately so an interrupted wait does not swallow its nudge.
+            record.resultConsumed = false;
+            waitInterrupted = true;
+            waitInterruptedByUser = waitController.signal.reason === USER_MESSAGE_INTERRUPT;
+          });
+          if (!completed) waitInterrupted = true;
+        } finally {
+          resultWaitControllers.delete(waitController);
+          signal?.removeEventListener("abort", forwardToolAbort);
+        }
       }
 
       const displayName = getDisplayName(record.type);
@@ -1201,7 +1401,11 @@ Guidelines:
         `Description: ${record.description}\n\n`;
 
       if (record.status === "running") {
-        output += "Agent is still running. Use wait: true or check back later.";
+        output += waitInterrupted
+          ? waitInterruptedByUser
+            ? "Waiting was interrupted by a user message. Agent is still running; use wait: true or check back later."
+            : "Waiting was interrupted. Agent is still running; use wait: true or check back later."
+          : "Agent is still running. Use wait: true or check back later.";
       } else if (record.status === "error") {
         output += `Error: ${record.error}`;
       } else {
@@ -1247,38 +1451,27 @@ Guidelines:
       if (!record) {
         return textResult(`Agent not found: "${params.agent_id}". It may have been cleaned up.`);
       }
-      if (record.status !== "running") {
-        return textResult(`Agent "${params.agent_id}" is not running (status: ${record.status}). Cannot steer a non-running agent.`);
-      }
-      if (!record.session) {
-        // Session not ready yet — queue the steer for delivery once initialized
-        if (!record.pendingSteers) record.pendingSteers = [];
-        record.pendingSteers.push(params.message);
-        pi.events.emit("subagents:steered", { id: record.id, message: params.message });
+      const sent = await sendSteeringMessage(record, params.message);
+      if (!sent.ok) return textResult(sent.message);
+      if (sent.queued) {
         return textResult(`Steering message queued for agent ${record.id}. It will be delivered once the session initializes.`);
       }
 
-      try {
-        await steerAgent(record.session, params.message);
-        pi.events.emit("subagents:steered", { id: record.id, message: params.message });
-        const tokens = formatLifetimeTokens(record);
-        const contextPercent = getSessionContextPercent(record.session);
-        const stateParts: string[] = [];
-        if (tokens) stateParts.push(tokens);
-        stateParts.push(`${record.toolUses} tool ${record.toolUses === 1 ? "use" : "uses"}`);
-        if (contextPercent !== null) stateParts.push(`context ${Math.round(contextPercent)}% full`);
-        if (record.compactionCount) stateParts.push(`${record.compactionCount} compaction${record.compactionCount === 1 ? "" : "s"}`);
-        return textResult(
-          `Steering message sent to agent ${record.id}. The agent will process it after its current tool execution.\n` +
-          `Current state: ${stateParts.join(" · ")}`,
-        );
-      } catch (err) {
-        return textResult(`Failed to steer agent: ${err instanceof Error ? err.message : String(err)}`);
-      }
+      const tokens = formatLifetimeTokens(record);
+      const contextPercent = getSessionContextPercent(record.session);
+      const stateParts: string[] = [];
+      if (tokens) stateParts.push(tokens);
+      stateParts.push(`${record.toolUses} tool ${record.toolUses === 1 ? "use" : "uses"}`);
+      if (contextPercent !== null) stateParts.push(`context ${Math.round(contextPercent)}% full`);
+      if (record.compactionCount) stateParts.push(`${record.compactionCount} compaction${record.compactionCount === 1 ? "" : "s"}`);
+      return textResult(
+        `Steering message sent to agent ${record.id}. The agent will process it after its current tool execution.\n` +
+        `Current state: ${stateParts.join(" · ")}`,
+      );
     },
   }));
 
-  // ---- /agents interactive menu ----
+  // ---- Active-agent viewer + compatibility management menu ----
 
   const projectAgentsDir = () => join(process.cwd(), ".pi", "agents");
   const personalAgentsDir = () => join(getAgentDir(), "agents");
@@ -1310,12 +1503,12 @@ Guidelines:
     // Build select options
     const options: string[] = [];
 
-    // Running agents entry (only if there are active agents)
-    const agents = manager.listAgents();
+    // Agent run monitor entry (only if this session has retained runs)
+    const agents = manager.listAgents().filter(isActiveAgentRecord);
     if (agents.length > 0) {
-      const running = agents.filter(a => a.status === "running" || a.status === "queued").length;
-      const done = agents.filter(a => a.status === "completed" || a.status === "steered").length;
-      options.push(`Running agents (${agents.length}) — ${running} running, ${done} done`);
+      const running = agents.filter(a => a.status === "running").length;
+      const queued = agents.length - running;
+      options.push(`Active agents (${agents.length}) — ${running} running, ${queued} queued`);
     }
 
     // Agent types list
@@ -1346,7 +1539,7 @@ Guidelines:
     const choice = await ctx.ui.select("Agents", options);
     if (!choice) return;
 
-    if (choice.startsWith("Running agents (")) {
+    if (choice.startsWith("Active agents (")) {
       await showRunningAgents(ctx);
       await showAgentsMenu(ctx);
     } else if (choice.startsWith("Agent types (")) {
@@ -1413,50 +1606,60 @@ Guidelines:
     }
   }
 
-  async function showRunningAgents(ctx: ExtensionCommandContext) {
-    const agents = manager.listAgents();
-    if (agents.length === 0) {
-      ctx.ui.notify("No agents.", "info");
-      return;
+  let showingRunningAgents = false;
+
+  async function showRunningAgents(ctx: ExtensionContext) {
+    if (showingRunningAgents) return;
+    showingRunningAgents = true;
+    try {
+      let selectedAgentId: string | undefined;
+      const getActiveAgents = () => manager.listAgents().filter(isActiveAgentRecord);
+      const source = {
+        getAgents: getActiveAgents,
+        getActivity: (agentId: string) => agentActivity.get(agentId),
+      };
+
+      if (getActiveAgents().length === 0) {
+        ctx.ui.notify("No active subagents.", "info");
+        return;
+      }
+
+      await widget.withFocusedWidget(async (present) => {
+        while (getActiveAgents().length > 0) {
+          const picked = await present<string | undefined>(
+            (tui, theme, done) => new AgentRunPicker(tui, source, theme, done, selectedAgentId),
+          );
+          if (!picked) return;
+
+          const record = manager.getRecord(picked);
+          if (!record || !isActiveAgentRecord(record)) continue;
+          selectedAgentId = await viewAgentConversation(record, getActiveAgents, present);
+        }
+      });
+    } finally {
+      showingRunningAgents = false;
     }
-
-    const options = agents.map(a => {
-      const dn = getDisplayName(a.type);
-      const dur = formatDuration(a.startedAt, a.completedAt);
-      return `${dn} (${a.description}) · ${a.toolUses} tools · ${a.status} · ${dur}`;
-    });
-
-    const choice = await ctx.ui.select("Running agents", options);
-    if (!choice) return;
-
-    // Find the selected agent by matching the option index
-    const idx = options.indexOf(choice);
-    if (idx < 0) return;
-    const record = agents[idx];
-
-    await viewAgentConversation(ctx, record);
-    // Back-navigation: re-show the list
-    await showRunningAgents(ctx);
   }
 
-  async function viewAgentConversation(ctx: ExtensionCommandContext, record: AgentRecord) {
-    if (!record.session) {
-      ctx.ui.notify(`Agent is ${record.status === "queued" ? "queued" : "expired"} — no session available.`, "info");
-      return;
-    }
-
-    const { ConversationViewer, VIEWPORT_HEIGHT_PCT } = await import("./ui/conversation-viewer.js");
-    const session = record.session;
-    const activity = agentActivity.get(record.id);
-
-    await ctx.ui.custom<undefined>(
-      (tui, theme, _keybindings, done) => {
-        return new ConversationViewer(tui, session, record, activity, theme, done);
-      },
-      {
-        overlay: true,
-        overlayOptions: { anchor: "center", width: "90%", maxHeight: `${VIEWPORT_HEIGHT_PCT}%` },
-      },
+  async function viewAgentConversation(
+    record: AgentRecord,
+    getActiveAgents: () => AgentRecord[],
+    present: FocusedWidgetPresenter,
+  ): Promise<string | undefined> {
+    return present<string | undefined>(
+      (tui, theme, done) => new ConversationViewer(
+        tui,
+        record.session,
+        record,
+        agentActivity.get(record.id),
+        theme,
+        done,
+        {
+          getAgents: getActiveAgents,
+          getActivity: (agentId) => agentActivity.get(agentId),
+          onSteer: sendSteeringMessage,
+        },
+      ),
     );
   }
 
@@ -1549,7 +1752,6 @@ Guidelines:
     fmFields.push(`tools: ${cfg.builtinToolNames?.join(", ") || "all"}`);
     if (cfg.model) fmFields.push(`model: ${cfg.model}`);
     if (cfg.thinking) fmFields.push(`thinking: ${cfg.thinking}`);
-    if (cfg.maxTurns) fmFields.push(`max_turns: ${cfg.maxTurns}`);
     fmFields.push(`prompt_mode: ${cfg.promptMode}`);
     if (cfg.extensions === false) fmFields.push("extensions: false");
     else if (Array.isArray(cfg.extensions)) fmFields.push(`extensions: ${cfg.extensions.join(", ")}`);
@@ -1677,7 +1879,6 @@ description: <one-line description shown in UI>
 tools: <comma-separated built-in tools: read, bash, edit, write, grep, find, ls. Use "none" for no tools. Omit for all tools>
 model: <optional model as "provider/modelId", e.g. "anthropic/claude-haiku-4-5-20251001". Omit to inherit parent model>
 thinking: <optional thinking level: off, minimal, low, medium, high, xhigh. Omit to inherit>
-max_turns: <optional max agentic turns. 0 or omit for unlimited (default)>
 prompt_mode: <"replace" (body IS the full system prompt) or "append" (body is appended to default prompt). Default: replace>
 extensions: <true (inherit all MCP/extension tools), false (none), or comma-separated names. Default: true>
 skills: <true (inherit all), false (none), or comma-separated skill names to preload into prompt. Default: true>
@@ -1705,7 +1906,6 @@ Write the file using the write tool. Only write the file, nothing else.`;
 
     const record = await manager.spawnAndWait(pi, ctx, "general-purpose", generatePrompt, {
       description: `Generate ${name} agent`,
-      maxTurns: 5,
     });
 
     if (record.status === "error") {
@@ -1813,10 +2013,6 @@ ${systemPrompt}
   function snapshotSettings(): SubagentsSettings {
     return {
       maxConcurrent: manager.getMaxConcurrent(),
-      // 0 = unlimited — per SubagentsSettings.defaultMaxTurns docstring and
-      // normalizeMaxTurns() in agent-runner.ts (which maps 0 → undefined).
-      defaultMaxTurns: getDefaultMaxTurns() ?? 0,
-      graceTurns: getGraceTurns(),
       defaultJoinMode: getDefaultJoinMode(),
       schedulingEnabled: isSchedulingEnabled(),
     };
@@ -1825,8 +2021,6 @@ ${systemPrompt}
   async function showSettings(ctx: ExtensionCommandContext) {
     const choice = await ctx.ui.select("Settings", [
       `Max concurrency (current: ${manager.getMaxConcurrent()})`,
-      `Default max turns (current: ${getDefaultMaxTurns() ?? "unlimited"})`,
-      `Grace turns (current: ${getGraceTurns()})`,
       `Join mode (current: ${getDefaultJoinMode()})`,
       `Scheduling (current: ${isSchedulingEnabled() ? "enabled" : "disabled"})`,
     ]);
@@ -1839,31 +2033,6 @@ ${systemPrompt}
         if (n >= 1) {
           manager.setMaxConcurrent(n);
           notifyApplied(ctx, `Max concurrency set to ${n}`);
-        } else {
-          ctx.ui.notify("Must be a positive integer.", "warning");
-        }
-      }
-    } else if (choice.startsWith("Default max turns")) {
-      const val = await ctx.ui.input("Default max turns before wrap-up (0 = unlimited)", String(getDefaultMaxTurns() ?? 0));
-      if (val) {
-        const n = parseInt(val, 10);
-        if (n === 0) {
-          setDefaultMaxTurns(undefined);
-          notifyApplied(ctx, "Default max turns set to unlimited");
-        } else if (n >= 1) {
-          setDefaultMaxTurns(n);
-          notifyApplied(ctx, `Default max turns set to ${n}`);
-        } else {
-          ctx.ui.notify("Must be 0 (unlimited) or a positive integer.", "warning");
-        }
-      }
-    } else if (choice.startsWith("Grace turns")) {
-      const val = await ctx.ui.input("Grace turns after wrap-up steer", String(getGraceTurns()));
-      if (val) {
-        const n = parseInt(val, 10);
-        if (n >= 1) {
-          setGraceTurns(n);
-          notifyApplied(ctx, `Grace turns set to ${n}`);
         } else {
           ctx.ui.notify("Must be a positive integer.", "warning");
         }
@@ -1883,7 +2052,7 @@ ${systemPrompt}
       const val = await ctx.ui.select(
         "Schedule subagent feature",
         [
-          "enabled — Agent tool accepts a `schedule` param; /agents → Scheduled jobs visible",
+          "enabled — Agent tool accepts a `schedule` param; /agent-manage → Scheduled jobs visible",
           "disabled — `schedule` removed from Agent tool spec (no LLM-context cost); menu hidden",
         ],
       );
@@ -1917,7 +2086,12 @@ ${systemPrompt}
   }
 
   pi.registerCommand("agents", {
-    description: "Manage agents",
+    description: "View and steer active subagents",
+    handler: async (_args, ctx) => { await showRunningAgents(ctx); },
+  });
+
+  pi.registerCommand("agent-manage", {
+    description: "Manage agent types, schedules, and settings",
     handler: async (_args, ctx) => { await showAgentsMenu(ctx); },
   });
 }

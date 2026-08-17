@@ -15,11 +15,11 @@ https://github.com/user-attachments/assets/8685261b-9338-4fea-8dfe-1c590d5df543
 - **Claude Code look & feel** — same tool names, calling conventions, and UI patterns (`Agent`, `get_subagent_result`, `steer_subagent`) — feels native
 - **Parallel background agents** — spawn multiple agents that run concurrently with automatic queuing (configurable concurrency limit, default 4) and smart group join (consolidated notifications)
 - **Live widget UI** — persistent above-editor widget with animated spinners, live tool activity, token counts, and colored status icons
-- **Conversation viewer** — select any agent in `/agents` to open a live-scrolling overlay of its full conversation (auto-follows new content, scroll up to pause)
+- **Focusable agents widget** — `/agents` (or pi-vim NORMAL-mode `Left Arrow` at column 0, when installed) promotes the existing passive agents widget into its focused picker/monitor state; watch active conversations, move between running/queued agents, and steer inline without rendering a second panel
 - **Custom agent types** — define agents in `.pi/agents/<name>.md` with YAML frontmatter: custom system prompts, model selection, thinking levels, tool restrictions
 - **Mid-run steering** — inject messages into running agents to redirect their work without restarting
 - **Session resume** — pick up where an agent left off, preserving full conversation context
-- **Graceful turn limits** — agents get a "wrap up" warning before hard abort, producing clean partial results instead of cut-off output
+- **Unlimited agent runs** — agents run until they finish, fail, or are explicitly stopped; this vendored variant has no turn-limit controls
 - **Case-insensitive agent types** — `"explore"`, `"Explore"`, `"EXPLORE"` all work. Unknown types fall back to general-purpose with a note
 - **Fuzzy model selection** — specify models by name (`"haiku"`, `"sonnet"`) instead of full IDs, with automatic filtering to only available/configured models
 - **Context inheritance** — optionally fork the parent conversation into a sub-agent so it knows what's been discussed
@@ -30,7 +30,7 @@ https://github.com/user-attachments/assets/8685261b-9338-4fea-8dfe-1c590d5df543
 - **Styled completion notifications** — background agent results render as themed, compact notification boxes (icon, stats, result preview) instead of raw XML. Expandable to show full output. Group completions render each agent individually
 - **Event bus** — lifecycle events (`subagents:created`, `started`, `completed`, `failed`, `steered`, `compacted`) emitted via `pi.events`, enabling other extensions to react to sub-agent activity
 - **Cross-extension RPC** — other pi extensions can spawn and stop subagents via the `pi.events` event bus (`subagents:rpc:ping`, `subagents:rpc:spawn`, `subagents:rpc:stop`). Standardized reply envelopes with protocol versioning. Emits `subagents:ready` on load
-- **Schedule subagents** — pass `schedule` to the `Agent` tool to fire on cron / interval / one-shot. Session-scoped jobs with PID-locked persistence; results land via the same `subagent-notification` followUp path as manual background completions; manage via `/agents → Scheduled jobs`
+- **Schedule subagents** — pass `schedule` to the `Agent` tool to fire on cron / interval / one-shot. Session-scoped jobs with PID-locked persistence; results land via the same `subagent-notification` followUp path as manual background completions; manage via `/agent-manage → Scheduled jobs`
 
 ## Install
 
@@ -81,9 +81,9 @@ Schedule formats:
 
 When a schedule fires, the spawn runs in background and its completion notification arrives in the conversation through the same `subagent-notification` followUp path as a manually-spawned background agent — your parent agent reasons about the result the same way.
 
-Schedules are **session-scoped**: they reset on `/new` and restore on `/resume`. List and cancel via `/agents → Scheduled jobs` (creation is the `Agent` tool's job — there is no parallel manual-create wizard). Storage at `<cwd>/.pi/subagent-schedules/<sessionId>.json` with PID-based file locking for cross-instance safety.
+Schedules are **session-scoped**: they reset on `/new` and restore on `/resume`. List and cancel via `/agent-manage → Scheduled jobs` (creation is the `Agent` tool's job — there is no parallel manual-create wizard). Storage at `<cwd>/.pi/subagent-schedules/<sessionId>.json` with PID-based file locking for cross-instance safety.
 
-**Disable the feature entirely**: `/agents → Settings → Scheduling → disabled` removes `schedule` from the `Agent` tool spec (no LLM-context cost), hides the menu entry, and stops any active scheduler. The schema-level removal takes effect on the next pi session; the runtime kill is immediate. Re-enable from the same menu.
+**Disable the feature entirely**: `/agent-manage → Settings → Scheduling → disabled` removes `schedule` from the `Agent` tool spec (no LLM-context cost), hides the menu entry, and stops any active scheduler. The schema-level removal takes effect on the next pi session; the runtime kill is immediate. Re-enable from the same menu.
 
 Restrictions:
 - `schedule` cannot be combined with `inherit_context` (no parent conversation exists at fire time) or `resume` (schedules create fresh agents).
@@ -97,7 +97,7 @@ The extension renders a persistent widget above the editor showing all active ag
 
 ```
 ● Agents
-├─ ⠹ Agent  Refactor auth module · ⟳5≤30 · 5 tool uses · 33.8k token (62%) · 12.3s
+├─ ⠹ Agent  Refactor auth module · ⟳5 · 5 tool uses · 33.8k token (62%) · 12.3s
 │    ⎿  editing 2 files…
 ├─ ⠹ Explore  Find auth files · ⟳3 · 3 tool uses · 12.4k token (8%) · 4.1s
 │    ⎿  searching…
@@ -110,16 +110,16 @@ The token field is annotated with two optional signals inside parens:
 - **`NN%`** — context-window utilization (color-coded: <70% dim, 70–85% warning, ≥85% error). Omitted when the model has no declared `contextWindow`, or briefly right after compaction.
 - **`↻N`** — number of times the session has compacted, when > 0. Stays dim; the percent's color carries urgency.
 
+`/agents` promotes the existing `agents` widget into its focused picker state instead of rendering a second panel or overlay. With pi-vim loaded, its NORMAL-mode literal `Left Arrow` at column 0 opens this same picker; pi-subagents registers the optional hook only for the current root TUI session and removes it on session switch/shutdown. The same widget slot then expands into the conversation monitor and returns to passive status when closed. Only running and queued agents appear, and the list updates live. Use `↑`/`↓` or `j`/`k` to choose an agent and Enter to watch it. In the monitor, use `←`/`→` or `h`/`l` to move between active agents, PgUp/PgDn to scroll, End to resume auto-follow, and `s` to compose a steering message inline. Escape returns to the picker; Escape again closes it.
+
 Individual agent results render Claude Code-style in the conversation:
 
 | State | Example |
 |-------|---------|
-| **Running** | `⠹ ⟳3≤30 · 3 tool uses · 12.4k token (8%)` / `⎿ searching, reading 3 files…` |
+| **Running** | `⠹ ⟳3 · 3 tool uses · 12.4k token (8%)` / `⎿ searching, reading 3 files…` |
 | **Completed** | `✓ ⟳8 · 5 tool uses · 33.8k token (62%) · 12.3s` / `⎿ Done` |
-| **Wrapped up** | `✓ ⟳50≤50 · 50 tool uses · 89.1k token (84% · ↻2) · 45.2s` / `⎿ Wrapped up (turn limit)` |
 | **Stopped** | `■ ⟳3 · 3 tool uses · 12.4k token (8%)` / `⎿ Stopped` |
 | **Error** | `✗ ⟳3 · 3 tool uses · 12.4k token (8%)` / `⎿ Error: timeout` |
-| **Aborted** | `✗ ⟳55≤50 · 55 tool uses · 102.3k token (95% · ↻3)` / `⎿ Aborted (max turns exceeded)` |
 
 Completed results can be expanded (ctrl+o in pi) to show the full agent output inline.
 
@@ -144,7 +144,7 @@ Group completions render each agent as a separate block. The LLM receives struct
 
 The `general-purpose` agent is a **parent twin** — it receives the parent's entire system prompt plus a sub-agent context bridge, so it follows the same rules the parent does. Explore and Plan use standalone prompts tailored to their read-only roles.
 
-Default agents can be **ejected** (`/agents` → select agent → Eject) to export them as `.md` files for customization, **overridden** by creating a `.md` file with the same name (e.g. `.pi/agents/general-purpose.md`), or **disabled** per-project with `enabled: false` frontmatter.
+Default agents can be **ejected** (`/agent-manage` → Agent types → select agent → Eject) to export them as `.md` files for customization, **overridden** by creating a `.md` file with the same name (e.g. `.pi/agents/general-purpose.md`), or **disabled** per-project with `enabled: false` frontmatter.
 
 ## Custom Agents
 
@@ -167,7 +167,6 @@ description: Security Code Reviewer
 tools: read, grep, find, bash
 model: anthropic/claude-opus-4-6
 thinking: high
-max_turns: 30
 ---
 
 You are a security auditor. Review code for vulnerabilities including:
@@ -201,14 +200,13 @@ All fields are optional — sensible defaults for everything.
 | `isolation` | — | Set to `worktree` to run in an isolated git worktree |
 | `model` | inherit parent | Model — `provider/modelId` or fuzzy name (`"haiku"`, `"sonnet"`) |
 | `thinking` | inherit | off, minimal, low, medium, high, xhigh |
-| `max_turns` | unlimited | Max agentic turns before graceful shutdown. `0` or omit for unlimited |
 | `prompt_mode` | `replace` | `replace`: body is the full system prompt (no AGENTS.md / CLAUDE.md inheritance). `append`: body appended to parent's prompt (agent acts as a "parent twin" — inherits parent's AGENTS.md / CLAUDE.md) |
 | `inherit_context` | `false` | Fork parent conversation into agent |
 | `run_in_background` | `false` | Run in background by default |
 | `isolated` | `false` | No extension/MCP tools, only built-in |
 | `enabled` | `true` | Set to `false` to disable an agent (useful for hiding a default agent per-project) |
 
-Frontmatter is authoritative. If an agent file sets `model`, `thinking`, `max_turns`, `inherit_context`, `run_in_background`, `isolated`, or `isolation`, those values are locked for that agent. `Agent` tool parameters only fill fields the agent config leaves unspecified.
+Frontmatter is authoritative. If an agent file sets `model`, `thinking`, `inherit_context`, `run_in_background`, `isolated`, or `isolation`, those values are locked for that agent. `Agent` tool parameters only fill fields the agent config leaves unspecified.
 
 ## Tools
 
@@ -223,7 +221,6 @@ Launch a sub-agent.
 | `subagent_type` | string | yes | Agent type (built-in or custom) |
 | `model` | string | no | Model — `provider/modelId` or fuzzy name (`"haiku"`, `"sonnet"`) |
 | `thinking` | string | no | Thinking level: off, minimal, low, medium, high, xhigh |
-| `max_turns` | number | no | Max agentic turns. Omit for unlimited (default) |
 | `run_in_background` | boolean | no | Run without blocking |
 | `resume` | string | no | Agent ID to resume a previous session |
 | `isolated` | boolean | no | No extension/MCP tools |
@@ -237,7 +234,7 @@ Check status and retrieve results from a background agent.
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `agent_id` | string | yes | Agent ID to check |
-| `wait` | boolean | no | Wait for completion |
+| `wait` | boolean | no | Wait for completion; a user message interrupts the wait but leaves the subagent running |
 | `verbose` | boolean | no | Include full conversation log |
 
 ### `steer_subagent`
@@ -253,17 +250,21 @@ Send a steering message to a running agent. The message interrupts after the cur
 
 | Command | Description |
 |---------|-------------|
-| `/agents` | Interactive agent management menu |
+| `/agents` | Focus the existing agents widget to view and steer active subagents |
+| `/agent-manage` | Manage agent types, schedules, and settings |
 
-The `/agents` command opens an interactive menu:
+`/agents` is the focused daily interface. It opens the custom live picker directly and only shows running or queued subagents. Completed and failed runs disappear from this view.
+
+`/agent-manage` preserves the broader configuration menu:
 
 ```
-Running agents (2) — 1 running, 1 done     ← only shown when agents exist
+Active agents (2) — 1 running, 1 queued     ← opens the focused live picker
 Agent types (6)                             ← unified list: defaults + custom
 Create new agent                            ← manual wizard or AI-generated
-Settings                                    ← max concurrency, max turns, grace turns, join mode
+Settings                                    ← max concurrency, join mode, scheduling
 ```
 
+- **Active agents** — the same focused picker as `/agents`; Enter opens the monitor, where you can switch active runs and steer inline
 - **Agent types** — unified list with source indicators: `•` (project), `◦` (global), `✕` (disabled). Select an agent to manage it:
   - **Default agents** (no override): Eject (export as `.md`), Disable
   - **Default agents** (ejected/overridden): Edit, Disable, Reset to default, Delete
@@ -272,22 +273,11 @@ Settings                                    ← max concurrency, max turns, grac
 - **Eject** — writes the embedded default config as a `.md` file to project or personal location, so you can customize it
 - **Disable/Enable** — toggle agent availability. Disabled agents stay visible in the list (marked `✕`) and can be re-enabled
 - **Create new agent** — choose project/personal location, then manual wizard (step-by-step prompts for name, tools, model, thinking, system prompt) or AI-generated (describe what the agent should do and a sub-agent writes the `.md` file). Any name is allowed, including default agent names (overrides them)
-- **Settings** — configure max concurrency, default max turns, grace turns, and join mode at runtime
+- **Settings** — configure max concurrency, join mode, and scheduling at runtime
 
-## Graceful Max Turns
+## Run Lifetime
 
-Instead of hard-aborting at the turn limit, agents get a graceful shutdown:
-
-1. At `max_turns` — steering message: *"Wrap up immediately — provide your final answer now."*
-2. Up to 5 grace turns to finish cleanly
-3. Hard abort only after the grace period
-
-| Status | Meaning | Icon |
-|--------|---------|------|
-| `completed` | Finished naturally | `✓` green |
-| `steered` | Hit limit, wrapped up in time | `✓` yellow |
-| `aborted` | Grace period exceeded | `✗` red |
-| `stopped` | User-initiated abort | `■` dim |
+Subagents have no turn limit. They continue until they finish naturally, encounter an error, or are explicitly stopped. Turn-limit controls from upstream are intentionally unsupported in this vendored variant: the Agent tool and RPC reject legacy limit options, while `max_turns` agent frontmatter and `defaultMaxTurns` / `graceTurns` settings are ignored.
 
 ## Concurrency
 
@@ -308,16 +298,16 @@ When background agents complete, they notify the main agent. The **join mode** c
 **Timeout behavior:** When agents are grouped, a 30-second timeout starts after the first agent completes. If not all agents finish in time, a partial notification is sent with completed results and remaining agents continue with a shorter 15-second re-batch window for stragglers.
 
 **Configuration:**
-- Configure join mode in `/agents` → Settings → Join mode
+- Configure join mode in `/agent-manage` → Settings → Join mode
 
 ## Persistent Settings
 
-Runtime tuning values set via `/agents` → Settings (max concurrency, default max turns, grace turns, default join mode) persist across pi restarts. Two files, merged on load:
+Runtime tuning values set via `/agent-manage` → Settings (max concurrency, default join mode, and scheduling) persist across pi restarts. Two files, merged on load:
 
-- **Global:** `~/.pi/agent/subagents.json` — your machine-wide defaults. Edit by hand; the `/agents` menu never writes here.
-- **Project:** `<cwd>/.pi/subagents.json` — per-project overrides. Written by `/agents` → Settings.
+- **Global:** `~/.pi/agent/subagents.json` — your machine-wide defaults. Edit by hand; `/agent-manage` never writes here.
+- **Project:** `<cwd>/.pi/subagents.json` — per-project overrides. Written by `/agent-manage` → Settings.
 
-**Precedence:** project overrides global on any field present in both. Missing fields fall back to the hardcoded defaults (max concurrency `4`, default max turns unlimited, grace turns `5`, join mode `smart`).
+**Precedence:** project overrides global on any field present in both. Missing fields fall back to the hardcoded defaults (max concurrency `4`, join mode `smart`, scheduling enabled). Legacy `defaultMaxTurns` and `graceTurns` fields are ignored.
 
 **Example — global defaults for a beefy machine:**
 
@@ -326,14 +316,14 @@ mkdir -p ~/.pi/agent
 cat > ~/.pi/agent/subagents.json <<'EOF'
 {
   "maxConcurrent": 16,
-  "graceTurns": 10
+  "defaultJoinMode": "smart"
 }
 EOF
 ```
 
-Every project now starts with concurrency 16 and grace 10, without ever touching the menu. Individual projects can still override via `/agents` → Settings.
+Every project now starts with concurrency 16 and smart joining, without ever touching the menu. Individual projects can still override via `/agent-manage` → Settings.
 
-**Failure behavior:** missing file is silent; malformed JSON logs a `[pi-subagents] Ignoring malformed settings at …` warning to stderr; invalid/out-of-range field values are dropped per-field; write failures downgrade the `/agents` toast to a warning with `(session only; failed to persist)`.
+**Failure behavior:** missing file is silent; malformed JSON logs a `[pi-subagents] Ignoring malformed settings at …` warning to stderr; invalid/out-of-range field values are dropped per-field; write failures downgrade the `/agent-manage` toast to a warning with `(session only; failed to persist)`.
 
 ## Events
 
@@ -341,20 +331,28 @@ Agent lifecycle events are emitted via `pi.events.emit()` so other extensions ca
 
 | Event | When | Key fields |
 |-------|------|------------|
-| `subagents:created` | Background agent registered | `id`, `type`, `description`, `isBackground` |
+| `subagents:created` | Agent registered, before it starts or queues | `id`, `type`, `description`, `isBackground` |
 | `subagents:started` | Agent transitions to running (including queued→running) | `id`, `type`, `description` |
 | `subagents:usage` | An assistant response reports usage | `id`, `type`, `description`, cumulative `usage` (`input`, `output`, `cacheWrite`, `cost`), `cost` |
 | `subagents:completed` | Agent finished successfully | `id`, `type`, `durationMs`, `tokens` (lifetime `{ input, output, total }`), `cost`, `toolUses`, `result` |
-| `subagents:failed` | Agent errored, stopped, or aborted | same as completed + `error`, `status` |
+| `subagents:failed` | Agent errored or was stopped | same as completed + `error`, `status` |
 | `subagents:steered` | Steering message sent | `id`, `message` |
 | `subagents:compacted` | Agent's session successfully compacted | `id`, `type`, `description`, `reason` (`"manual"` / `"threshold"` / `"overflow"`), `tokensBefore`, `compactionCount` |
 | `subagents:scheduled` | Schedule lifecycle change | `{ type: "added" \| "removed" \| "updated" \| "fired" \| "error", … }` (job/agentId/error fields per type) |
 | `subagents:scheduler_ready` | Scheduler bound to session, enabled jobs armed | `sessionId`, `jobCount` |
-| `subagents:ready` | Extension loaded and RPC handlers registered | — |
+| `subagents:ready` | Session activity provider registered and RPC handlers available | `sessionId`, `activeSubagents` snapshot (queued/running only) |
 | `subagents:settings_loaded` | Persisted settings applied at extension init | `settings` (merged global + project) |
-| `subagents:settings_changed` | `/agents` → Settings mutation was applied | `settings`, `persisted` (`boolean` — `false` on write failure) |
+| `subagents:settings_changed` | `/agent-manage` → Settings mutation was applied | `settings`, `persisted` (`boolean` — `false` on write failure) |
 
 `tokens.total` = `input + output + cacheWrite`. `cacheRead` is excluded — each turn's `cacheRead` is the cumulative cached prefix re-read on that one API call, so summing per-message would over-count it. `cost` is lifetime-cumulative in dollars and survives compaction. Final `subagents:record` custom entries persist the same cumulative usage snapshot, allowing branch-aware consumers to reconstruct totals after reload. Use `contextUsage.percent` (surfaced as `(NN%)` in the widget) for current context size.
+
+### Activity snapshot
+
+For integrations that attach after subagents have already started, the package exports `getSubagentActivityProvider(sessionId)`, `getSubagentActivityRegistry()`, and `SUBAGENT_ACTIVITY_REGISTRY_KEY` from `src/activity.ts`. The registry is keyed by the root Pi session ID and returns only queued and running agents. A child session registers and removes only its own entry, so it cannot overwrite the root session's activity during initialization or shutdown. Treat a missing provider as unavailable, use the root session snapshot to reconcile on load/reload, and then follow the lifecycle events above for incremental updates. The registry and returned records are read-only.
+
+### Herdr activity boundary
+
+With the reviewed Herdr Pi v8 patch installed, any queued or running subagent keeps its **parent Pi pane** `working`; it does not make the pane `blocked`. `blocked` is reserved for a direct, root-session external input surface such as Q&A, a browser plan/draft decision, an intercom reply, or an installation confirmation. If a background child itself waits for input, it remains represented as parent-pane `working`, not parent-pane `blocked`, because the parent pane has no direct response surface for that wait. Stopping a running agent publishes its terminal `failed`/`stopped` lifecycle state immediately and only once, before its child promise later settles.
 
 ## Cross-Extension RPC
 
@@ -507,7 +505,7 @@ src/
   types.ts            # Type definitions (AgentConfig, AgentRecord, etc.)
   default-agents.ts   # Embedded default agent configs (general-purpose, Explore, Plan)
   agent-types.ts      # Unified agent registry (defaults + user), tool name resolution
-  agent-runner.ts     # Session creation, execution, graceful max_turns, steer/resume
+  agent-runner.ts     # Session creation, execution, turn tracking, steer/resume
   agent-manager.ts    # Agent lifecycle, concurrency queue, completion notifications
   cross-extension-rpc.ts # RPC handlers for cross-extension spawn/ping via pi.events
   group-join.ts       # Group join manager: batched completion notifications with timeout
@@ -520,8 +518,9 @@ src/
   context.ts          # Parent conversation context for inherit_context
   env.ts              # Environment detection (git, platform)
   ui/
-    agent-widget.ts       # Persistent widget: spinners, activity, status icons, theming
-    conversation-viewer.ts # Live conversation overlay for viewing agent sessions
+    agent-widget.ts        # Persistent widget: spinners, activity, status icons, theming
+    agent-run-picker.ts    # Focused active-agent state for the existing agents widget
+    conversation-viewer.ts # Live active-agent monitor with navigation and steering
 ```
 
 ## License

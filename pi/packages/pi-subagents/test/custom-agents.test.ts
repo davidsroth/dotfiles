@@ -38,7 +38,6 @@ description: Security Auditor
 tools: read, grep, find
 model: anthropic/claude-opus-4-6
 thinking: high
-max_turns: 30
 prompt_mode: replace
 inherit_context: true
 run_in_background: true
@@ -56,7 +55,6 @@ You are a security auditor.`);
     expect(agent.builtinToolNames).toEqual(["read", "grep", "find"]);
     expect(agent.model).toBe("anthropic/claude-opus-4-6");
     expect(agent.thinking).toBe("high");
-    expect(agent.maxTurns).toBe(30);
     expect(agent.promptMode).toBe("replace");
     expect(agent.inheritContext).toBe(true);
     expect(agent.runInBackground).toBe(true);
@@ -80,7 +78,6 @@ Just a prompt.`);
     expect(agent.skills).toBe(true); // inherit all
     expect(agent.model).toBeUndefined();
     expect(agent.thinking).toBeUndefined();
-    expect(agent.maxTurns).toBeUndefined();
     expect(agent.promptMode).toBe("replace");
     expect(agent.inheritContext).toBeUndefined();
     expect(agent.runInBackground).toBeUndefined();
@@ -163,26 +160,15 @@ Any thinking.`);
     expect(result.get("anythink")!.thinking).toBe("turbo");
   });
 
-  it("accepts max_turns: 0 as unlimited", () => {
-    writeAgent("unlimited", `---
-max_turns: 0
+  it("ignores the removed max_turns frontmatter field", () => {
+    writeAgent("legacy", `---
+max_turns: 5
 ---
 
-Unlimited turns.`);
+Legacy config.`);
 
     const result = loadCustomAgents(tmpDir);
-    expect(result.get("unlimited")!.maxTurns).toBe(0);
-  });
-
-  it("rejects negative max_turns", () => {
-    writeAgent("negturns", `---
-max_turns: -5
----
-
-Negative turns.`);
-
-    const result = loadCustomAgents(tmpDir);
-    expect(result.get("negturns")!.maxTurns).toBeUndefined();
+    expect(result.get("legacy")).not.toHaveProperty("maxTurns");
   });
 
   it("handles prompt_mode: append", () => {
