@@ -38,6 +38,8 @@ export interface SecretPattern {
   regex: RegExp;
   /** Build the replacement. Default masks the whole match. `groups` are capture groups. */
   render?: (placeholder: string, match: string, ...groups: string[]) => string;
+  /** Return true to leave a match untouched (false-positive guard). */
+  skip?: (match: string, ...groups: string[]) => boolean;
 }
 
 /**
@@ -97,6 +99,11 @@ export const GENERIC_ASSIGNMENT: SecretPattern = {
   regex:
     /\b([A-Za-z0-9_.-]*(?:passwd|password|secret|token|api[_-]?key|access[_-]?key|client[_-]?secret|auth[_-]?token|private[_-]?key|credential)[A-Za-z0-9_.-]*)(\s*[:=]\s*)(["'`]?)([^\s"'`,;\[\]]{12,})\3/gi,
   render: (ph, _m, key, sep, quote) => `${key}${sep}${quote}${ph}${quote}`,
+  // Suppress only the known config identifiers that caused false positives.
+  // Do not skip values merely because they are lowercase snake_case: tokens
+  // may use that format too.
+  skip: (_m, _key, _sep, _quote, value) =>
+    value === "terminal_title_stripped" || value === "indexed_workspace",
 };
 
 // ---------------------------------------------------------------------------
@@ -137,6 +144,9 @@ function applyPattern(
       const candidate = pattern.render ? groups[groups.length - 1] : match;
       if (candidate && opts.allowlist.has(candidate)) return match;
     }
+
+    // Per-pattern false-positive guard.
+    if (pattern.skip?.(match, ...groups)) return match;
 
     hits[pattern.name] = (hits[pattern.name] ?? 0) + 1;
     return pattern.render ? pattern.render(ph, match, ...groups) : ph;

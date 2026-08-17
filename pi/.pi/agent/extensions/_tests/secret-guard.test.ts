@@ -91,6 +91,26 @@ describe("GENERIC_ASSIGNMENT", () => {
 		expect(redactText(input, opts({ generic: false })).text).toBe(input);
 	});
 
+	it("suppresses only known snake_case identifier false positives", () => {
+		const input = '{ token = "terminal_title_stripped", dim = true }';
+		expect(redactText(input, opts()).text).toBe(input);
+		const legacy = 'LEGACY_TOKEN = "indexed_workspace"';
+		expect(redactText(legacy, opts()).text).toBe(legacy);
+	});
+
+	it("masks lowercase snake_case values assigned to token", () => {
+		const token = ["lowercase", "underscore", "token", "value"].join("_");
+		const { text } = redactText(`token = "${token}"`, opts());
+		expect(text).toBe('token = "[REDACTED:credential-assignment]"');
+		expect(text).not.toContain(token);
+	});
+
+	it("still masks high-entropy values assigned to token-like keys", () => {
+		const { text } = redactText('token = "x9F8gH7jK2lM4nB6vC1"', opts());
+		expect(text).not.toContain("x9F8gH7jK2lM4nB6vC1");
+		expect(text).toContain('token = "');
+	});
+
 	it("does not re-match an existing placeholder (idempotence)", () => {
 		const first = redactText('token = "abcdefghijklmnopqrst"', opts());
 		const second = redactText(first.text, opts());
