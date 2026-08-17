@@ -93,6 +93,14 @@ topology, and incident details belong in local memory instead.
 - Do not claim a subagent result until the result was actually received and
   inspected.
 
+### Document prose: remove chain-of-thought narration
+
+For shared documents, write the conclusion, evidence, decision, trade-offs, risks, and open questions directly. Remove internal-reasoning narration, discovery-story prose, rhetorical self-dialogue, and phrases such as “the design tell,” “why this shape is right,” “this dissolves the fork,” or “the strongest argument.” Preserve concise rationale and traceable evidence; do not expose or simulate the author’s chain of thought.
+
+### Inter-process coordination
+
+Do not request draft approval for pi intercom messages exchanged with other local agent sessions for ownership checks, conflict avoidance, status coordination, or similar inter-process communication. Reply directly and succinctly.
+
 ## Memory hygiene
 
 - Public/global memory contains only portable, anonymized rules that should
