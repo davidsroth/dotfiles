@@ -1,5 +1,6 @@
+import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { describe, expect, it } from "vitest";
-import { calculateBranchUsage } from "../custom-footer";
+import { calculateBranchUsage, composeFooterLine, shortModelId } from "../custom-footer";
 
 function assistant(input: number, output: number, cost: number, cacheRead = 0, cacheWrite = 0) {
 	return {
@@ -24,6 +25,53 @@ function subagent(id: string, cost: number) {
 		data: { id, usage: { input: 0, output: 0, cacheWrite: 0, cost } },
 	};
 }
+
+describe("shortModelId", () => {
+	it("strips router-style prefixes", () => {
+		expect(shortModelId("accounts/fireworks/routers/kimi-k3-fast")).toBe("kimi-k3-fast");
+	});
+
+	it("leaves plain ids untouched", () => {
+		expect(shortModelId("claude-sonnet-5")).toBe("claude-sonnet-5");
+	});
+});
+
+describe("composeFooterLine", () => {
+	const left = "notes ⎇ main ✓";
+
+	it("pads between left and right when both fit", () => {
+		const right = "ctx 12% · claude-sonnet-5";
+		const line = composeFooterLine(left, right, 80);
+		expect(visibleWidth(line)).toBe(80);
+		expect(line.startsWith(left)).toBe(true);
+		expect(line.endsWith(right)).toBe(true);
+	});
+
+	it("never exceeds terminal width when the right side alone is wider (2026-08-03 crash)", () => {
+		// Crash reproduction: terminal 63, right side 76 wide (long model id), left truncated to 0.
+		const right = "ctx 12% · ↑148k ↓32k ⊕3.4M · $2.90 · accounts/fireworks/routers/kimi-k3-fast";
+		const line = composeFooterLine(left, right, 63);
+		expect(visibleWidth(line)).toBeLessThanOrEqual(63);
+	});
+
+	it("clamps to width for tiny terminals and overwidth left", () => {
+		const longLeft = "very-long-directory-name ⎇ feature/some-very-long-branch-name ✓ ↑3";
+		const right = "ctx 99% · ↑9M ↓9M · $999.99 · some-model";
+		for (const width of [20, 40, 59, 60, 61, 63, 80]) {
+			expect(visibleWidth(composeFooterLine(longLeft, right, width))).toBeLessThanOrEqual(width);
+		}
+	});
+
+	it("handles zero/negative budgets without throwing", () => {
+		const right = "ctx 12% · ↑1k ↓1k · $1.00 · m";
+		expect(visibleWidth(composeFooterLine(left, right, 60))).toBeLessThanOrEqual(60);
+		expect(() => composeFooterLine("", right, 1)).not.toThrow();
+	});
+
+	it("truncateToWidth keeps ANSI-aware width within budget", () => {
+		expect(visibleWidth(truncateToWidth("abcdef", 3))).toBeLessThanOrEqual(3);
+	});
+});
 
 describe("calculateBranchUsage", () => {
 	it("adds persisted subagent costs to top-level assistant cost", () => {

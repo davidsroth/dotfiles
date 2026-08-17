@@ -51,6 +51,30 @@ function nonNegativeFinite(value: unknown): number | undefined {
 		: undefined;
 }
 
+/** Router-style ids (e.g. "accounts/fireworks/routers/kimi-k3-fast") are too long
+ * for narrow terminals; show the last path segment. */
+export function shortModelId(modelId: string): string {
+	return modelId.split("/").pop() ?? modelId;
+}
+
+/** Compose the single footer line, guaranteeing visibleWidth(result) <= width.
+ * pi-tui throws on any overwidth rendered line (see pi-crash.log), so both
+ * halves must be clamped — the right side can exceed the terminal on its own. */
+export function composeFooterLine(left: string, right: string, width: number): string {
+	const lW = visibleWidth(left);
+	const rW = visibleWidth(right);
+	if (lW + rW + 2 > width) {
+		// Drop right-side fluff progressively if cramped
+		if (width < 60) return truncateToWidth(left, width);
+		const truncatedLeft = truncateToWidth(left, Math.max(0, width - rW - 2));
+		const rightBudget = Math.max(0, width - visibleWidth(truncatedLeft) - 1);
+		const fittedRight = truncateToWidth(right, rightBudget);
+		const padW = Math.max(1, width - visibleWidth(truncatedLeft) - visibleWidth(fittedRight));
+		return truncatedLeft + " ".repeat(padW) + fittedRight;
+	}
+	return left + " ".repeat(width - lW - rW) + right;
+}
+
 /** Sum parent usage and the latest cumulative record for each subagent on a branch. */
 export function calculateBranchUsage(
 	entries: readonly unknown[],
@@ -235,25 +259,14 @@ export default function (pi: ExtensionAPI) {
 							: "";
 					const costStr = cost > 0 ? ` · $${cost.toFixed(cost < 1 ? 4 : 2)}` : "";
 					const ctxStr = `ctx ${pct}`;
-					const modelStr = ctx.model?.id ?? "no-model";
+					const modelStr = shortModelId(ctx.model?.id ?? "no-model");
 
 					const right = theme.fg(
 						"dim",
 						`${ctxStr} · ${tokenStr}${cacheStr}${costStr} · ${modelStr}`,
 					);
 
-					// Pad between left and right; truncate left first if needed.
-					const lW = visibleWidth(left);
-					const rW = visibleWidth(right);
-					if (lW + rW + 2 > width) {
-						// Drop right-side fluff progressively if cramped
-						if (width < 60) return [truncateToWidth(left, width)];
-						const truncatedLeft = truncateToWidth(left, Math.max(0, width - rW - 2));
-						const padW = Math.max(1, width - visibleWidth(truncatedLeft) - rW);
-						return [truncatedLeft + " ".repeat(padW) + right];
-					}
-					const pad = " ".repeat(width - lW - rW);
-					return [left + pad + right];
+					return [composeFooterLine(left, right, width)];
 				},
 			};
 		});
