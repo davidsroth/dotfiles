@@ -29,11 +29,15 @@
     ]
   },
   "peerDependencies": {
-    "@davidroth/pi-intercom": "*",
+    "@davidroth/pi-intercom": "^0.10.0",
+    "pi-intercom": "^0.9.2",
     "@earendil-works/pi-coding-agent": "*"
   },
   "peerDependenciesMeta": {
     "@davidroth/pi-intercom": {
+      "optional": true
+    },
+    "pi-intercom": {
       "optional": true
     }
   },

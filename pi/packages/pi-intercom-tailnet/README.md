@@ -1,70 +1,54 @@
 # pi-intercom-tailnet
 
-Extension that bridges DMs (and, in the future, channels) across a
-Tailscale tailnet by relaying through the **local intercom broker**.
+Extension that bridges pi-intercom DMs across a Tailscale tailnet through each
+host's local broker.
+
+> **Status: Phase 1.** Cross-host discovery and DMs work behind a static host
+> allowlist. Channels and interactive grants are not implemented.
 
 ## Broker compatibility
 
-The relay talks to whatever intercom broker your local pi-intercom
-extension already started. It is wire-compatible with **both**:
+The relay targets stock `pi-intercom@0.9.2` and `@davidroth/pi-intercom@0.10.x`, including its portable `aside-v1` implementation. It uses the common registration/features protocol;
+there is no broker-flavor detection.
 
-- upstream [`nicobailon/pi-intercom`](https://github.com/nicobailon/pi-intercom)
-  (`pi install npm:pi-intercom`), and
-- the [`@davidroth/pi-intercom`](../pi-intercom) fork.
+The broker writer deliberately permits only `register`, `list`, `send`, and
+`unregister`. Cross-host delivery receipts, cancellation controls, and live
+presence/name updates are not forwarded yet. See
+[`docs/adr/0001-dual-broker-compatibility.md`](docs/adr/0001-dual-broker-compatibility.md).
 
-It only emits the broker control verbs both implementations understand
-(`register` / `list` / `send` / `unregister`) and ignores any
-fork-only fields, so no fork adoption or code change is needed to run it
-against the upstream broker. See
-[`docs/adr/0001-dual-broker-compatibility.md`](docs/adr/0001-dual-broker-compatibility.md)
-for the contract and how it's enforced + tested.
+## What works
 
-> **Status: Phase 1 — cross-host session discovery.** Cross-host DMs
-> work with name-based targeting (`worker@maigret`). Behind a static
-> allowlist; no interactive grant flow yet. No channels yet.
+- A relay daemon listens on the host's Tailscale IPv4 (port 4271 by default).
+- `allowedHosts` and Tailscale `whois` gate inbound peers.
+- Remote sessions appear locally as `<name>@<host>` virtual sessions.
+- Stable v0.9 registration IDs are reused across broker and peer reconnects.
+- Messages preserve v0.9.2 metadata plus `aside` and `replyError`.
+- Virtual sessions advertise `aside-v1` only for remote sessions that support it.
+- Local-broker frames have the stock fixed 1 MiB limit. Peer framing is
+  independently configurable with `PI_INTERCOM_TAILNET_MAX_FRAME_BYTES`.
 
-## What works today
+Peer-link drops are not queued or retried. Channels and interactive grant flow
+remain future work.
 
-- Per-host **relay daemon** auto-spawned by the pi extension when
-  `~/.pi/agent/intercom/tailnet.json` has `enabled: true`.
-- Listens on a TCP port (default 4271) bound to the Tailscale IPv4 of
-  this host. Refuses to start if no Tailscale IPv4 is detected.
-- Accepts inbound connections from peers whose MagicDNS short name
-  appears in `allowedHosts`. Everyone else is rejected at the hello.
-- Periodically polls `tailscale status --json` to track online peers
-  and dial them.
-- **Cross-host session discovery:** when a peer link comes up, both
-  sides exchange their local session lists. Remote sessions appear on
-  your local broker as virtual sessions named `<name>@<host>`.
-  Joins/leaves are propagated incrementally.
-- The existing `intercom` tool routes DMs to them by **name**
-  (`intercom({ action: "send", to: "worker@maigret", message: "hi" })`)
-  with **no other changes**.
+## Runtime paths and platform support
 
-## What doesn't work yet
+This package follows `PI_CODING_AGENT_DIR`:
 
-- **Channels** (`post` / `read` / `tail`). Reserved in the protocol;
-  no implementation yet.
-- **Interactive grant flow** (§4.2 of the scope doc). Phase 1 still
-  uses only the static `allowedHosts` list; there is no per-peer or
-  per-session approval prompt.
-- **Reconnect / queue.** If a peer link drops while a DM is in flight,
-  the DM is dropped, not retried.
+- config: `$PI_CODING_AGENT_DIR/intercom/tailnet.json`
+- broker: `$PI_CODING_AGENT_DIR/intercom/broker.sock`
+- relay PID: `$PI_CODING_AGENT_DIR/intercom/tailnet-relay.pid`
 
-## Install / wire-up
+The default agent directory is `~/.pi/agent`. An absolute configured path is
+used directly; a relative path is resolved against the pi launcher's current
+working directory and passed to the relay as an absolute path.
 
-Already loaded via `~/.pi/agent/settings.json` if you add it:
+The tailnet relay currently supports POSIX/macOS Unix sockets only. Windows
+named pipes and opt-in broker TCP endpoints are not implemented.
 
-```json
-{
-  "packages": [
-    "../../packages/pi-intercom",
-    "../../packages/pi-intercom-tailnet"
-  ]
-}
-```
+## Configure
 
-Then create `~/.pi/agent/intercom/tailnet.json`:
+Load `pi-intercom` and this package, then create
+`~/.pi/agent/intercom/tailnet.json` (or the corresponding custom agent path):
 
 ```json
 {
@@ -73,51 +57,26 @@ Then create `~/.pi/agent/intercom/tailnet.json`:
 }
 ```
 
-Restart pi. The extension spawns the relay; it logs to stderr,
-which (because we `stdio: "ignore"`) goes to the bit bucket. To watch
-logs while debugging, run the relay manually:
+Both hosts must list each other and have working `tailscale status`/`whois`.
+After restarting pi, a remote `worker` session on `aurora` appears as
+`worker@aurora` and can be targeted with the existing intercom tool:
 
-```bash
-cd ~/dotfiles/packages/pi-intercom-tailnet
-npx tsx relay/relay.ts
+```ts
+intercom({ action: "send", to: "worker@aurora", message: "hi" })
 ```
 
-## Smoke test (two hosts, A and B)
+For portable aside, both the local sender and represented remote recipient must
+advertise `aside-v1`; stock recipients continue to use normal ask behavior when
+no aside capability is requested.
 
-Pre-reqs:
-
-- Both hosts on the same tailnet, both with `tailscale status` working.
-- Both hosts have `@davidroth/pi-intercom` + `pi-intercom-tailnet` installed.
-- `~/.pi/agent/intercom/tailnet.json` on A lists B in `allowedHosts`,
-  and vice versa.
-
-1. On A and B, start a pi session each. Name them: `/name a-planner`
-   on A, `/name b-worker` on B.
-2. Verify intra-host intercom works: open a second session on A,
-   `intercom({ action: "list" })` should show `a-planner`.
-3. From A, `intercom({ action: "list" })`. You should now see
-   `b-worker@B` (cross-host session discovery is active in Phase 1).
-4. From A, send by name:
-   ```ts
-   intercom({ action: "send", to: "b-worker@B", message: "hi from A" })
-   ```
-5. From B, reply:
-   ```ts
-   intercom({ action: "send", to: "a-planner@A", message: "hello back" })
-   ```
-
-## Testing
+## Development
 
 ```bash
-cd ~/dotfiles/packages/pi-intercom-tailnet
+cd pi/packages/pi-intercom-tailnet
 npm install
 npm test
+npm run typecheck
 ```
 
-Unit tests cover:
-
-- `config.ts` — merge, validation, allowlist semantics.
-- `tailscale.ts` — `tailscale status --json` parsing.
-- `framing.ts` — length-prefixed JSON roundtrip + partial reads.
-
-Integration tests (relay end-to-end against a real broker) are TODO.
+The broker tests use an independently framed v0.9.2-style socket server so
+framing drift is not hidden by importing the implementation under test.

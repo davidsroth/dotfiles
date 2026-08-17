@@ -18,19 +18,80 @@
 // extension when `enabled: true` in tailnet.json. Exits cleanly on
 // SIGTERM/SIGINT.
 
-import { chmodSync, writeFileSync, unlinkSync, mkdirSync } from "fs";
-import { join } from "path";
-import { homedir } from "os";
+import { chmodSync, closeSync, mkdirSync, openSync, readFileSync, unlinkSync, writeSync } from "fs";
+import { createHash } from "crypto";
 import net from "net";
-import { loadTailnetConfig, isPeerAllowed, type TailnetConfig } from "../config.js";
+import {
+  getAgentDirPath,
+  getBrokerSocketPath,
+  getIntercomDirPath,
+  getRelayPidPath,
+  isPeerAllowed,
+  loadTailnetConfig,
+  type TailnetConfig,
+} from "../config.js";
 import { getTailnetStatus, whoisHost, type TailnetStatus } from "../tailscale.js";
 import { createBrokerBridge, type BrokerBridge, type VirtualSessionHandle } from "./broker-bridge.js";
 import { dialPeer, acceptPeer, type PeerLink } from "./peer-link.js";
-import type { IntercomMessage, SessionInfo, TailnetDM, TailnetFrame } from "../types.js";
+import { ASIDE_FEATURE, type IntercomMessage, type SessionInfo, type TailnetDM, type TailnetFrame } from "../types.js";
 
-const INTERCOM_DIR = join(homedir(), ".pi/agent/intercom");
-const RELAY_PID_PATH = join(INTERCOM_DIR, "tailnet-relay.pid");
-const BROKER_SOCKET = join(INTERCOM_DIR, "broker.sock");
+const AGENT_DIR = getAgentDirPath();
+const INTERCOM_DIR = getIntercomDirPath(AGENT_DIR);
+const RELAY_PID_PATH = getRelayPidPath(AGENT_DIR);
+const BROKER_SOCKET = getBrokerSocketPath(AGENT_DIR);
+
+export function stableControlSessionId(host: string): string {
+  const digest = createHash("sha256").update(`control\0${host.toLowerCase()}`).digest("hex").slice(0, 32);
+  return `pi-tailnet-control-v1-${digest}`;
+}
+
+/**
+ * A configured host name changes only the relay's advertised identity. Binding
+ * still requires the local node address reported by Tailscale.
+ */
+export function resolveRelaySelf(status: TailnetStatus, hostOverride?: string): TailnetStatus["self"] {
+  return {
+    ...status.self,
+    host: hostOverride?.trim().toLowerCase() || status.self.host,
+  };
+}
+
+export function stableVirtualSessionId(host: string, remoteSessionId: string): string {
+  const digest = createHash("sha256")
+    .update(`virtual\0${host.toLowerCase()}\0${remoteSessionId}`)
+    .digest("hex")
+    .slice(0, 32);
+  return `pi-tailnet-virtual-v1-${digest}`;
+}
+
+function pidRunning(pid: number): boolean {
+  if (!Number.isSafeInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
+/** Atomically claim the relay PID file so concurrent pi processes cannot spawn competing relays. */
+function claimRelayProcess(): void {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const fd = openSync(RELAY_PID_PATH, "wx", 0o600);
+      try { writeSync(fd, String(process.pid)); } finally { closeSync(fd); }
+      chmodSync(RELAY_PID_PATH, 0o600);
+      return;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      let existing = 0;
+      try { existing = Number.parseInt(readFileSync(RELAY_PID_PATH, "utf-8").trim(), 10); } catch { /* stale */ }
+      if (pidRunning(existing)) throw new Error(`tailnet relay already running as pid ${existing}`);
+      try { unlinkSync(RELAY_PID_PATH); } catch { /* another contender won */ }
+    }
+  }
+  throw new Error("could not acquire tailnet relay process lock");
+}
 
 interface PeerState {
   host: string;
@@ -39,12 +100,13 @@ interface PeerState {
   outbound: PeerLink | null;
   inbound: PeerLink | null;
   /** Virtual local sessions we host on behalf of this peer's sessions. */
-  virtualByRemoteId: Map<string, { handle: VirtualSessionHandle; remoteName: string; localId?: string }>;
+  virtualByRemoteId: Map<string, { handle: VirtualSessionHandle; remoteName: string; remoteFeatures: string[]; localId?: string }>;
 }
 
 class TailnetRelay {
   private readonly config: TailnetConfig;
   private selfHost: string | null = null;
+  private selfIPv4: string | null = null;
   private bridge: BrokerBridge | null = null;
   private server: net.Server | null = null;
   private peers = new Map<string, PeerState>();
@@ -70,23 +132,24 @@ class TailnetRelay {
 
     mkdirSync(INTERCOM_DIR, { recursive: true, mode: 0o700 });
     chmodSync(INTERCOM_DIR, 0o700);
+    claimRelayProcess();
 
-    // 1. Discover our own host name via the tailscale CLI (unless overridden).
-    if (this.config.hostOverride) {
-      this.selfHost = this.config.hostOverride.toLowerCase();
-    } else {
-      const status = await getTailnetStatus(this.config.tailscaleCli);
-      if (!status) {
-        console.error("[tailnet-relay] tailscale status unavailable; refusing to start");
-        process.exit(1);
-      }
-      this.selfHost = status.self.host;
-      this.applyTailscaleStatus(status);
+    // 1. Tailscale status is always required for the local bind address.
+    // hostOverride affects only the advertised host name (primarily for tests).
+    const status = await getTailnetStatus(this.config.tailscaleCli);
+    if (!status) {
+      console.error("[tailnet-relay] tailscale status unavailable; refusing to start");
+      process.exit(1);
     }
+    const self = resolveRelaySelf(status, this.config.hostOverride);
+    this.selfHost = self.host;
+    this.selfIPv4 = self.ipv4;
+    this.applyTailscaleStatus(status);
 
     // 2. Connect to the local broker (control socket).
     this.bridge = createBrokerBridge({
       socketPath: BROKER_SOCKET,
+      controlSessionId: stableControlSessionId(this.selfHost),
       controlName: "__tailnet_relay__",
       pid: process.pid,
     });
@@ -126,8 +189,6 @@ class TailnetRelay {
         resolve();
       });
     });
-    writeFileSync(RELAY_PID_PATH, String(process.pid), { mode: 0o600 });
-    chmodSync(RELAY_PID_PATH, 0o600);
     console.error(`[tailnet-relay] listening on ${ipv4}:${this.config.port} as ${this.selfHost}`);
 
     // 4. Discovery loop.
@@ -143,13 +204,8 @@ class TailnetRelay {
   }
 
   private getSelfIPv4(): string | null {
-    // Phase 0: only inferred from tailscale status, never accept 0.0.0.0.
-    // (We stash this on the peer entry for "self" below, but at this point
-    // we may not have run discovery yet, so re-query if needed.)
-    for (const p of this.peers.values()) {
-      if (p.host === this.selfHost && p.ipv4) return p.ipv4;
-    }
-    return null;
+    // Never bind an override name to an inferred/unspecified address.
+    return this.selfIPv4;
   }
 
   private async tick(): Promise<void> {
@@ -173,6 +229,9 @@ class TailnetRelay {
   }
 
   private applyTailscaleStatus(status: TailnetStatus): void {
+    // The configured host name can differ from Tailscale's host name, but the
+    // listener must always track Tailscale's actual local address.
+    this.selfIPv4 = status.self.ipv4;
     // Self.
     const self = this.peers.get(status.self.host) ?? this.makePeerState(status.self.host);
     self.ipv4 = status.self.ipv4;
@@ -277,7 +336,14 @@ class TailnetRelay {
   }
 
   private wirePeerLink(peer: PeerState, link: PeerLink, direction: "inbound" | "outbound"): void {
-    link.on("dm", (frame) => void this.routeInboundDM(peer, frame));
+    link.on("dm", (frame) => {
+      // EventEmitter does not observe promise rejections. Keep malformed or
+      // broker-side failures from becoming unhandled rejections in the socket
+      // data listener.
+      void this.routeInboundDM(peer, frame).catch((error) => {
+        console.error(`[tailnet-relay] inbound DM ${frame.message.id} from ${peer.host} failed: ${error instanceof Error ? error.message : String(error)}`);
+      });
+    });
     link.on("ack", (frame) => {
       // The ack travels remote->origin; nothing on this side is blocking on it
       // (the local sender's broker already returned), so surface a cross-host
@@ -332,31 +398,33 @@ class TailnetRelay {
     // Create new / refresh existing.
     for (const session of sessions) {
       const displayName = `${session.name ?? session.id}@${peer.host}`;
+      const features = session.features?.filter((feature) => feature === ASIDE_FEATURE) ?? [];
       const existing = peer.virtualByRemoteId.get(session.id);
       if (existing) {
-        // Name may have changed; if so, close and recreate.
-        if (existing.remoteName !== displayName) {
+        // Registration fields changed; recreate with the same stable ID.
+        if (existing.remoteName !== displayName || existing.remoteFeatures.join("\0") !== features.join("\0")) {
           existing.handle.close();
           peer.virtualByRemoteId.delete(session.id);
-          this.ensureVirtualForRemote(peer, session.id, displayName);
+          this.ensureVirtualForRemote(peer, session.id, displayName, features);
         }
       } else {
-        this.ensureVirtualForRemote(peer, session.id, displayName);
+        this.ensureVirtualForRemote(peer, session.id, displayName, features);
       }
     }
   }
 
   private handlePeerSessionJoined(peer: PeerState, session: SessionInfo): void {
     const displayName = `${session.name ?? session.id}@${peer.host}`;
+    const features = session.features?.filter((feature) => feature === ASIDE_FEATURE) ?? [];
     const existing = peer.virtualByRemoteId.get(session.id);
     if (existing) {
-      if (existing.remoteName !== displayName) {
+      if (existing.remoteName !== displayName || existing.remoteFeatures.join("\0") !== features.join("\0")) {
         existing.handle.close();
         peer.virtualByRemoteId.delete(session.id);
-        this.ensureVirtualForRemote(peer, session.id, displayName);
+        this.ensureVirtualForRemote(peer, session.id, displayName, features);
       }
     } else {
-      this.ensureVirtualForRemote(peer, session.id, displayName);
+      this.ensureVirtualForRemote(peer, session.id, displayName, features);
     }
   }
 
@@ -373,35 +441,45 @@ class TailnetRelay {
   /** A remote relay DM'd us → deliver to a local session via the broker. */
   private async routeInboundDM(peer: PeerState, frame: TailnetDM): Promise<void> {
     if (!this.bridge) return;
-    // Hosts must match what the link's hello claimed.
-    if (frame.fromHost.toLowerCase() !== peer.host) {
-      this.ackTo(peer, frame.message.id, false, "host mismatch");
-      return;
+    try {
+      // Hosts must match what the link's hello claimed.
+      if (frame.fromHost.toLowerCase() !== peer.host) {
+        this.ackTo(peer, frame.message.id, false, "host mismatch");
+        return;
+      }
+      // Resolve target locally. We need a virtual session to "send" from
+      // so the recipient sees the inbound as coming from <name>@<host>.
+      const senderDisplayName = `${frame.fromName.replace(/@.*/, "")}@${peer.host}`;
+      const virtual = this.ensureVirtualForRemote(peer, frame.fromSessionId, senderDisplayName);
+      const target = frame.toResolver.kind === "sessionId"
+        ? frame.toResolver.id
+        : frame.toResolver.name;
+      // Ack with the broker's ACTUAL delivery outcome rather than an optimistic
+      // true, so the sending host learns when a cross-host DM is dropped.
+      const result = await virtual.send(target, frame.message);
+      this.ackTo(peer, frame.message.id, result.delivered, result.reason);
+    } catch (error) {
+      this.ackTo(peer, frame.message.id, false, error instanceof Error ? error.message : String(error));
     }
-    // Resolve target locally. We need a virtual session to "send" from
-    // so the recipient sees the inbound as coming from <name>@<host>.
-    const senderDisplayName = `${frame.fromName.replace(/@.*/, "")}@${peer.host}`;
-    const virtual = this.ensureVirtualForRemote(peer, frame.fromSessionId, senderDisplayName);
-
-    const target = frame.toResolver.kind === "sessionId"
-      ? frame.toResolver.id
-      : frame.toResolver.name;
-    // Ack with the broker's ACTUAL delivery outcome rather than an optimistic
-    // true, so the sending host learns when a cross-host DM is dropped.
-    const result = await virtual.send(target, frame.message);
-    this.ackTo(peer, frame.message.id, result.delivered, result.reason);
   }
 
-  private ensureVirtualForRemote(peer: PeerState, remoteSessionId: string, displayName: string): VirtualSessionHandle {
+  private ensureVirtualForRemote(
+    peer: PeerState,
+    remoteSessionId: string,
+    displayName: string,
+    remoteFeatures: string[] = peer.virtualByRemoteId.get(remoteSessionId)?.remoteFeatures ?? [],
+  ): VirtualSessionHandle {
     const existing = peer.virtualByRemoteId.get(remoteSessionId);
     if (existing && existing.remoteName === displayName) return existing.handle;
     if (existing) existing.handle.close();
 
     this.virtualSessionNames.add(displayName);
     const handle = this.bridge!.openVirtualSession({
+      sessionId: stableVirtualSessionId(peer.host, remoteSessionId),
       displayName,
       cwd: `tailnet:${peer.host}`,
       model: `tailnet:${peer.host}`,
+      ...(remoteFeatures.length ? { features: [...remoteFeatures] } : {}),
       onMessage: (from, message) => this.routeOutboundFromLocal(peer, remoteSessionId, from, message),
       onClose: () => this.handleVirtualSessionClosed(peer, remoteSessionId, displayName),
     });
@@ -411,7 +489,7 @@ class TailnetRelay {
       const entry = peer.virtualByRemoteId.get(remoteSessionId);
       if (entry) entry.localId = id;
     }).catch(() => {});
-    peer.virtualByRemoteId.set(remoteSessionId, { handle, remoteName: displayName });
+    peer.virtualByRemoteId.set(remoteSessionId, { handle, remoteName: displayName, remoteFeatures });
     return handle;
   }
 
@@ -506,11 +584,11 @@ class TailnetRelay {
     this.virtualSessionNames.clear();
     for (const peer of this.peers.values()) {
       const wanted = Array.from(peer.virtualByRemoteId.entries()).map(
-        ([remoteId, v]) => ({ remoteId, remoteName: v.remoteName }),
+        ([remoteId, v]) => ({ remoteId, remoteName: v.remoteName, remoteFeatures: v.remoteFeatures }),
       );
       peer.virtualByRemoteId.clear();
-      for (const { remoteId, remoteName } of wanted) {
-        this.ensureVirtualForRemote(peer, remoteId, remoteName);
+      for (const { remoteId, remoteName, remoteFeatures } of wanted) {
+        this.ensureVirtualForRemote(peer, remoteId, remoteName, remoteFeatures);
       }
     }
   }
@@ -538,6 +616,7 @@ class TailnetRelay {
     this.localSessions.clear();
     this.bridge = createBrokerBridge({
       socketPath: BROKER_SOCKET,
+      controlSessionId: stableControlSessionId(this.selfHost!),
       controlName: "__tailnet_relay__",
       pid: process.pid,
     });
@@ -579,7 +658,9 @@ class TailnetRelay {
     }
     this.bridge?.close();
     this.server?.close();
-    try { unlinkSync(RELAY_PID_PATH); } catch { /* PID file may not exist */ }
+    try {
+      if (readFileSync(RELAY_PID_PATH, "utf-8").trim() === String(process.pid)) unlinkSync(RELAY_PID_PATH);
+    } catch { /* PID file may not exist */ }
     process.exit(0);
   }
 }

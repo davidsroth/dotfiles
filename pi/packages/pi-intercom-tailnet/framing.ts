@@ -1,90 +1,122 @@
-// Length-prefixed JSON framing. Same wire format as pi-intercom's
-// broker/framing.ts; duplicated rather than imported so the relay
-// daemon stays runnable when pi-intercom isn't reachable on disk.
-//
+// Length-prefixed JSON framing shared by the local-broker and peer links.
 // Format: 4-byte big-endian length || UTF-8 JSON payload.
 
 import type { Socket } from "net";
 
-// Upper bound on a single frame. The relay is network-facing (peers reach it
-// over the tailnet), so an unbounded length prefix is a memory-exhaustion
-// vector: a peer could declare a multi-GiB frame and force the reader to
-// buffer until OOM. Mirror pi-intercom's broker cap (16 MiB default), enforced
-// on both encode and decode. Override with PI_INTERCOM_TAILNET_MAX_FRAME_BYTES.
-export const MAX_FRAME_BYTES: number = (() => {
+/** Stock pi-intercom v0.9.2's fixed local-broker frame limit. */
+export const BROKER_MAX_FRAME_BYTES = 1024 * 1024;
+
+/** Peer framing has an independent, configurable limit. */
+export const TAILNET_MAX_FRAME_BYTES: number = (() => {
   const raw = Number(process.env.PI_INTERCOM_TAILNET_MAX_FRAME_BYTES);
   return Number.isInteger(raw) && raw > 0 ? raw : 16 * 1024 * 1024;
 })();
 
-// High-water mark for a socket's outbound buffer. If a peer/broker isn't
-// draining what we write, Node buffers it in this process's memory without
-// bound. Past this mark we treat the socket as wedged and tear it down rather
-// than keep buffering. Floored at 2x the max frame so one in-flight + one
-// queued legal frame never trips it. Override with
-// PI_INTERCOM_TAILNET_MAX_SOCKET_BUFFER_BYTES.
+/** Backward-compatible name for the default (peer) framing limit. */
+export const MAX_FRAME_BYTES = TAILNET_MAX_FRAME_BYTES;
+
 export const MAX_OUTBOUND_BUFFER_BYTES: number = (() => {
   const raw = Number(process.env.PI_INTERCOM_TAILNET_MAX_SOCKET_BUFFER_BYTES);
   const configured = Number.isInteger(raw) && raw > 0 ? raw : 8 * 1024 * 1024;
-  return Math.max(configured, MAX_FRAME_BYTES * 2);
+  return Math.max(configured, TAILNET_MAX_FRAME_BYTES * 2);
 })();
 
-/** True when a socket's outbound buffer has grown past the high-water mark. */
 export function isSocketBackedUp(socket: Socket): boolean {
   return socket.writableLength > MAX_OUTBOUND_BUFFER_BYTES;
 }
 
-export function writeMessage(socket: Socket, msg: unknown): void {
+export function writeMessage(
+  socket: Socket,
+  msg: unknown,
+  maxFrameBytes = TAILNET_MAX_FRAME_BYTES,
+  transport = "tailnet",
+): void {
   const json = JSON.stringify(msg);
   const payload = Buffer.from(json, "utf-8");
-  if (payload.length > MAX_FRAME_BYTES) {
+  if (payload.length > maxFrameBytes) {
     throw new Error(
-      `Refusing to send tailnet frame of ${payload.length} bytes (max ${MAX_FRAME_BYTES}); a peer would reject it`,
+      `Refusing to send ${transport} frame of ${payload.length} bytes (max ${maxFrameBytes})`,
     );
   }
-  const header = Buffer.alloc(4);
-  header.writeUInt32BE(payload.length, 0);
-  socket.write(Buffer.concat([header, payload]));
+  const frame = Buffer.allocUnsafe(4 + payload.length);
+  frame.writeUInt32BE(payload.length, 0);
+  payload.copy(frame, 4);
+  socket.write(frame);
 }
 
 export function createMessageReader(
   onMessage: (msg: unknown) => void,
   onError: (error: Error) => void,
+  maxFrameBytes = TAILNET_MAX_FRAME_BYTES,
+  transport = "tailnet",
 ) {
-  let buffer = Buffer.alloc(0);
+  const header = Buffer.allocUnsafe(4);
+  let headerBytes = 0;
+  let payload: Buffer | null = null;
+  let payloadBytes = 0;
+  let payloadLength = 0;
+
+  const report = (framePayload: Buffer): boolean => {
+    let msg: unknown;
+    try {
+      msg = JSON.parse(framePayload.toString("utf-8"));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      onError(new Error(`Failed to parse ${transport} frame: ${message}`, { cause: error }));
+      return false;
+    }
+    try {
+      onMessage(msg);
+      return true;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      onError(new Error(`Failed to handle ${transport} frame: ${message}`, { cause: error }));
+      return false;
+    }
+  };
 
   return (data: Buffer) => {
-    buffer = Buffer.concat([buffer, data]);
-
-    while (buffer.length >= 4) {
-      const length = buffer.readUInt32BE(0);
-      // Reject an oversized declared length BEFORE buffering its body, so a
-      // hostile/buggy peer can't drive unbounded memory growth with a giant
-      // length prefix.
-      if (length > MAX_FRAME_BYTES) {
-        onError(new Error(`Tailnet frame too large: ${length} bytes exceeds max ${MAX_FRAME_BYTES}`));
-        return;
-      }
-      if (buffer.length < 4 + length) break;
-
-      const payload = buffer.subarray(4, 4 + length);
-      buffer = buffer.subarray(4 + length);
-
-      let msg: unknown;
-      try {
-        msg = JSON.parse(payload.toString("utf-8"));
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        onError(new Error(`Failed to parse tailnet frame: ${message}`, { cause: error }));
-        return;
+    let offset = 0;
+    while (offset < data.length) {
+      if (headerBytes < 4) {
+        const count = Math.min(4 - headerBytes, data.length - offset);
+        data.copy(header, headerBytes, offset, offset + count);
+        headerBytes += count;
+        offset += count;
+        if (headerBytes < 4) return;
+        payloadLength = header.readUInt32BE(0);
+        if (payloadLength > maxFrameBytes) {
+          headerBytes = 0;
+          onError(new Error(`${transport} frame too large: ${payloadLength} bytes exceeds max ${maxFrameBytes}`));
+          return;
+        }
       }
 
-      try {
-        onMessage(msg);
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        onError(new Error(`Failed to handle tailnet frame: ${message}`, { cause: error }));
-        return;
+      if (payloadBytes === 0 && data.length - offset >= payloadLength) {
+        const framePayload = data.subarray(offset, offset + payloadLength);
+        offset += payloadLength;
+        headerBytes = 0;
+        payload = null;
+        payloadLength = 0;
+        if (!report(framePayload)) return;
+        continue;
       }
+
+      if (payload === null || payload.length !== payloadLength) {
+        payload = Buffer.allocUnsafe(payloadLength);
+      }
+      const count = Math.min(payloadLength - payloadBytes, data.length - offset);
+      data.copy(payload, payloadBytes, offset, offset + count);
+      payloadBytes += count;
+      offset += count;
+      if (payloadBytes < payloadLength) return;
+
+      const framePayload = payload;
+      headerBytes = 0;
+      payload = null;
+      payloadBytes = 0;
+      payloadLength = 0;
+      if (!report(framePayload)) return;
     }
   };
 }

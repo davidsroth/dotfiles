@@ -7,219 +7,227 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   createBrokerBridge,
-  writeBrokerFrame,
   SHARED_BROKER_CLIENT_MESSAGE_TYPES,
+  writeBrokerFrame,
 } from "../relay/broker-bridge.ts";
-import { writeMessage, createMessageReader } from "../framing.ts";
+import { stableControlSessionId, stableVirtualSessionId } from "../relay/relay.ts";
 import type { IntercomMessage } from "../types.ts";
 
-type Flavor = "baseline" | "fork";
+interface MockOptions {
+  registrationDelayMs?: number;
+  registrationError?: string;
+  neverRegister?: boolean;
+  closeOnList?: boolean;
+  closeOnSend?: boolean;
+}
 
 interface MockBroker {
   socketPath: string;
-  /** Every client message type seen across all connections, in order. */
-  received: string[];
-  /** True if the broker dropped a connection due to an unknown verb. */
-  droppedOnUnknown: boolean;
+  frames: Array<{ type: string } & Record<string, unknown>>;
   close(): Promise<void>;
 }
 
-/**
- * A mock broker in one of two flavors:
- *  - "baseline": upstream nicobailon/pi-intercom — `registered` has no
- *    `version`, `delivered` has no `recipientId`, and an UNKNOWN client verb
- *    destroys the connection (mirrors upstream's throw → onError → destroy).
- *  - "fork": @davidroth/pi-intercom — `registered.version` + `delivered.recipientId`,
- *    and unknown verbs are ignored (connection survives).
- *
- * Both speak the identical framing + socket protocol the real brokers share.
- */
-function startMockBroker(flavor: Flavor): Promise<MockBroker> {
-  const dir = mkdtempSync(join(tmpdir(), "tailnet-broker-"));
-  const socketPath = join(dir, "broker.sock");
-  const received: string[] = [];
-  let droppedOnUnknown = false;
+/** Independent v0.9 framing implementation: tests do not import relay framing. */
+function encode(value: unknown): Buffer {
+  const payload = Buffer.from(JSON.stringify(value));
+  const result = Buffer.allocUnsafe(payload.length + 4);
+  result.writeUInt32BE(payload.length, 0);
+  payload.copy(result, 4);
+  return result;
+}
 
+function reader(onFrame: (frame: { type: string } & Record<string, unknown>) => void) {
+  let buffered = Buffer.alloc(0);
+  return (chunk: Buffer) => {
+    buffered = Buffer.concat([buffered, chunk]);
+    while (buffered.length >= 4) {
+      const length = buffered.readUInt32BE(0);
+      if (buffered.length < length + 4) return;
+      const value = JSON.parse(buffered.subarray(4, length + 4).toString("utf8"));
+      buffered = buffered.subarray(length + 4);
+      onFrame(value);
+    }
+  };
+}
+
+function startMockBroker(options: MockOptions = {}): Promise<MockBroker> {
+  const socketPath = join(mkdtempSync(join(tmpdir(), "tailnet-v092-")), "broker.sock");
+  const frames: MockBroker["frames"] = [];
+  const sockets = new Set<net.Socket>();
   const server = net.createServer((socket) => {
-    let sessionId: string | null = null;
-    const reader = createMessageReader(
-      (raw) => {
-        const m = raw as { type: string } & Record<string, unknown>;
-        received.push(m.type);
-        switch (m.type) {
-          case "register": {
-            sessionId = randomUUID();
-            const reply: Record<string, unknown> = { type: "registered", sessionId };
-            if (flavor === "fork") reply.version = 1;
-            writeMessage(socket, reply);
-            break;
-          }
-          case "list": {
-            writeMessage(socket, {
-              type: "sessions",
-              requestId: m.requestId,
-              sessions: [],
-            });
-            break;
-          }
-          case "send": {
-            const message = m.message as IntercomMessage;
-            const reply: Record<string, unknown> = {
-              type: "delivered",
-              messageId: message.id,
-            };
-            if (flavor === "fork") reply.recipientId = "recipient-xyz";
-            writeMessage(socket, reply);
-            break;
-          }
-          case "unregister": {
-            socket.end();
-            break;
-          }
-          default: {
-            // Upstream throws here → connection dropped. Fork logs & ignores.
-            if (flavor === "baseline") {
-              droppedOnUnknown = true;
-              socket.destroy();
-            }
-          }
-        }
-      },
-      () => socket.destroy(),
-    );
-    socket.on("data", reader);
+    sockets.add(socket);
+    socket.on("close", () => sockets.delete(socket));
     socket.on("error", () => {});
+    socket.on("data", reader((frame) => {
+      frames.push(frame);
+      switch (frame.type) {
+        case "register": {
+          if (options.neverRegister) return;
+          const response = options.registrationError
+            ? { type: "error", error: options.registrationError }
+            : {
+                type: "registered",
+                sessionId: frame.sessionId,
+                features: ["extension-bus-v1", "aside-v1"],
+              };
+          setTimeout(() => socket.write(encode(response)), options.registrationDelayMs ?? 0);
+          break;
+        }
+        case "list":
+          if (options.closeOnList) socket.destroy();
+          else socket.write(encode({ type: "sessions", requestId: frame.requestId, sessions: [] }));
+          break;
+        case "send":
+          if (options.closeOnSend) socket.destroy();
+          else {
+            const message = frame.message as IntercomMessage;
+            socket.write(encode({ type: "delivered", messageId: message.id }));
+          }
+          break;
+        case "unregister":
+          socket.end();
+          break;
+        default:
+          socket.destroy();
+      }
+    }));
   });
 
-  return new Promise((resolve) => {
-    server.listen(socketPath, () => {
-      resolve({
-        socketPath,
-        received,
-        get droppedOnUnknown() {
-          return droppedOnUnknown;
-        },
-        close: () =>
-          new Promise<void>((res) => server.close(() => res())),
-      });
-    });
+  return new Promise((resolve) => server.listen(socketPath, () => resolve({
+    socketPath,
+    frames,
+    close: async () => {
+      for (const socket of sockets) socket.destroy();
+      await new Promise<void>((done) => server.close(() => done()));
+    },
+  })));
+}
+
+function bridgeFor(broker: MockBroker, registrationTimeoutMs = 500): ReturnType<typeof createBrokerBridge> {
+  return createBrokerBridge({
+    socketPath: broker.socketPath,
+    controlSessionId: "pi-tailnet-control-v1-test",
+    pid: process.pid,
+    registrationTimeoutMs,
   });
 }
 
-function makeMessage(text: string): IntercomMessage {
-  return { id: randomUUID(), timestamp: Date.now(), content: { text } };
+function virtual(bridge: ReturnType<typeof createBrokerBridge>, suffix = "test") {
+  return bridge.openVirtualSession({
+    sessionId: `pi-tailnet-virtual-v1-${suffix}`,
+    displayName: "worker@nimbus",
+    cwd: "/tmp",
+    model: "tailnet:nimbus",
+    features: ["aside-v1"],
+    onMessage: () => {},
+  });
 }
 
-// --- writeBrokerFrame guard (ADR 0001, decision 1) ----------------------
+function message(): IntercomMessage {
+  return {
+    id: randomUUID(),
+    timestamp: Date.now(),
+    senderSequence: 7,
+    brokerReceivedAt: 10,
+    brokerDeliveredAt: 11,
+    receiverReceivedAt: 12,
+    injectedAt: 13,
+    supersedes: "old",
+    retryOf: "retry",
+    replyTo: "question",
+    expectsReply: true,
+    aside: true,
+    replyError: "portable error",
+    content: { text: "hello" },
+  };
+}
 
-test("writeBrokerFrame: rejects any type outside the shared subset", () => {
-  const writes: unknown[] = [];
-  const fake = { write: (b: unknown) => (writes.push(b), true) } as unknown as net.Socket;
-
-  for (const type of SHARED_BROKER_CLIENT_MESSAGE_TYPES) {
-    assert.doesNotThrow(() => writeBrokerFrame(fake, { type }));
-  }
-  // A plausible future / fork-only verb must be refused at the writer.
-  assert.throws(
-    () => writeBrokerFrame(fake, { type: "post" as never }),
-    /not in the dual-broker shared subset/,
-  );
-  assert.throws(
-    () => writeBrokerFrame(fake, { type: "presence" as never }),
-    /shared subset/,
-  );
+test("relay registration IDs are deterministic and scoped by host/remote ID", () => {
+  assert.equal(stableControlSessionId("Nimbus"), stableControlSessionId("nimbus"));
+  assert.equal(stableVirtualSessionId("Nimbus", "remote-1"), stableVirtualSessionId("nimbus", "remote-1"));
+  assert.notEqual(stableVirtualSessionId("nimbus", "remote-1"), stableVirtualSessionId("nimbus", "remote-2"));
+  assert.notEqual(stableVirtualSessionId("nimbus", "remote-1"), stableVirtualSessionId("aurora", "remote-1"));
 });
 
-// --- Dual-flavor end-to-end through a real socket -----------------------
+test("writer preserves the strict four-verb allowlist", () => {
+  const socket = { write: () => true } as unknown as net.Socket;
+  for (const type of SHARED_BROKER_CLIENT_MESSAGE_TYPES) {
+    assert.doesNotThrow(() => writeBrokerFrame(socket, { type }));
+  }
+  assert.throws(() => writeBrokerFrame(socket, { type: "presence" as never }), /minimal broker subset/);
+});
 
-for (const flavor of ["baseline", "fork"] as const) {
-  test(`broker-bridge: registers, lists, and delivers a DM against the ${flavor} broker`, async () => {
-    const broker = await startMockBroker(flavor);
-    const bridge = createBrokerBridge({ socketPath: broker.socketPath, pid: process.pid });
-
-    try {
-      await bridge.start();
-
-      // Flavor detection: fork advertises version, baseline does not.
-      // (poll briefly: `registered` arrives on a frame after connect)
-      await waitFor(() => bridge.brokerProtocolVersion !== undefined);
-      // Give the registered frame a tick to land.
-      await delay(20);
-      if (flavor === "fork") {
-        assert.equal(bridge.brokerProtocolVersion, 1);
-      } else {
-        assert.equal(bridge.brokerProtocolVersion, null);
-      }
-
-      // list works on both.
-      const sessions = await bridge.refreshLocalSessions();
-      assert.deepEqual(sessions, []);
-
-      // virtual session register → sessionId resolves; send → delivered.
-      const received: Array<{ text: string }> = [];
-      const vs = bridge.openVirtualSession({
-        displayName: "worker@nimbus",
-        cwd: "/tmp",
-        model: "tailnet:nimbus",
-        onMessage: (_from, msg) => received.push({ text: msg.content.text }),
-      });
-      const id = await vs.sessionId;
-      assert.ok(id && typeof id === "string");
-
-      const result = await vs.send("planner", makeMessage("hi from A"));
-      assert.deepEqual(result, { delivered: true });
-
-      vs.close();
-    } finally {
-      bridge.close();
-      await broker.close();
-    }
-  });
-}
-
-// --- The relay never trips upstream's drop-on-unknown path --------------
-
-test("broker-bridge: normal traffic emits only shared-subset verbs (no upstream drop)", async () => {
-  const broker = await startMockBroker("baseline");
-  const bridge = createBrokerBridge({ socketPath: broker.socketPath, pid: process.pid });
-
+test("start waits for registered and records broker features", async () => {
+  const broker = await startMockBroker({ registrationDelayMs: 60 });
+  const bridge = bridgeFor(broker);
   try {
-    await bridge.start();
-    await bridge.refreshLocalSessions();
-    const vs = bridge.openVirtualSession({
-      displayName: "worker@nimbus",
-      cwd: "/tmp",
-      model: "tailnet:nimbus",
-      onMessage: () => {},
-    });
-    await vs.sessionId;
-    await vs.send("planner", makeMessage("hello"));
-    vs.close();
-    await delay(20);
-
-    // The strict broker never saw a verb it didn't understand.
-    assert.equal(broker.droppedOnUnknown, false);
-    const sharedSet = new Set<string>(SHARED_BROKER_CLIENT_MESSAGE_TYPES);
-    const offenders = broker.received.filter((t) => !sharedSet.has(t));
-    assert.deepEqual(offenders, [], `bridge emitted non-shared verbs: ${offenders.join(", ")}`);
-    // sanity: it really did exercise the protocol.
-    assert.ok(broker.received.includes("register"));
-    assert.ok(broker.received.includes("list"));
-    assert.ok(broker.received.includes("send"));
+    let ready = false;
+    const started = bridge.start().then(() => { ready = true; });
+    await new Promise((resolve) => setTimeout(resolve, 15));
+    assert.equal(ready, false);
+    await started;
+    assert.deepEqual([...bridge.brokerFeatures], ["extension-bus-v1", "aside-v1"]);
+    assert.equal(broker.frames[0]?.sessionId, "pi-tailnet-control-v1-test");
   } finally {
     bridge.close();
     await broker.close();
   }
 });
 
-function delay(ms: number): Promise<void> {
-  return new Promise((res) => setTimeout(res, ms));
-}
+test("virtual send waits for stable registration and preserves v0.9 plus aside fields", async () => {
+  const broker = await startMockBroker({ registrationDelayMs: 40 });
+  const bridge = bridgeFor(broker);
+  try {
+    await bridge.start();
+    const handle = virtual(bridge, "stable");
+    const payload = message();
+    const send = handle.send("planner", payload);
+    assert.equal(await handle.sessionId, "pi-tailnet-virtual-v1-stable");
+    assert.deepEqual(await send, { delivered: true });
 
-async function waitFor(pred: () => boolean, timeoutMs = 1000): Promise<void> {
-  const start = Date.now();
-  while (!pred()) {
-    if (Date.now() - start > timeoutMs) throw new Error("waitFor timed out");
-    await delay(5);
+    const virtualRegister = broker.frames.find((frame) =>
+      frame.type === "register" && frame.sessionId === "pi-tailnet-virtual-v1-stable"
+    );
+    assert.deepEqual((virtualRegister?.session as { features?: string[] }).features, ["aside-v1"]);
+    const registerIndex = broker.frames.indexOf(virtualRegister!);
+    const sendFrame = broker.frames.find((frame) => frame.type === "send");
+    assert.ok(registerIndex >= 0 && broker.frames.indexOf(sendFrame!) > registerIndex);
+    assert.deepEqual(sendFrame?.message, payload);
+    handle.close();
+  } finally {
+    bridge.close();
+    await broker.close();
   }
-}
+});
+
+test("registration errors and timeouts reject start", async () => {
+  const errorBroker = await startMockBroker({ registrationError: "Too many registered intercom sessions" });
+  const errorBridge = bridgeFor(errorBroker);
+  await assert.rejects(errorBridge.start(), /Too many registered/);
+  errorBridge.close();
+  await errorBroker.close();
+
+  const timeoutBroker = await startMockBroker({ neverRegister: true });
+  const timeoutBridge = bridgeFor(timeoutBroker, 30);
+  await assert.rejects(timeoutBridge.start(), /registration timed out/);
+  timeoutBridge.close();
+  await timeoutBroker.close();
+});
+
+test("close rejects pending list and send operations", async () => {
+  const listBroker = await startMockBroker({ closeOnList: true });
+  const listBridge = bridgeFor(listBroker);
+  await listBridge.start();
+  await assert.rejects(listBridge.refreshLocalSessions(), /closed/);
+  listBridge.close();
+  await listBroker.close();
+
+  const sendBroker = await startMockBroker({ closeOnSend: true });
+  const sendBridge = bridgeFor(sendBroker);
+  await sendBridge.start();
+  const handle = virtual(sendBridge, "close");
+  await handle.sessionId;
+  await assert.rejects(handle.send("planner", message()), /closed/);
+  sendBridge.close();
+  await sendBroker.close();
+});

@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { resolveRelaySelf } from "../relay/relay.ts";
 import { parseStatusForTest, parseWhoisForTest } from "../tailscale.ts";
 
 // Trimmed fixture of `tailscale status --json` output. The real CLI
@@ -33,6 +34,16 @@ test("parseStatus: extracts self short host and IPv4", () => {
   assert.equal(status!.self.host, "nimbus");
   assert.equal(status!.self.ipv4, "100.64.0.2");
   assert.equal(status!.self.online, true);
+});
+
+test("host override retains the Tailscale self IPv4 required for binding", () => {
+  const status = parseStatusForTest(FIXTURE);
+  assert.ok(status);
+  assert.deepEqual(resolveRelaySelf(status, "Test-Relay"), {
+    host: "test-relay",
+    ipv4: "100.64.0.2",
+    online: true,
+  });
 });
 
 test("parseStatus: enumerates peers, lowercases hostnames", () => {

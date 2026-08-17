@@ -1,6 +1,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { createMessageReader, writeMessage, MAX_FRAME_BYTES, MAX_OUTBOUND_BUFFER_BYTES, isSocketBackedUp } from "../framing.ts";
+import {
+  BROKER_MAX_FRAME_BYTES,
+  createMessageReader,
+  writeMessage,
+  MAX_FRAME_BYTES,
+  MAX_OUTBOUND_BUFFER_BYTES,
+  isSocketBackedUp,
+} from "../framing.ts";
 import type { Socket } from "node:net";
 
 /** Fake socket that records every write into a buffer array. */
@@ -73,6 +80,23 @@ test("framing: writeMessage throws on an oversized payload", () => {
   const { socket } = fakeSocket();
   const huge = "x".repeat(MAX_FRAME_BYTES + 1);
   assert.throws(() => writeMessage(socket, { type: "tailnet_dm", blob: huge }), /Refusing to send/);
+});
+
+test("framing: local broker has an independent fixed 1 MiB boundary", () => {
+  const exact = "x".repeat(BROKER_MAX_FRAME_BYTES - 2); // JSON string adds two quotes.
+  assert.doesNotThrow(() => writeMessage(fakeSocket().socket, exact, BROKER_MAX_FRAME_BYTES, "local broker"));
+  assert.throws(
+    () => writeMessage(fakeSocket().socket, `${exact}x`, BROKER_MAX_FRAME_BYTES, "local broker"),
+    /max 1048576/,
+  );
+
+  let captured: Error | null = null;
+  const brokerReader = createMessageReader(() => {}, (error) => { captured = error; }, BROKER_MAX_FRAME_BYTES, "local broker");
+  const header = Buffer.alloc(4);
+  header.writeUInt32BE(BROKER_MAX_FRAME_BYTES + 1);
+  brokerReader(header);
+  assert.ok(captured);
+  assert.match((captured as unknown as Error).message, /local broker frame too large/);
 });
 
 test("framing: isSocketBackedUp tracks writableLength against the high-water mark", () => {

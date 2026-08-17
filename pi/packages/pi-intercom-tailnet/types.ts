@@ -1,10 +1,8 @@
-// Local mirrors of the pi-intercom wire shapes. Kept as a separate
-// declaration so we don't reach into pi-intercom's `node_modules` from
-// the relay daemon (which runs as its own process and may not have
-// pi-intercom's deps resolved on every launch).
-//
-// If these drift from pi-intercom's `types.ts` we'll catch it at
-// runtime when JSON deserialisation rejects an unexpected field.
+// Additive local mirrors of the pi-intercom v0.9.2 wire shapes plus the
+// portable aside-v1 fields. Unknown optional JSON fields are intentionally
+// preserved by relay forwarding rather than stripped by schema conversion.
+
+export const ASIDE_FEATURE = "aside-v1";
 
 export interface SessionInfo {
   id: string;
@@ -15,7 +13,23 @@ export interface SessionInfo {
   startedAt: number;
   lastActivity: number;
   status?: string;
+  peerUid?: number;
+  trustedLocal?: boolean;
+  features?: string[];
+  contextPct?: number;
+  contextTokens?: number;
+  contextWindow?: number;
 }
+
+export interface ExtensionCapability {
+  namespace: string;
+  ownerEligible: boolean;
+}
+
+/** Registration inputs exclude fields owned by the broker. */
+export type SessionRegistration = Omit<SessionInfo, "id" | "peerUid" | "trustedLocal"> & {
+  extensions?: ExtensionCapability[];
+};
 
 export interface Attachment {
   type: "file" | "snippet" | "context";
@@ -27,15 +41,24 @@ export interface Attachment {
 export interface IntercomMessage {
   id: string;
   timestamp: number;
+  senderSequence?: number;
+  brokerReceivedAt?: number;
+  brokerDeliveredAt?: number;
+  receiverReceivedAt?: number;
+  injectedAt?: number;
+  supersedes?: string;
+  retryOf?: string;
   replyTo?: string;
   expectsReply?: boolean;
+  aside?: boolean;
+  replyError?: string;
   content: {
     text: string;
     attachments?: Attachment[];
   };
 }
 
-// Tailnet-only protocol additions (§6 of the scope doc).
+// Tailnet protocol additions.
 
 export interface TailnetHello {
   type: "tailnet_hello";
@@ -46,16 +69,14 @@ export interface TailnetHello {
 
 export interface TailnetDM {
   type: "tailnet_dm";
-  // Both endpoints carry the @host suffix; the receiver strips its own
-  // host to find/register the matching local virtual session.
-  fromName: string;        // e.g. "planner@nimbus"
-  fromHost: string;        // MagicDNS short name of sender's host
-  fromSessionId: string;   // sender's local broker session id
-  toName: string;          // e.g. "worker@aurora" (display only)
-  toHost: string;          // MagicDNS short name (the receiver)
-  toResolver:              // how the receiver should find a local target
-    | { kind: "name"; name: string }      // bare name (no @host suffix)
-    | { kind: "sessionId"; id: string };  // exact session id
+  fromName: string;
+  fromHost: string;
+  fromSessionId: string;
+  toName: string;
+  toHost: string;
+  toResolver:
+    | { kind: "name"; name: string }
+    | { kind: "sessionId"; id: string };
   message: IntercomMessage;
 }
 
@@ -63,7 +84,6 @@ export interface TailnetDeliveryAck {
   type: "tailnet_delivery_ack";
   messageId: string;
   delivered: boolean;
-  // Opaque — see §4.2: collapse `denied` / `not_found` / `pending` here.
   reason?: string;
 }
 

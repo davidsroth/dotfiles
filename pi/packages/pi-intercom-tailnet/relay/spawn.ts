@@ -1,19 +1,14 @@
 // Auto-spawn the tailnet relay if config has it enabled.
 //
-// We deliberately keep this very thin: spawn once per pi extension
-// activation, write the pid file from the relay process itself, and
-// just check the pid file to avoid double-spawning. No locking dance
-// like pi-intercom does for its broker — the relay is opt-in and the
-// race window is tiny.
+// The relay atomically claims its PID file before registering, while this
+// launcher performs the cheap already-running check to avoid needless spawns.
 
 import { spawn } from "child_process";
 import { existsSync, readFileSync } from "fs";
-import { join, dirname } from "path";
+import { dirname, isAbsolute, join, resolve } from "path";
 import { fileURLToPath } from "url";
-import { homedir } from "os";
+import { getRelayPidPath } from "../config.js";
 
-const INTERCOM_DIR = join(homedir(), ".pi/agent/intercom");
-const RELAY_PID_PATH = join(INTERCOM_DIR, "tailnet-relay.pid");
 const EXTENSION_DIR = join(dirname(fileURLToPath(import.meta.url)), "..");
 const RELAY_SCRIPT = join(EXTENSION_DIR, "relay", "relay.ts");
 
@@ -38,19 +33,28 @@ const RELAY_ENV_KEYS = new Set([
 ]);
 
 /** Build the relay environment without inheriting unrelated API keys/tokens. */
-export function buildRelayEnv(source: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+export function buildRelayEnv(
+  source: NodeJS.ProcessEnv = process.env,
+  cwd: string = process.cwd(),
+): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {};
   for (const [key, value] of Object.entries(source)) {
     if (value === undefined) continue;
     if (RELAY_ENV_KEYS.has(key) || key.startsWith("PI_INTERCOM_")) env[key] = value;
   }
+  const configuredAgentDir = source.PI_CODING_AGENT_DIR?.trim();
+  if (configuredAgentDir) {
+    env.PI_CODING_AGENT_DIR = isAbsolute(configuredAgentDir)
+      ? configuredAgentDir
+      : resolve(cwd, configuredAgentDir);
+  }
   return env;
 }
 
-export function isRelayRunning(): boolean {
-  if (!existsSync(RELAY_PID_PATH)) return false;
+export function isRelayRunning(pidPath: string = getRelayPidPath()): boolean {
+  if (!existsSync(pidPath)) return false;
   try {
-    const pid = Number.parseInt(readFileSync(RELAY_PID_PATH, "utf-8").trim(), 10);
+    const pid = Number.parseInt(readFileSync(pidPath, "utf-8").trim(), 10);
     return pidRunning(pid);
   } catch {
     return false;

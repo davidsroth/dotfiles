@@ -47,55 +47,104 @@ export interface PeerLink extends EventEmitter {
   close(): void;
 }
 
-function isHello(value: unknown): value is TailnetHello {
-  if (!value || typeof value !== "object") return false;
-  const v = value as Record<string, unknown>;
-  return v.type === "tailnet_hello"
-    && v.protocolVersion === 1
-    && typeof v.host === "string"
-    && v.host.length > 0;
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function isDM(value: unknown): value is TailnetDM {
-  if (!value || typeof value !== "object") return false;
-  const v = value as Record<string, unknown>;
-  return v.type === "tailnet_dm"
-    && typeof v.fromName === "string"
-    && typeof v.fromHost === "string"
-    && typeof v.fromSessionId === "string"
-    && typeof v.toName === "string"
-    && typeof v.toHost === "string"
-    && typeof v.toResolver === "object"
-    && v.message !== undefined;
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0;
+}
+
+function optional(value: Record<string, unknown>, key: string, check: (item: unknown) => boolean): boolean {
+  return value[key] === undefined || check(value[key]);
+}
+
+function isAttachment(value: unknown): boolean {
+  if (!isRecord(value)) return false;
+  return (value.type === "file" || value.type === "snippet" || value.type === "context")
+    && isNonEmptyString(value.name)
+    && typeof value.content === "string"
+    && optional(value, "language", (item) => typeof item === "string");
+}
+
+function isMessage(value: unknown): boolean {
+  if (!isRecord(value) || !isNonEmptyString(value.id) || !Number.isFinite(value.timestamp)) return false;
+  if (!isRecord(value.content) || typeof value.content.text !== "string") return false;
+  if (!optional(value.content, "attachments", (items) => Array.isArray(items) && items.every(isAttachment))) return false;
+  for (const key of ["senderSequence", "brokerReceivedAt", "brokerDeliveredAt", "receiverReceivedAt", "injectedAt"]) {
+    if (!optional(value, key, Number.isFinite)) return false;
+  }
+  for (const key of ["supersedes", "retryOf", "replyTo", "replyError"]) {
+    if (!optional(value, key, (item) => typeof item === "string")) return false;
+  }
+  return optional(value, "expectsReply", (item) => typeof item === "boolean")
+    && optional(value, "aside", (item) => typeof item === "boolean");
+}
+
+function isSession(value: unknown): value is SessionInfo {
+  if (!isRecord(value)) return false;
+  if (!isNonEmptyString(value.id) || typeof value.cwd !== "string" || typeof value.model !== "string") return false;
+  if (!Number.isFinite(value.pid) || !Number.isFinite(value.startedAt) || !Number.isFinite(value.lastActivity)) return false;
+  for (const key of ["name", "status"]) {
+    if (!optional(value, key, (item) => typeof item === "string")) return false;
+  }
+  for (const key of ["peerUid", "contextPct", "contextTokens", "contextWindow"]) {
+    if (!optional(value, key, Number.isFinite)) return false;
+  }
+  return optional(value, "trustedLocal", (item) => typeof item === "boolean")
+    && optional(value, "features", (items) => Array.isArray(items) && items.every((item) => typeof item === "string"));
+}
+
+function isHello(value: unknown): value is TailnetHello {
+  if (!isRecord(value)) return false;
+  return value.type === "tailnet_hello"
+    && value.protocolVersion === 1
+    && isNonEmptyString(value.host)
+    && optional(value, "features", (items) => Array.isArray(items) && items.every((item) => typeof item === "string"));
+}
+
+/** Validate untrusted direct-message frames before dispatching to relay listeners. */
+export function isTailnetDM(value: unknown): value is TailnetDM {
+  if (!isRecord(value)) return false;
+  const resolver = value.toResolver;
+  const validResolver = isRecord(resolver)
+    && ((resolver.kind === "name" && isNonEmptyString(resolver.name))
+      || (resolver.kind === "sessionId" && isNonEmptyString(resolver.id)));
+  return value.type === "tailnet_dm"
+    && isNonEmptyString(value.fromName)
+    && isNonEmptyString(value.fromHost)
+    && isNonEmptyString(value.fromSessionId)
+    && isNonEmptyString(value.toName)
+    && isNonEmptyString(value.toHost)
+    && validResolver
+    && isMessage(value.message);
 }
 
 function isAck(value: unknown): value is TailnetDeliveryAck {
-  if (!value || typeof value !== "object") return false;
-  const v = value as Record<string, unknown>;
-  return v.type === "tailnet_delivery_ack"
-    && typeof v.messageId === "string"
-    && typeof v.delivered === "boolean";
+  if (!isRecord(value)) return false;
+  return value.type === "tailnet_delivery_ack"
+    && isNonEmptyString(value.messageId)
+    && typeof value.delivered === "boolean"
+    && optional(value, "reason", (item) => typeof item === "string");
 }
 
 function isSessionList(value: unknown): value is TailnetSessionList {
-  if (!value || typeof value !== "object") return false;
-  const v = value as Record<string, unknown>;
-  return v.type === "tailnet_sessions"
-    && Array.isArray(v.sessions);
+  return isRecord(value)
+    && value.type === "tailnet_sessions"
+    && Array.isArray(value.sessions)
+    && value.sessions.every(isSession);
 }
 
 function isSessionJoined(value: unknown): value is TailnetSessionJoined {
-  if (!value || typeof value !== "object") return false;
-  const v = value as Record<string, unknown>;
-  return v.type === "tailnet_session_joined"
-    && v.session !== undefined;
+  return isRecord(value)
+    && value.type === "tailnet_session_joined"
+    && isSession(value.session);
 }
 
 function isSessionLeft(value: unknown): value is TailnetSessionLeft {
-  if (!value || typeof value !== "object") return false;
-  const v = value as Record<string, unknown>;
-  return v.type === "tailnet_session_left"
-    && typeof v.sessionId === "string";
+  return isRecord(value)
+    && value.type === "tailnet_session_left"
+    && isNonEmptyString(value.sessionId);
 }
 
 function wireUp(
@@ -131,12 +180,16 @@ function wireUp(
         return;
       }
 
-      if (isDM(raw)) ee.emit("dm", raw);
+      if (isTailnetDM(raw)) ee.emit("dm", raw);
       else if (isAck(raw)) ee.emit("ack", raw);
       else if (isSessionList(raw)) ee.emit("sessionList", raw.sessions);
-      else if (isSessionJoined(raw)) ee.emit("sessionJoined", raw.session as SessionInfo);
+      else if (isSessionJoined(raw)) ee.emit("sessionJoined", raw.session);
       else if (isSessionLeft(raw)) ee.emit("sessionLeft", raw.sessionId);
-      // Unknown frame types ignored (forward-compat).
+      else if (isRecord(raw) && typeof raw.type === "string" && raw.type.startsWith("tailnet_")) {
+        // Known protocol namespace frames must be valid before they reach an
+        // EventEmitter listener. Unknown future namespaces remain ignorable.
+        socket.destroy(new Error(`Invalid ${raw.type} frame`));
+      }
     },
     (err) => {
       socket.destroy(err);

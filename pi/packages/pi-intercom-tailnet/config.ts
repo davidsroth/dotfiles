@@ -1,12 +1,38 @@
-// Configuration for the tailnet relay. Single JSON file at
-// ~/.pi/agent/intercom/tailnet.json. Missing file → relay disabled,
-// safe no-op.
+// Configuration for the tailnet relay. The file follows pi-intercom's
+// PI_CODING_AGENT_DIR and defaults to ~/.pi/agent/intercom/tailnet.json.
 
 import { existsSync, readFileSync } from "fs";
 import { homedir } from "os";
-import { join } from "path";
+import { isAbsolute, join, resolve } from "path";
 
-export const TAILNET_CONFIG_PATH = join(homedir(), ".pi/agent/intercom/tailnet.json");
+export function getAgentDirPath(
+  env: NodeJS.ProcessEnv = process.env,
+  homeDir: string = homedir(),
+  cwd: string = process.cwd(),
+): string {
+  const configured = env.PI_CODING_AGENT_DIR?.trim();
+  if (!configured) return join(homeDir, ".pi/agent");
+  return isAbsolute(configured) ? configured : resolve(cwd, configured);
+}
+
+export function getIntercomDirPath(agentDir: string = getAgentDirPath()): string {
+  return join(agentDir, "intercom");
+}
+
+export function getTailnetConfigPath(agentDir: string = getAgentDirPath()): string {
+  return join(getIntercomDirPath(agentDir), "tailnet.json");
+}
+
+export function getBrokerSocketPath(agentDir: string = getAgentDirPath()): string {
+  return join(getIntercomDirPath(agentDir), "broker.sock");
+}
+
+export function getRelayPidPath(agentDir: string = getAgentDirPath()): string {
+  return join(getIntercomDirPath(agentDir), "tailnet-relay.pid");
+}
+
+/** @deprecated Prefer getTailnetConfigPath(), which observes runtime environment changes. */
+export const TAILNET_CONFIG_PATH = getTailnetConfigPath();
 export const TAILNET_DEFAULT_PORT = 4271;
 
 export interface TailnetConfig {
@@ -52,7 +78,7 @@ const defaults: TailnetConfig = {
   discoveryIntervalMs: 15_000,
 };
 
-export function loadTailnetConfig(path: string = TAILNET_CONFIG_PATH): TailnetConfig {
+export function loadTailnetConfig(path: string = getTailnetConfigPath()): TailnetConfig {
   if (!existsSync(path)) {
     return { ...defaults };
   }

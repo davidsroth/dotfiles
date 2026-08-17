@@ -1,6 +1,14 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mergeConfig, isPeerAllowed, normaliseHost } from "../config.ts";
+import {
+  getAgentDirPath,
+  getBrokerSocketPath,
+  getRelayPidPath,
+  getTailnetConfigPath,
+  isPeerAllowed,
+  mergeConfig,
+  normaliseHost,
+} from "../config.ts";
 
 const defaults = {
   enabled: false,
@@ -61,4 +69,14 @@ test("isPeerAllowed: case insensitive, exact match", () => {
 
 test("normaliseHost: trims and lowercases", () => {
   assert.equal(normaliseHost("  Nimbus  "), "nimbus");
+});
+
+test("runtime paths honor absolute and relative PI_CODING_AGENT_DIR", () => {
+  assert.equal(getAgentDirPath({}, "/Users/test", "/work"), "/Users/test/.pi/agent");
+  assert.equal(getAgentDirPath({ PI_CODING_AGENT_DIR: "/srv/pi" }, "/Users/test", "/work"), "/srv/pi");
+  const relative = getAgentDirPath({ PI_CODING_AGENT_DIR: "runtime/pi" }, "/Users/test", "/work");
+  assert.equal(relative, "/work/runtime/pi");
+  assert.equal(getTailnetConfigPath(relative), "/work/runtime/pi/intercom/tailnet.json");
+  assert.equal(getBrokerSocketPath(relative), "/work/runtime/pi/intercom/broker.sock");
+  assert.equal(getRelayPidPath(relative), "/work/runtime/pi/intercom/tailnet-relay.pid");
 });
