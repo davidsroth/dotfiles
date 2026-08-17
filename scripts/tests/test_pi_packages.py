@@ -29,8 +29,10 @@ class PiPackagesTest(unittest.TestCase):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(value) + "\n", encoding="utf-8")
 
-    def configure(self, *names):
-        packages = [f"../../dotfiles/pi/packages/{name}" for name in names]
+    def configure(self, *names, package_specs=None):
+        packages = package_specs or [
+            f"../../dotfiles/pi/packages/{name}" for name in names
+        ]
         self.write_json("pi/.pi/agent/settings.base.json", {"packages": packages})
         for name in names:
             self.write_json(f"pi/packages/{name}/package.json", {"name": name})
@@ -52,6 +54,40 @@ class PiPackagesTest(unittest.TestCase):
         result = self.run_runner("verify")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("2 local packages", result.stdout)
+
+    def test_verify_accepts_object_sources_and_npm_specs(self):
+        self.configure(
+            "one",
+            "two",
+            package_specs=[
+                {"source": "../../dotfiles/pi/packages/one", "skills": []},
+                "npm:example@1.0.0",
+                {"source": "npm:another-example@2.0.0", "skills": []},
+                "../../dotfiles/pi/packages/two",
+            ],
+        )
+        result = self.run_runner("verify")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("2 local packages", result.stdout)
+
+    def test_verify_rejects_malformed_object_source(self):
+        self.configure(
+            package_specs=[{"skills": []}],
+        )
+        result = self.run_runner("verify")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(
+            "Malformed Pi package spec at packages[0]: object source must be a non-empty string",
+            result.stderr,
+        )
+
+    def test_verify_rejects_non_string_object_source(self):
+        self.configure(
+            package_specs=[{"source": ["../../dotfiles/pi/packages/one"]}],
+        )
+        result = self.run_runner("verify")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("object source must be a non-empty string", result.stderr)
 
     def test_verify_rejects_missing_lockfile(self):
         self.configure("one")

@@ -42,8 +42,8 @@ check_settings_drift() {
 check_package_paths() {
   local settings="$PI_AGENT/settings.json"
 
-  if ! command -v jq >/dev/null 2>&1; then
-    FAIL "PACKAGE PATHS: jq not on PATH — cannot check packages"
+  if ! command -v python3 >/dev/null 2>&1; then
+    FAIL "PACKAGE PATHS: python3 not on PATH — cannot check packages"
     return
   fi
 
@@ -52,37 +52,99 @@ check_package_paths() {
     return
   fi
 
-  local pkg dir
-  while IFS= read -r pkg; do
-    # Skip npm: specifiers
-    [[ "$pkg" == npm:* ]] && continue
+  # Extract only validated source strings. In particular, never feed jq's raw
+  # rendering of an object package spec into shell path handling.
+  local package_sources status=0
+  package_sources="$(python3 - "$settings" 2>&1 <<'PY'
+import json
+import sys
 
-    if [[ "$pkg" == /* ]]; then
-      dir="$pkg"
+try:
+    with open(sys.argv[1], encoding="utf-8") as handle:
+        data = json.load(handle)
+except (OSError, json.JSONDecodeError) as error:
+    raise SystemExit(f"could not read settings: {error}")
+
+specs = data.get("packages", [])
+if not isinstance(specs, list):
+    raise SystemExit("settings field 'packages' must be an array")
+
+for index, spec in enumerate(specs):
+    if isinstance(spec, str):
+        source = spec
+    elif isinstance(spec, dict):
+        source = spec.get("source")
+        if not isinstance(source, str) or not source:
+            raise SystemExit(
+                f"malformed package spec at packages[{index}]: "
+                "object source must be a non-empty string"
+            )
+    else:
+        raise SystemExit(
+            f"malformed package spec at packages[{index}]: "
+            "expected a string or an object with a string source"
+        )
+
+    if not source:
+        raise SystemExit(f"malformed package spec at packages[{index}]: source must not be empty")
+    if "\n" in source or "\r" in source:
+        raise SystemExit(f"malformed package spec at packages[{index}]: source must not contain a newline")
+    if "\0" in source:
+        raise SystemExit(f"malformed package spec at packages[{index}]: source must not contain a NUL byte")
+    if not source.startswith("npm:"):
+        print(source)
+PY
+)" || status=$?
+  if [[ "$status" != 0 ]]; then
+    FAIL "PACKAGE PATHS: invalid settings package spec — ${package_sources//$'\n'/ }"
+    return
+  fi
+
+  local source dir dependency_status
+  while IFS= read -r source; do
+    [[ -n "$source" ]] || continue
+
+    if [[ "$source" == /* ]]; then
+      dir="$source"
     else
-      dir="$PI_AGENT/$pkg"
+      dir="$PI_AGENT/$source"
     fi
 
     if [[ ! -d "$dir" ]]; then
-      FAIL "PACKAGE PATHS: directory missing for package '$pkg' (resolved: $dir)"
+      FAIL "PACKAGE PATHS: directory missing for package '$source' (resolved: $dir)"
       continue
     fi
 
-    # If package.json declares dependencies but node_modules is absent, warn
     if [[ -f "$dir/package.json" ]]; then
-      if jq -e '.dependencies // empty | length > 0' "$dir/package.json" >/dev/null 2>&1; then
+      dependency_status="$(python3 - "$dir/package.json" 2>&1 <<'PY'
+import json
+import sys
+
+try:
+    with open(sys.argv[1], encoding="utf-8") as handle:
+        manifest = json.load(handle)
+except (OSError, json.JSONDecodeError) as error:
+    raise SystemExit(f"invalid package.json: {error}")
+
+print("has-runtime-dependencies" if manifest.get("dependencies") else "no-runtime-dependencies")
+PY
+)" || {
+        FAIL "PACKAGE PATHS: '$source' has an invalid package.json — ${dependency_status//$'\n'/ }"
+        continue
+      }
+      if [[ "$dependency_status" == "has-runtime-dependencies" ]]; then
         if [[ ! -d "$dir/node_modules" ]]; then
-          WARN "PACKAGE PATHS: '$pkg' has dependencies but node_modules is absent — run: bash install.sh (npm install step)"
+          WARN "PACKAGE PATHS: '$source' has dependencies but node_modules is absent — run: bash install.sh (npm install step)"
         else
-          PASS "PACKAGE PATHS: '$pkg' dir and node_modules present"
+          PASS "PACKAGE PATHS: '$source' dir and node_modules present"
         fi
       else
-        PASS "PACKAGE PATHS: '$pkg' dir present (no runtime deps)"
+        PASS "PACKAGE PATHS: '$source' dir present (no runtime deps)"
       fi
     else
-      PASS "PACKAGE PATHS: '$pkg' dir present"
+      PASS "PACKAGE PATHS: '$source' dir present"
     fi
-  done < <(jq -r '.packages[]' "$settings" 2>/dev/null)
+  done <<< "$package_sources"
 }
 
 # ---------------------------------------------------------------------------
@@ -165,7 +227,31 @@ check_stow_health() {
 }
 
 # ---------------------------------------------------------------------------
-# 6. AI TOOL RUNTIME STATE
+# 6. HERDR PI PATCH
+# ---------------------------------------------------------------------------
+check_herdr_pi_patch() {
+  local patcher="$REPO_ROOT/core/.config/herdr/bin/apply-herdr-pi-state-patch.py"
+
+  if [[ ! -f "$patcher" ]]; then
+    FAIL "HERDR PI PATCH: patcher missing at $patcher"
+    return
+  fi
+  if ! command -v python3 >/dev/null 2>&1; then
+    FAIL "HERDR PI PATCH: python3 not on PATH — cannot verify the managed integration"
+    return
+  fi
+
+  local output status=0
+  output="$(python3 "$patcher" --check 2>&1)" || status=$?
+  if [[ "$status" == 0 ]]; then
+    PASS "HERDR PI PATCH: exact reviewed v8 patch is installed"
+  else
+    FAIL "HERDR PI PATCH: ${output//$'\n'/ }"
+  fi
+}
+
+# ---------------------------------------------------------------------------
+# 7. AI TOOL RUNTIME STATE
 # ---------------------------------------------------------------------------
 check_runtime_state_locations() {
   local path
@@ -209,7 +295,7 @@ check_runtime_state_locations() {
 }
 
 # ---------------------------------------------------------------------------
-# 7. TOOLCHAIN
+# 8. TOOLCHAIN
 # ---------------------------------------------------------------------------
 check_toolchain() {
   if command -v jq >/dev/null 2>&1; then
@@ -235,7 +321,7 @@ check_toolchain() {
 }
 
 # ---------------------------------------------------------------------------
-# 8. PRIVATE FILE PERMISSIONS
+# 9. PRIVATE FILE PERMISSIONS
 # ---------------------------------------------------------------------------
 path_mode() {
   stat -f '%Lp' "$1" 2>/dev/null || stat -c '%a' "$1" 2>/dev/null || true
@@ -295,7 +381,7 @@ check_private_permissions() {
 }
 
 # ---------------------------------------------------------------------------
-# 9. SECRETS REPORT (info only, never values, never FAIL)
+# 10. SECRETS REPORT (info only, never values, never FAIL)
 # ---------------------------------------------------------------------------
 check_secrets() {
   local secrets=(
@@ -328,6 +414,7 @@ check_package_paths
 check_hooks
 check_memory_link
 check_stow_health
+check_herdr_pi_patch
 check_runtime_state_locations
 check_toolchain
 check_private_permissions

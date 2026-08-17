@@ -8,17 +8,28 @@
   "packages": [
     "../../dotfiles/pi/packages/pi-vim",
     "../../dotfiles/pi/packages/pi-subagents",
-    "../../dotfiles/pi/packages/pi-btw",
+    {
+      "source": "../../dotfiles/pi/packages/pi-btw",
+      "skills": []
+    },
     "../../dotfiles/pi/packages/pi-intercom",
     "../../dotfiles/pi/packages/pi-intercom-tailnet",
     "../../dotfiles/pi/packages/pi-qna",
     "../../dotfiles/pi/packages/pi-plan-review",
     "../../dotfiles/pi/packages/pi-memory",
-    "npm:@feniix/pi-notion@2.2.2",
-    "npm:pi-web-access@0.13.0"
+    "npm:pi-mcp-adapter@2.26.0",
+    {
+      "source": "npm:pi-web-access@0.13.0",
+      "skills": []
+    }
   ],
   "extensions": [
     "!advisor.ts"
+  ],
+  "skills": [
+    "-skills/sunsama-token",
+    "-skills/open-knowledge-discovery",
+    "-skills/open-knowledge-write-skill"
   ],
   "hideThinkingBlock": false,
   "doubleEscapeAction": "tree",

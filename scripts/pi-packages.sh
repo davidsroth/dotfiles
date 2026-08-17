@@ -17,27 +17,71 @@ command -v python3 >/dev/null 2>&1 || { echo "python3 is required" >&2; exit 1; 
 command -v node >/dev/null 2>&1 || { echo "node is required" >&2; exit 1; }
 command -v npm >/dev/null 2>&1 || { echo "npm is required" >&2; exit 1; }
 
+# Keep the package source alongside its resolved directory so errors identify
+# the setting to fix rather than only a derived path. NUL delimiters keep the
+# shell boundary safe even if an invalid JSON string contains whitespace.
 packages=()
-package_output="$(python3 - "$SETTINGS" "$REPO_ROOT" <<'PY'
-import json, pathlib, sys
+package_sources=()
+package_specs="$(mktemp)"
+trap 'rm -f "$package_specs"' EXIT
+if ! python3 - "$SETTINGS" "$REPO_ROOT" > "$package_specs" <<'PY'
+import json
+import pathlib
+import sys
+
 settings = pathlib.Path(sys.argv[1])
 root = pathlib.Path(sys.argv[2]).resolve()
 prefix = "../../dotfiles/pi/packages/"
-data = json.loads(settings.read_text(encoding="utf-8"))
-for spec in data.get("packages", []):
-    if not isinstance(spec, str) or spec.startswith("npm:"):
+
+try:
+    data = json.loads(settings.read_text(encoding="utf-8"))
+except (OSError, json.JSONDecodeError) as error:
+    raise SystemExit(f"Could not read Pi package settings: {error}")
+
+specs = data.get("packages", [])
+if not isinstance(specs, list):
+    raise SystemExit("Pi package settings field 'packages' must be an array")
+
+for index, spec in enumerate(specs):
+    if isinstance(spec, str):
+        source = spec
+    elif isinstance(spec, dict):
+        source = spec.get("source")
+        if not isinstance(source, str) or not source:
+            raise SystemExit(
+                f"Malformed Pi package spec at packages[{index}]: "
+                "object source must be a non-empty string"
+            )
+    else:
+        raise SystemExit(
+            f"Malformed Pi package spec at packages[{index}]: "
+            "expected a string or an object with a string source"
+        )
+
+    if not source:
+        raise SystemExit(f"Malformed Pi package spec at packages[{index}]: source must not be empty")
+    if "\0" in source:
+        raise SystemExit(f"Malformed Pi package spec at packages[{index}]: source must not contain a NUL byte")
+    if source.startswith("npm:"):
+        # Registry packages have no repository directory to inventory.
         continue
-    if not spec.startswith(prefix):
-        raise SystemExit(f"Unsupported local Pi package spec: {spec}")
-    name = spec.removeprefix(prefix)
+    if not source.startswith(prefix):
+        raise SystemExit(f"Unsupported local Pi package source at packages[{index}]: {source!r}")
+
+    name = source[len(prefix):]
     if not name or "/" in name or name in {".", ".."}:
-        raise SystemExit(f"Unsafe local Pi package spec: {spec}")
-    print(root / "pi" / "packages" / name)
+        raise SystemExit(f"Unsafe local Pi package source at packages[{index}]: {source!r}")
+
+    path = root / "pi" / "packages" / name
+    sys.stdout.buffer.write(source.encode("utf-8") + b"\0" + str(path).encode("utf-8") + b"\0")
 PY
-)"
-while IFS= read -r package; do
-  [[ -n "$package" ]] && packages+=("$package")
-done <<< "$package_output"
+then
+  exit 1
+fi
+while IFS= read -r -d '' source && IFS= read -r -d '' package; do
+  package_sources+=("$source")
+  packages+=("$package")
+done < "$package_specs"
 [[ ${#packages[@]} -gt 0 ]] || { echo "No local Pi packages configured" >&2; exit 1; }
 
 has_script() {
@@ -49,10 +93,18 @@ has_runtime_dependencies() {
 }
 
 verify_inventory() {
-  local package
-  for package in "${packages[@]}"; do
-    [[ -f "$package/package.json" ]] || { echo "Configured Pi package missing package.json: $package" >&2; return 1; }
-    [[ -f "$package/package-lock.json" ]] || { echo "Configured Pi package missing tracked lockfile: $package" >&2; return 1; }
+  local index package source
+  for index in "${!packages[@]}"; do
+    package="${packages[$index]}"
+    source="${package_sources[$index]}"
+    [[ -f "$package/package.json" ]] || {
+      echo "Configured Pi package '$source' missing package.json (resolved: $package)" >&2
+      return 1
+    }
+    [[ -f "$package/package-lock.json" ]] || {
+      echo "Configured Pi package '$source' missing tracked lockfile (resolved: $package)" >&2
+      return 1
+    }
   done
   [[ -f "$EXTENSIONS/package.json" && -f "$EXTENSIONS/package-lock.json" ]] || {
     echo "Hand-written Pi extensions require package.json and package-lock.json" >&2
@@ -71,13 +123,15 @@ verify_inventory() {
 }
 
 run_script() {
-  local script="$1" package
-  for package in "${packages[@]}"; do
+  local script="$1" index package source
+  for index in "${!packages[@]}"; do
+    package="${packages[$index]}"
+    source="${package_sources[$index]}"
     if has_script "$package" "$script"; then
-      echo "==> $(basename "$package"): npm run $script"
+      echo "==> $source: npm run $script"
       (cd "$package" && npm run "$script")
     else
-      echo "==> $(basename "$package"): no $script script (skipped)"
+      echo "==> $source: no $script script (skipped)"
     fi
   done
 }

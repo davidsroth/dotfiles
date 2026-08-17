@@ -52,8 +52,12 @@ if command -v jq >/dev/null 2>&1; then
     ((.[0] // {}) * (.[1] // {}) * (.[2] // {}))
     | if (.packages | type) == "array" then
         .packages |= map(
-          if type == "string" and startswith($prefix)
-          then $repo_root + "/" + ltrimstr($prefix)
+          if type == "string" and startswith($prefix) then
+            $repo_root + "/" + ltrimstr($prefix)
+          elif type == "object"
+            and (.source | type) == "string"
+            and (.source | startswith($prefix)) then
+            .source = $repo_root + "/" + (.source | ltrimstr($prefix))
           else .
           end
         )
@@ -97,12 +101,19 @@ def merge(left, right):
 settings = merge(merge(load(existing_path), load(base_path)), load(local_path))
 packages = settings.get("packages")
 if isinstance(packages, list):
-    settings["packages"] = [
-        os.path.join(repo_root, package[len(prefix):])
-        if isinstance(package, str) and package.startswith(prefix)
-        else package
-        for package in packages
-    ]
+    rewritten_packages = []
+    for package in packages:
+        if isinstance(package, str) and package.startswith(prefix):
+            package = os.path.join(repo_root, package[len(prefix):])
+        elif (
+            isinstance(package, dict)
+            and isinstance(package.get("source"), str)
+            and package["source"].startswith(prefix)
+        ):
+            package = dict(package)
+            package["source"] = os.path.join(repo_root, package["source"][len(prefix):])
+        rewritten_packages.append(package)
+    settings["packages"] = rewritten_packages
 
 with open(destination, "w", encoding="utf-8") as handle:
     json.dump(settings, handle, indent=2)

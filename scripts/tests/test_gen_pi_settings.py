@@ -57,6 +57,10 @@ class GenPiSettingsTest(unittest.TestCase):
             "nested": {"base": True},
             "packages": [
                 "../../dotfiles/pi/packages/pi-vim",
+                {
+                    "source": "../../dotfiles/pi/packages/pi-btw",
+                    "skills": [],
+                },
                 "npm:pi-web-access",
                 "/already/absolute",
             ],
@@ -72,6 +76,10 @@ class GenPiSettingsTest(unittest.TestCase):
             generated["packages"],
             [
                 str(self.root / "pi" / "packages" / "pi-vim"),
+                {
+                    "source": str(self.root / "pi" / "packages" / "pi-btw"),
+                    "skills": [],
+                },
                 "npm:pi-web-access",
                 "/already/absolute",
             ],
@@ -96,7 +104,8 @@ class GenPiSettingsTest(unittest.TestCase):
     def test_tracked_npm_packages_use_exact_versions(self):
         tracked_base = REPO_ROOT / "pi" / ".pi" / "agent" / "settings.base.json"
         packages = json.loads(tracked_base.read_text(encoding="utf-8"))["packages"]
-        npm_specs = [spec.removeprefix("npm:") for spec in packages if spec.startswith("npm:")]
+        sources = [package if isinstance(package, str) else package["source"] for package in packages]
+        npm_specs = [source.removeprefix("npm:") for source in sources if source.startswith("npm:")]
 
         self.assertGreater(len(npm_specs), 0)
         for spec in npm_specs:
