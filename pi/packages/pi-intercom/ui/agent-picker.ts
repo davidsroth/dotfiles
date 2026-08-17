@@ -1,109 +1,119 @@
 import type { KeybindingsManager, Theme } from "@earendil-works/pi-coding-agent";
-import type { Component, TUI } from "@earendil-works/pi-tui";
+import type { Component, KeyId, TUI } from "@earendil-works/pi-tui";
 import { Key, matchesKey } from "@earendil-works/pi-tui";
-import type { SessionInfo } from "../types.js";
-import { activityState, formatAge } from "./agent-picker-util.js";
-import { activityMarker, framedOverlay, hintLine, innerWidth } from "./frame.js";
-import { cwdLabel, middleTruncate, shortSessionId } from "./text.js";
+import { sameCwd } from "../cwd.ts";
+import { formatContextUsage } from "../format-context.ts";
+import type { SessionInfo } from "../types.ts";
+import {
+  activityState,
+  cwdLabel,
+  formatAge,
+  middleTruncate,
+  shortSessionId,
+  sortSessionsForPicker,
+} from "./agent-picker-util.ts";
+import { activityMarker, framedPicker } from "./agent-picker-frame.ts";
 
 function sessionName(session: SessionInfo): string {
   return session.name || "Unnamed session";
 }
 
 export class AgentPickerOverlay implements Component {
-  private tui: TUI;
-  private theme: Theme;
-  private keybindings: KeybindingsManager;
-  private currentSession: SessionInfo;
-  private sessions: SessionInfo[];
-  private done: (result: SessionInfo | undefined) => void;
   private selected = 0;
   private scrollTop = 0;
-  private maxVisibleRows = 12;
+  private readonly maxVisiblePeers = 10;
+  private currentSession: SessionInfo;
+  private sessions: SessionInfo[];
 
   constructor(
-    tui: TUI,
-    theme: Theme,
-    keybindings: KeybindingsManager,
+    private readonly tui: TUI,
+    private readonly theme: Theme,
+    private readonly keybindings: KeybindingsManager,
     currentSession: SessionInfo,
     sessions: SessionInfo[],
-    done: (result: SessionInfo | undefined) => void,
+    private readonly closeKey: KeyId,
+    private readonly done: (result: SessionInfo | undefined) => void,
   ) {
-    this.tui = tui;
-    this.theme = theme;
-    this.keybindings = keybindings;
     this.currentSession = currentSession;
-    this.sessions = sessions;
-    this.done = done;
+    this.sessions = sortSessionsForPicker(sessions);
   }
 
   invalidate(): void {}
 
-  /**
-   * Replace the session list while the overlay is open (driven by broker
-   * join/leave/presence events). Preserves the user's selection by id across
-   * the re-sort and requests a redraw so the change is visible immediately.
-   */
+  private peers(): SessionInfo[] {
+    return this.sessions.filter((session) => session.id !== this.currentSession.id);
+  }
+
+  /** Replace the live broker snapshot while retaining the selected peer by stable id. */
   setSessions(sessions: SessionInfo[]): void {
-    const selectedId = this.sessions[this.selected]?.id;
-    this.sessions = sessions;
-    if (selectedId) {
-      const index = this.sessions.findIndex((session) => session.id === selectedId);
-      this.selected = index >= 0 ? index : Math.min(this.selected, Math.max(0, this.sessions.length - 1));
-    } else {
-      this.selected = 0;
-    }
+    const previousPeers = this.peers();
+    const selectedId = previousPeers[this.selected]?.id;
+    const previousIndex = this.selected;
+    const self = sessions.find((session) => session.id === this.currentSession.id);
+    if (self) this.currentSession = self;
+    this.sessions = sortSessionsForPicker(sessions);
+
+    const nextPeers = this.peers();
+    const selectedIndex = selectedId ? nextPeers.findIndex((session) => session.id === selectedId) : -1;
+    this.selected = selectedIndex >= 0
+      ? selectedIndex
+      : Math.min(previousIndex, Math.max(0, nextPeers.length - 1));
     this.tui.requestRender();
   }
 
-  private selectedSession(): SessionInfo | undefined {
-    return this.sessions[this.selected];
-  }
-
   private move(delta: number): void {
-    const total = this.sessions.length;
-    if (total === 0) return;
-    this.selected = (this.selected + delta + total) % total;
+    const count = this.peers().length;
+    if (count === 0) return;
+    this.selected = (this.selected + delta + count) % count;
+    this.tui.requestRender();
   }
 
   handleInput(data: string): void {
     if (
-      matchesKey(data, Key.ctrlAlt("a"))
+      matchesKey(data, this.closeKey)
       || matchesKey(data, Key.escape)
       || matchesKey(data, Key.ctrl("c"))
       || data === "q"
+      || this.keybindings.matches(data, "tui.select.cancel")
     ) {
       this.done(undefined);
       return;
     }
 
-    if (this.sessions.length === 0) return;
+    const peers = this.peers();
+    if (peers.length === 0) return;
 
-    if (matchesKey(data, Key.shift(Key.tab)) || matchesKey(data, Key.up) || data === "k") {
+    if (
+      matchesKey(data, Key.shift(Key.tab))
+      || matchesKey(data, Key.up)
+      || data === "k"
+      || this.keybindings.matches(data, "tui.select.up")
+    ) {
       this.move(-1);
       return;
     }
-
-    if (matchesKey(data, Key.tab) || matchesKey(data, Key.down) || data === "j") {
+    if (
+      matchesKey(data, Key.tab)
+      || matchesKey(data, Key.down)
+      || data === "j"
+      || this.keybindings.matches(data, "tui.select.down")
+    ) {
       this.move(1);
       return;
     }
-
     if (data === "g") {
       this.selected = 0;
+      this.tui.requestRender();
       return;
     }
-
     if (data === "G") {
-      this.selected = this.sessions.length - 1;
+      this.selected = peers.length - 1;
+      this.tui.requestRender();
       return;
     }
-
-    if (this.keybindings.matches(data, "tui.select.confirm") || matchesKey(data, Key.enter)) {
-      const session = this.selectedSession();
-      // The `[self]` row is shown for context but isn't a switch target
-      // (switching to your own pane is a no-op); ignore Enter on it.
-      if (session && session.id !== this.currentSession.id) this.done(session);
+    if (matchesKey(data, Key.enter) || this.keybindings.matches(data, "tui.select.confirm")) {
+      const peer = peers[this.selected];
+      if (peer) this.done(peer);
     }
   }
 
@@ -112,59 +122,63 @@ export class AgentPickerOverlay implements Component {
     const active = this.sessions.filter((session) => activityState(session, now) === "active").length;
     const stale = this.sessions.filter((session) => activityState(session, now) === "stale").length;
     const idle = this.sessions.length - active - stale;
-    const stalePart = stale > 0 ? `${this.theme.fg("dim", " · ")}${this.theme.fg("muted", `${stale} stale`)}` : "";
-    return `${this.theme.fg("dim", "Agents:")} ${this.theme.fg("accent", String(this.sessions.length))} ${this.theme.fg("muted", "connected")} ${this.theme.fg("dim", "·")} ${this.theme.fg("accent", String(active))} ${this.theme.fg("muted", "active")} ${this.theme.fg("dim", "·")} ${this.theme.fg("muted", `${idle} idle`)}${stalePart}`;
+    const staleText = stale ? ` · ${stale} stale` : "";
+    return `Agents: ${this.sessions.length} connected · ${active} active · ${idle} idle${staleText}`;
   }
 
-  private formatRow(session: SessionInfo, isSelected: boolean, inner: number): string {
-    const stateKind = activityState(session);
-    const statusText = session.status || "idle";
-    const pointer = isSelected ? this.theme.fg("accent", "▸") : " ";
-    const marker = activityMarker(this.theme, stateKind);
-    const state = stateKind === "active"
-      ? this.theme.fg("accent", statusText)
-      : this.theme.fg("muted", stateKind === "stale" ? `stale ${statusText}` : "idle");
-    const self = session.id === this.currentSession.id ? this.theme.fg("dim", " [self]") : "";
+  private formatRow(session: SessionInfo, selected: boolean, width: number, self: boolean): string {
+    const activity = activityState(session);
+    const pointer = selected ? this.theme.fg("accent", "▸") : " ";
     const titleText = `${sessionName(session)} (${shortSessionId(session.id)})`;
-    const title = isSelected ? this.theme.bold(this.theme.fg("text", titleText)) : this.theme.fg("text", titleText);
-    const project = this.theme.fg("muted", cwdLabel(session.cwd));
-    const status = stateKind === "stale"
-      ? `${this.theme.fg("dim", " · ")}${this.theme.fg("muted", `last update ${formatAge(session.lastActivity)}`)}`
+    const title = selected ? this.theme.bold(this.theme.fg("text", titleText)) : this.theme.fg("text", titleText);
+    const tags = [
+      self ? "self" : undefined,
+      !self && sameCwd(session.cwd, this.currentSession.cwd) ? "same cwd" : undefined,
+    ].filter((tag): tag is string => Boolean(tag));
+    const tagText = tags.length ? this.theme.fg("dim", ` [${tags.join(", ")}]`) : "";
+    const status = activity === "active"
+      ? this.theme.fg("accent", session.status || "active")
+      : this.theme.fg("muted", activity === "stale" ? `stale ${session.status || "active"}` : "idle");
+    const context = formatContextUsage(session);
+    const model = this.theme.fg("muted", `${session.model}${context}`);
+    const trust = !self && session.trustedLocal !== true
+      ? `${this.theme.fg("dim", " · ")}${this.theme.fg("warning", "unverified")}`
       : "";
-    const model = `${this.theme.fg("dim", " · ")}${this.theme.fg("muted", session.model)}`;
-    const cwdBudget = Math.max(10, Math.min(32, Math.floor(inner / 4)));
-    const path = this.theme.fg("dim", ` (${middleTruncate(session.cwd, cwdBudget)})`);
+    const project = cwdLabel(session.cwd);
+    const pathBudget = Math.max(10, Math.min(30, Math.floor(width / 4)));
+    const path = `${project} (${middleTruncate(session.cwd, pathBudget)})`;
+    const age = activity === "stale" ? ` · ${formatAge(session.lastActivity)}` : "";
 
-    return `${pointer} ${marker} ${state} ${title}${self} ${this.theme.fg("dim", "·")} ${project}${path}${model}${status}`;
+    return `${pointer} ${activityMarker(this.theme, activity)} ${title}${tagText} ${this.theme.fg("dim", "·")} ${status} ${this.theme.fg("dim", "·")} ${model}${trust} ${this.theme.fg("dim", "·")} ${this.theme.fg("dim", path + age)}`;
   }
 
   render(width: number): string[] {
-    const inner = innerWidth(width);
-    const bodyLines: string[] = [
-      hintLine(this.theme, ["enter: switch", "j/k: move", "g/G: ends", "q/esc: close"]),
+    const contentWidth = Math.max(1, width - 2);
+    const peers = this.peers();
+    const body: string[] = [
+      this.theme.fg("dim", " enter: switch · j/k: move · g/G: ends · q/esc: close"),
+      this.theme.fg("dim", " Self"),
+      this.formatRow(this.currentSession, false, contentWidth, true),
+      this.theme.fg("dim", " Peers"),
     ];
 
-    if (this.sessions.length === 0) {
-      bodyLines.push(this.theme.fg("muted", "  No intercom-connected Pi sessions"));
+    if (peers.length === 0) {
+      body.push(this.theme.fg("muted", "  No other intercom-connected Pi sessions"));
     } else {
-      if (this.selected < 0) this.selected = 0;
-      if (this.selected >= this.sessions.length) this.selected = this.sessions.length - 1;
-      const maxRows = Math.min(this.maxVisibleRows, Math.max(3, this.sessions.length));
+      this.selected = Math.max(0, Math.min(this.selected, peers.length - 1));
+      const visibleCount = Math.min(this.maxVisiblePeers, peers.length);
       if (this.selected < this.scrollTop) this.scrollTop = this.selected;
-      if (this.selected >= this.scrollTop + maxRows) this.scrollTop = this.selected - maxRows + 1;
-      this.scrollTop = Math.max(0, Math.min(this.scrollTop, Math.max(0, this.sessions.length - maxRows)));
+      if (this.selected >= this.scrollTop + visibleCount) this.scrollTop = this.selected - visibleCount + 1;
+      this.scrollTop = Math.max(0, Math.min(this.scrollTop, peers.length - visibleCount));
 
-      const windowSessions = this.sessions.slice(this.scrollTop, this.scrollTop + maxRows);
-      for (let index = 0; index < windowSessions.length; index++) {
-        const absoluteIndex = this.scrollTop + index;
-        bodyLines.push(this.formatRow(windowSessions[index]!, absoluteIndex === this.selected, inner));
-      }
-
-      if (this.scrollTop > 0 || this.scrollTop + maxRows < this.sessions.length) {
-        bodyLines.push(this.theme.fg("dim", ` ${this.selected + 1}/${this.sessions.length}`));
+      peers.slice(this.scrollTop, this.scrollTop + visibleCount).forEach((session, index) => {
+        body.push(this.formatRow(session, this.scrollTop + index === this.selected, contentWidth, false));
+      });
+      if (visibleCount < peers.length) {
+        body.push(this.theme.fg("dim", ` ${this.selected + 1}/${peers.length} peers`));
       }
     }
 
-    return framedOverlay(this.theme, this.formatSummary(), bodyLines, width);
+    return framedPicker(this.theme, this.formatSummary(), body, width);
   }
 }

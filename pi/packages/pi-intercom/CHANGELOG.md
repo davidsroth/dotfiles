@@ -5,47 +5,73 @@ All notable changes to the `pi-intercom` extension will be documented in this fi
 ## [Unreleased]
 
 ### Added
-- Protocol v2 machine-readable reply failures (`replyError`) so aside, ask, and supervisor failures surface as tool errors instead of successful answer text. The status view now also reports settled-reply guards, queued inbound messages, and active aside capacity.
-- `intercom({ action: "aside", to, message })` — ask a peer session a one-off question **without interrupting it and without adding anything to its history**. The asker side behaves like `ask` (sends, awaits the reply, returns the answer). On the recipient side an aside is answered out of band: instead of injecting the message into the timeline or triggering a turn, the session spins up a throwaway, fully in-memory forked sub-session seeded with a read-only snapshot of its current context, runs the question against it (with read-only inspection tools only: read/ls/find/grep), and sends the answer back through the normal reply path. The recipient's persisted history, on-screen transcript, and current turn are all untouched, and asides are answered **concurrently** (not idle-gated) so a busy peer still responds. In-flight asides are bounded by a timeout and aborted on shutdown/reload. Wire-level: `Message` gains an optional, forward-compatible `aside` flag (the broker forwards it verbatim; older peers treat the message as a normal send). New `side-session.ts` module; tests in `test/side-session.test.ts` plus an aside round-trip assertion in the integration suite.
-- Protocol forward-compatibility for the long-lived shared broker, which survives in-place package upgrades (a newer session can talk to an older broker, or vice-versa):
-  - Unknown message types are now **ignored instead of fatal**. Previously a single unrecognized frame threw in the dispatch `default`, reached the framing reader's error handler, and destroyed the socket — so the moment a newer broker broadcast a new event type, every older connected client was disconnected (and a newer client using a new request type was dropped by an older broker). Now an unknown type is logged/ignored and the connection survives; known-but-malformed messages are still rejected, and a pre-registration unknown type is still refused.
-  - A minimal version handshake: `register` carries an optional `version` and the broker echoes its `PROTOCOL_VERSION` in `registered`. The field is a backward/forward-compatible sibling (old peers omit it, new peers tolerate its absence). `intercom({ action: "status" })` now reports the broker's protocol version when known.
-- Agent picker overlay (`/agents-picker`, `Ctrl+Alt+I`, override via `PI_INTERCOM_AGENT_PICKER_KEY`) to list running pi sessions and switch to a peer's tmux pane. The list live-updates from broker join/leave/presence events while open, preserving the current selection across re-sorts. The `[self]` row also updates from local status changes (the broker never echoes a session's own presence back to it).
-- Unit tests for the agent picker's pure helpers (`test/agent-picker.test.ts`), the length-prefix framing reader/writer (`test/framing.test.ts`), and the shared wire-payload validators (`test/validation.test.ts`).
-- `intercom({ action: "status" })` now reports a fuller diagnostic view: reconnect attempts, pending outbound sends/lists, pending inbound asks, whether a reply is being awaited, the broker pid + liveness, and the socket/log paths.
-- The broker now runs a periodic liveness sweep (`PI_INTERCOM_REAPER_INTERVAL_MS`, default 30 s; set `0` to disable) that reaps any session whose owning process is gone (`process.kill(pid, 0)` → `ESRCH`). This catches SIGKILL'd peers whose socket `close` never fired and that never reconnect — the residual "zombie session" case the reconnect-eviction couldn't cover. A session is only reaped when its process is definitively gone (EPERM/invalid pids are left alone).
-- The broker now logs to `~/.pi/agent/intercom/broker.log` (previously its stdout/stderr were discarded to `/dev/null`), so session removals, errors, and shutdowns are inspectable. The log is truncated when it grows past 5 MiB. The Windows hidden-launcher path is unchanged.
+- Added `intercom({ action: "aside", to, message })` for one-off questions answered by a temporary read-only context fork without interrupting the recipient or writing to its history. Aside support is negotiated with `aside-v1` broker/session capabilities and refuses silent downgrade to older peers.
+- Added a live `/agents-picker` (`Ctrl+Alt+A`) for safely switching to trusted peer tmux panes.
+- Added offline status diagnostics, bounded inbound queues, broker log output, outbound frame/backpressure protection, and split-brain-safe broker lifecycle handling.
 
 ### Changed
-- Reworked the intercom UI so every surface shares one visual language with the PR picker / agent picker: a subtle `borderAccent` rounded card with the header/summary baked into the top border, a dim `·`-separated hint line, the `▸` selection pointer, and `●`/`◐`/`○` activity markers. The shared chrome (`topBorderWithTitle`, `padRight`, `framedOverlay`, `hintLine`, `activityMarker`) now lives in `ui/frame.ts`; `cwdLabel` moved to `ui/text.ts`.
-  - The `/intercom` (Alt+M) **recipient picker** is now a single activity-sorted list (your own session tagged `self`, with `same cwd` tags) navigable with vim keys (`j`/`k`, `g`/`G`, arrows, `Tab`/`Shift+Tab`), replacing the bright-bordered two-section "Current Session / Other Sessions" layout. It and the **compose overlay** now anchor bottom-center at full width like the agent picker.
-  - The **compose overlay** and the **inline received-message card** adopt the same frame, dropping the old bright `accent` borders and `├┤` dividers.
-- `intercom({ action: "status" })` and `{ action: "pending" }` now work when the broker is **down or unresponsive** — the failure modes you'd run them to diagnose. Both are local-only reads, so they run before the tool's connection gate (previously they short-circuited with "Intercom not connected", hiding the pid-liveness, socket/log paths, and reconnect/pending counters). When connected but the broker is hung, only the active-session line degrades ("unknown (broker not responding)") instead of the whole report being replaced by an error.
-- When `enabled: false`, the extension no longer registers the `intercom`/`contact_supervisor` tools, the `/intercom` and `/agents-picker` commands, or the `Alt+M` / picker shortcuts — so a disabled intercom doesn't add tools to the prompt only to fail at call time.
-- The runtime validators (`isAttachment`/`isMessage`/`isSessionInfo`/`isSessionRegistration`) now live in one shared `broker/validation.ts` imported by both the broker and the client, instead of byte-identical copies that could drift. `middleTruncate`/`shortSessionId` are likewise consolidated into `ui/text.ts`.
-- The agent picker's `[self]` row is no longer a switch target (pressing Enter on it is a no-op, matching the `Alt+M` overlay which excludes self). `sortPeerSessions` was renamed to `sortSessionsForPicker` (it always included the current session).
-- The test suite now uses Node's test-file auto-discovery (`tsx --test`) instead of a hand-maintained file list, so new `*.test.ts` files run automatically.
-- `send`, `ask`, and `contact_supervisor` no longer make a redundant `listSessions` round-trip to pre-resolve the target before sending. The broker already resolves id/name/prefix on `send`, so the raw target is passed through; a fast local check still rejects messaging your own session by exact id/name, and the broker authoritatively rejects self-targets (including by prefix). Reply matching already handles name-or-id, and the `recipientId` from the `delivered` ack drives `session_left` fast-cancel. `listSessions` is now reserved for the list action and the overlays. The subagent relay still resolves up front (it needs the id for local-vs-broker routing).
-- Presence status updates are now debounced (trailing, ~150 ms; override via `PI_INTERCOM_PRESENCE_DEBOUNCE_MS`) and skipped when the computed status string is unchanged. A tool-heavy turn previously emitted a presence write on every `tool_execution_start`/`end` (which the broker fanned out to every peer); bursts are now coalesced into a single trailing write per quiet window. Identity changes (connect/name/model) still flush immediately.
-- The broker now serializes a broadcast payload once and reuses the frame for every recipient, instead of re-running `JSON.stringify` + buffer-encode per peer.
-- The broker now rejects a message a session addresses to itself (by id, name, or id prefix) with a `Cannot message the current session` delivery failure, instead of delivering the message back to the sender.
-- The broker now evicts a prior registration from the same pi session on reconnect (keyed on `originSessionId`), so duplicate "zombie" rows no longer accumulate when a stale socket's `close` never fires.
-- The `delivered` ack now carries the broker-resolved `recipientId`, letting a pending ask fast-cancel on the recipient's `session_left` even when the target was addressed by name or id prefix.
+- Rebased `@davidroth/pi-intercom` on upstream `pi-intercom@0.9.2`, retaining upstream receipts, cancellation, mailbox delivery, stable IDs, trust controls, context presence, extension bus, and optimized rendering/framing.
+- Busy interactive sessions now hand inbound messages to Pi's native steering queue at the next safe model boundary instead of polling until the whole session is idle; the fork's bounded handoff queue, receipts, cancellation, supersede, and dedupe remain in place.
+- `send` now infers the sole pending inbound ask as its reply; blocking `ask`/`aside` calls require a live target, while non-blocking `send` retains mailbox delivery.
+- Session lists show shortest unique ID prefixes, and stale-ID guidance now tells agents to re-list and skip self-targets.
 
 ### Fixed
-- Broker replacement and shutdown now preserve a newer broker's socket and PID file, refuse to unlink sockets after indeterminate probe failures, and only classify missing/refused Unix sockets as stale.
-- Reply/request lifecycle hardening rejects duplicate in-flight IDs and nested ask threading, drops wrong-sender and late/duplicate replies, bounds active asides and queued requests, and cleans correlation state when queues evict messages.
-- Failed reconnects continue scheduling retries; overlapping shutdown/restart cannot clear the replacement runtime; and busy non-interactive sessions no longer send unsolicited replies to fire-and-forget messages.
-- The broker's outbound-buffer backpressure cap (`PI_INTERCOM_MAX_SOCKET_BUFFER_BYTES`) is now floored at twice the max frame size. Previously the 8 MiB default sat *below* the 16 MiB frame cap, so a single legal large message pushed a perfectly healthy recipient's socket buffer past the high-water mark; the next unrelated broadcast (e.g. a presence update) or send then reaped that recipient mid-delivery — dropping the in-flight message even though the sender had already received a `delivered` ack. The floor guarantees one in-flight + one queued max frame can't be mistaken for a wedged peer.
-- A message sized near the frame cap that exceeds it only once re-framed for delivery (the forward adds the sender's `SessionInfo`) is now rejected to the **sender** as `delivery_failed: "Message too large"`, instead of the bare write-catch destroying the **recipient** and misreporting it to the sender as `"Session disconnected"`. The forward frame is encoded before the write so an encode (size) failure is distinguished from a recipient socket failure — a sender can no longer evict an arbitrary healthy recipient by sizing a message in the `[cap − overhead, cap]` band.
-- The broker now honors write backpressure: a peer whose outbound buffer grows past a high-water mark (`PI_INTERCOM_MAX_SOCKET_BUFFER_BYTES`, default 8 MiB) is treated as dead and reaped, instead of letting Node buffer outbound data in broker memory without bound. `send` to such a peer returns a `delivery_failed` ("Recipient is not reading messages") rather than a false `delivered`.
-- The reply tracker now bounds its queue of pending turn contexts (drops oldest past a cap, age-prunes stale entries), and the extension caps the queue of inbound messages held while non-idle (drops oldest past 500). Prevents unbounded memory growth during a long busy/non-idle stretch with steady inbound traffic.
-- `broadcast` now isolates per-socket write failures (e.g. `ERR_STREAM_WRITE_AFTER_END` on a half-closed socket) and reaps the dead peer, instead of letting one bad socket abort delivery to the remaining sessions.
-- `unregister` now destroys the socket immediately to release the file descriptor instead of waiting for the end/close roundtrip.
-- The framing layer now caps frame size (16 MiB default, override via `PI_INTERCOM_MAX_FRAME_BYTES`). An oversized declared length is rejected as soon as the header is read — before the payload is buffered — preventing a single peer from driving unbounded memory growth or an event-loop stall in the shared broker. `writeMessage` also refuses to send an over-cap payload.
-- The published package no longer ships test files (the `broker/` glob in `files` was including `broker/*.test.ts`); broker runtime modules are now listed explicitly.
-- The broker now attaches a `net.Server` `'error'` listener so a `listen` failure (e.g. `EADDRINUSE` race, `EACCES`) is logged and exits non-zero instead of throwing uncaught and dying silently. Added top-level `uncaughtException`/`unhandledRejection` guards so a stray throw outside the per-connection framing guard can't take down IPC for every session.
-- `session_shutdown` now nulls the module client *before* awaiting `disconnect()` (capture-then-null), closing a reload race where a freshly-created client could be clobbered and orphaned. It also clears the reconnect promise and the agent-picker self-refresh hook, and the hook invocation is wrapped so a throw can't escape a host lifecycle event handler.
+- Ported post-`v0.9.2` upstream fixes for unique short-ID replies, half-open broker socket detection, disconnected mailbox routing, reply attachments, and flat/hoisted plugin-store `tsx` resolution.
+- Runtime fallback aliases are no longer mailbox reconnect identities, and mailbox fallback resolution cannot route a disconnected target back to the sender.
+
+## [0.9.2] - 2026-08-03
+
+### Fixed
+- Avoid relaunching standalone Pi executables as the Node runtime when starting the default broker process. Thanks to ZacharyQin for PR #82 and to jeffutter and awaae001 for confirming the impact.
+
+## [0.9.1] - 2026-07-30
+
+### Fixed
+- Scoped name-based queued-mail redelivery to sessions that also match the target's directory. A disconnected session's queued messages, including replies addressed to its exact session ID, could previously be delivered to an unrelated same-named session in a different project folder. Directories compare through the same normalization used by `list-cwd`, so a relaunch reporting the same directory via a trailing slash or symlink still receives its mail.
+
+### Changed
+- Rewrote the broker frame reader as a bounded state machine and made frame writes a single allocation, removing quadratic `Buffer.concat` accumulation on fragmented socket reads (up to ~28x faster on heavily fragmented frames).
+- Cached the collapsed preview and width-keyed wrapped body lines in the inline message renderer, cutting repeated rerender cost of long messages by ~2-3x while keeping live theme changes applied per render.
+
+## [0.9.0] - 2026-07-29
+
+### Added
+- Added a bounded in-memory broker mailbox so replies to recently disconnected named CLI senders are queued and delivered when a process reconnects with the same name. Thanks to Luke (`valkyriweb`) for issue #63.
+- Added protocol-visible delivery metadata, receiver lifecycle receipts, receiver-side inbound message dedupe, explicit cancel/supersede controls, and clearer ask-timeout receipts for ordered delivery diagnostics. Thanks to Donnie Thomas (`donnielrt`) for issue #65.
+
+## [0.8.0] - 2026-07-29
+
+### Added
+- Added opt-in restart-stable intercom session IDs via `PI_INTERCOM_STABLE_ID` or `stableId` in `config.json`. Thanks to iRonin for issue #39.
+- Added `/intercom-id` to insert a stable handoff snippet for the current session into the editor. Thanks to dataforxyz for PR #60.
+- Added `intercom({ action: "list-cwd" })` to list peers scoped to the same working directory. Thanks to iRonin for PR #58.
+- Added live context-window usage to session presence and list output. Thanks to iRonin for PR #59.
+- Added a silent namespaced extension bus for non-conversational extension coordination. Thanks to Kieran Bond for PR #69.
+
+## [0.7.0] - 2026-07-29
+
+### Changed
+- Documented `PI_INTERCOM_ASK_TIMEOUT_MS` for configurable ask/supervisor timeouts. Thanks to wiansapu for issue #14.
+- Clarified session addressing copy so the short IDs shown by `list` are documented as usable prefixes. Thanks to Grant Hutchins for PR #66.
+- Updated Pi runtime peer metadata and tool schemas for the `@earendil-works` package scope and Pi-bundled `typebox`/`pi-ai` packages.
+- Centralized pi-intercom runtime and config paths under `PI_CODING_AGENT_DIR` when set, defaulting to `~/.pi/agent`.
+- Hardened default broker auto-spawn to launch the resolved bundled `tsx` CLI through the current Node executable instead of resolving `npx` through `PATH`; custom `brokerCommand`/`brokerArgs` remain available as advanced trusted config.
+- Added an `inboundTrigger` policy (`always`, `replies`, or `never`) so users can reduce inbound auto-trigger risk while preserving existing behavior by default.
+- Made inline intercom messages collapse and expand with Pi's `Ctrl+O` custom-message toggle while keeping sender, preview, reply, and attachment cues visible. Thanks to RyanKim17920 for PR #32.
+- Improved inline message theme hierarchy with separate semantic styling for borders, headers, body text, and metadata. Thanks to Sreenath for PR #68.
+
+### Fixed
+- Added broker-owned local trust metadata, clearer stable-ID trust boundaries for duplicate names, per-connection rate limiting, and no-op presence coalescing for local IPC abuse hardening.
+- Added an inbound broker frame size cap to reject oversized local IPC messages before buffering their payloads.
+- Restricted Unix intercom runtime directory, socket, PID, and spawn-lock permissions.
+- Rechecked single-flight ask state after session target resolution so concurrent regular asks fail safely instead of crashing on an unhandled rejected reply waiter.
+- Refused broker-level mutual asks that would deadlock two sessions, and cleared outstanding ask edges when asks are replied to, cancelled, or disconnected.
+- Stabilized intercom session addressing across reconnects, idle `/name` changes, replaced Pi sessions, supervisor routing, pending replies, and short-ID targeting.
+- Aligned intercom overlay widths with their rendered modal boxes. Thanks to Cat for PR #43.
+- Marked failed `intercom` and `contact_supervisor` tool results through Pi's `tool_result` error flag path while preserving structured renderer details.
+- Limited the intercom overlay to TUI mode and unsubscribed subagent relay event handlers during session shutdown.
+- Added an opt-in Windows localhost TCP transport using a dynamic port, broker protocol health checks, and a local endpoint secret instead of a fixed-port default.
+- Stabilized reply/supervisor routing by respecting explicit reply targets, suppressing legacy supervisor tools when native supervisor channels are present, and clearing replied idle-queued asks. Thanks to ThanhNT29Jacky for PR #64.
 
 ## [0.6.0] - 2026-05-03
 

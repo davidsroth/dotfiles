@@ -1,14 +1,14 @@
-import type { SessionInfo } from "../types.js";
-
-/**
- * Pure helpers shared by the agent picker overlay (`ui/agent-picker.ts`) and
- * the extension entrypoint (`index.ts`). Kept free of `pi-tui`/runtime deps so
- * they can be unit tested in isolation (see `test/agent-picker.test.ts`).
- */
+import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import type { SessionInfo } from "../types.ts";
 
 export const ACTIVE_STATUS_FRESH_MS = 30 * 60 * 1000;
+export const DEFAULT_AGENT_PICKER_KEY = "ctrl+alt+a";
 
 export type ActivityState = "active" | "idle" | "stale";
+
+export function resolveAgentPickerKey(value = process.env.PI_INTERCOM_AGENT_PICKER_KEY): string {
+  return value?.trim() || DEFAULT_AGENT_PICKER_KEY;
+}
 
 function isBusyStatus(status?: string): boolean {
   return Boolean(status && !status.includes("idle"));
@@ -25,32 +25,50 @@ export function sessionActivityRank(session: SessionInfo, now = Date.now()): num
   return ACTIVITY_RANK[activityState(session, now)];
 }
 
-export function sortSessionsForPicker(sessions: SessionInfo[]): SessionInfo[] {
-  const now = Date.now();
+export function sortSessionsForPicker(sessions: SessionInfo[], now = Date.now()): SessionInfo[] {
   return [...sessions].sort((a, b) => {
     const rankDelta = sessionActivityRank(a, now) - sessionActivityRank(b, now);
     if (rankDelta !== 0) return rankDelta;
-    return b.lastActivity - a.lastActivity;
+    const activityDelta = b.lastActivity - a.lastActivity;
+    if (activityDelta !== 0) return activityDelta;
+    return a.id.localeCompare(b.id);
   });
-}
-
-export function parseTmuxTarget(target: string): { session: string; window: string } | null {
-  const colon = target.lastIndexOf(":");
-  if (colon <= 0) return null;
-  const session = target.slice(0, colon);
-  const windowPane = target.slice(colon + 1);
-  const dot = windowPane.indexOf(".");
-  if (!session || dot <= 0) return null;
-  return { session, window: windowPane.slice(0, dot) };
 }
 
 export function formatAge(timestamp: number, now = Date.now()): string {
   const elapsedMs = Math.max(0, now - timestamp);
-  const minutes = Math.floor(elapsedMs / 60000);
+  const minutes = Math.floor(elapsedMs / 60_000);
   if (minutes < 1) return "just now";
   if (minutes < 60) return `${minutes}m ago`;
   const hours = Math.floor(minutes / 60);
   if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  return `${days}d ago`;
+  return `${Math.floor(hours / 24)}d ago`;
+}
+
+export function shortSessionId(sessionId: string): string {
+  return sessionId.slice(0, 8);
+}
+
+export function cwdLabel(cwd: string): string {
+  const trimmed = cwd.replace(/\/$/, "");
+  return trimmed.split("/").filter(Boolean).pop() || cwd || "?";
+}
+
+export function middleTruncate(text: string, maxWidth: number): string {
+  if (visibleWidth(text) <= maxWidth) return text;
+  if (maxWidth <= 3) return truncateToWidth(text, maxWidth, "");
+
+  const chars = [...text];
+  const side = Math.max(1, Math.floor((maxWidth - 1) / 2));
+  let left = "";
+  for (const char of chars) {
+    if (visibleWidth(left + char) > side) break;
+    left += char;
+  }
+  let right = "";
+  for (const char of chars.slice().reverse()) {
+    if (visibleWidth(char + right) > side) break;
+    right = char + right;
+  }
+  return truncateToWidth(`${left}…${right}`, maxWidth, "");
 }

@@ -1,0 +1,1225 @@
+From c1ba40a3c621ba49b68e6c6d3b8cabe0572b1156 Mon Sep 17 00:00:00 2001
+From: David Roth <davidsamuelroth@gmail.com>
+Date: Wed, 5 Aug 2026 12:38:32 -0400
+Subject: [PATCH] feat: add out-of-band aside questions
+
+---
+ CHANGELOG.md                 |   3 +
+ README.md                    |  30 +++++-
+ broker/broker.ts             | 101 ++++++++++++++++----
+ broker/client.test.ts        |  41 ++++++++
+ broker/client.ts             |  31 ++++++
+ index.ts                     | 154 +++++++++++++++++++++++++-----
+ intercom.integration.test.ts |  86 ++++++++++++++++-
+ package.json                 |   3 +-
+ side-session.ts              | 179 +++++++++++++++++++++++++++++++++++
+ skills/pi-intercom/SKILL.md  |   6 +-
+ test/side-session.test.ts    |  19 ++++
+ types.ts                     |  13 ++-
+ 12 files changed, 614 insertions(+), 52 deletions(-)
+ create mode 100644 side-session.ts
+ create mode 100644 test/side-session.test.ts
+
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index 28f4de0..9e9bce1 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -4,6 +4,9 @@ All notable changes to the `pi-intercom` extension will be documented in this fi
+ 
+ ## [Unreleased]
+ 
++### Added
++- Added `intercom({ action: "aside", to, message })` for one-off questions answered by a temporary read-only context fork without interrupting the recipient or writing to its history. Aside support is negotiated with `aside-v1` broker/session capabilities and refuses silent downgrade to older peers.
++
+ ## [0.9.2] - 2026-08-03
+ 
+ ### Fixed
+diff --git a/README.md b/README.md
+index ef81eb2..e0e2b02 100644
+--- a/README.md
++++ b/README.md
+@@ -44,7 +44,7 @@ Coordinate with other local pi sessions on related codebases. Use `/skill:pi-int
+ 
+ **Not when:** Unrelated codebases, trivial questions, or when you can proceed independently.
+ 
+-**Principle:** Prefer `send` for notifications; `ask` only when blocked waiting for input.
++**Principle:** Prefer `send` for notifications; `ask` only when blocked waiting for input; `aside` for one-off questions that should not interrupt the peer.
+ </pi-intercom>
+ ```
+ 
+@@ -164,6 +164,21 @@ intercom({
+ // Worker continues implementing with the answer, same turn, full context.
+ ```
+ 
++**Planner asks for a status detail without interrupting the worker:**
++```typescript
++intercom({
++  action: "aside",
++  to: "worker",
++  message: "Which retry delay did you choose?"
++})
++// → Aside reply from worker: Exponential, starting at 100ms, capped at 2s.
++```
++
++Unlike `ask`, an `aside` is answered out of band by a temporary read-only fork of
++the recipient's context. It does not trigger a turn, appear in the recipient's
++transcript, or get added to its persisted history, and it can be answered while
++the recipient is busy.
++
+ **Worker finds something unexpected — escalates and waits:**
+ ```typescript
+ intercom({
+@@ -190,6 +205,7 @@ intercom({
+ |---------|--------|-----|
+ | **Task Delegation** | Planner uses `send` | Fire-and-forget. Planner doesn't need to wait for an ack. |
+ | **Clarification Request** | Worker uses `ask` | Worker needs the answer to proceed. Blocks until reply. |
++| **Quick Side Question** | Either uses `aside` | One-off question answered out of band — no interruption, nothing added to the peer's history. |
+ | **Discovery Escalation** | Worker uses `ask` | Worker needs approval before changing course. |
+ | **Completion Report** | Worker uses `ask` | Planner might have follow-up instructions or the next task. |
+ 
+@@ -213,6 +229,8 @@ This matters because the agent receiving the message doesn't need to reconstruct
+ 
+ `ask` sends the message and blocks until the recipient responds (10-minute timeout by default; set `PI_INTERCOM_ASK_TIMEOUT_MS` to a positive millisecond value to change it). The reply comes back as the tool result, so the agent continues in the same turn with full context. No confirmation dialog — if you're asking and waiting, the intent is clear.
+ 
++`aside` has the same asker-side behavior as `ask`, but the recipient answers out of band. The recipient spins up a short-lived, fully in-memory session seeded with a snapshot of its current context and read-only inspection tools (`read`, `ls`, `find`, and `grep`), then sends the answer through the normal reply path. Its current turn, visible transcript, and persisted history are untouched. Up to three inbound asides are answered concurrently; each has a two-minute wall-clock budget and is aborted on cancellation, supersede, sender disconnect, or shutdown.
++
+ `reply` is receiver-side sugar for replying to an inbound ask. In the turn triggered by an incoming intercom ask, `intercom({ action: "reply", message: "..." })` targets that exact sender and message automatically. If you reply later, it falls back to the single unresolved inbound ask. If multiple asks are pending, use `intercom({ action: "pending" })` to inspect them and then call `reply` with `to` to disambiguate.
+ 
+ The broker keeps a bounded in-memory mailbox for recently disconnected named sessions. If a lightweight CLI sender asks a long-running session something and exits before the answer, the later `reply` is accepted into that mailbox instead of failing with `Session not found`; a process that reconnects with the same name receives the queued reply. This is per-broker runtime state, not durable storage across broker restarts.
+@@ -321,9 +339,9 @@ The supervisor can reply with plain JSON or a fenced `json` block. If the reply
+ 
+ | Parameter | Type | Description |
+ |-----------|------|-------------|
+-| `action` | string | `"list"`, `"list-cwd"`, `"send"`, `"ask"`, `"reply"`, `"pending"`, `"status"`, or `"cancel"` |
+-| `to` | string | Target session name or ID (for send/ask, or to disambiguate reply) |
+-| `message` | string | Message text (for send/ask/reply) |
++| `action` | string | `"list"`, `"list-cwd"`, `"send"`, `"ask"`, `"aside"`, `"reply"`, `"pending"`, `"status"`, or `"cancel"` |
++| `to` | string | Target session name or ID (for send/ask/aside, or to disambiguate reply) |
++| `message` | string | Message text (for send/ask/aside/reply) |
+ | `attachments` | array | Optional `file`, `snippet`, or `context` attachments |
+ | `replyTo` | string | Optional message ID for threading or replying to an `ask` |
+ | `messageId` | string | Optional explicit message ID for send/ask, or required message ID for `cancel` |
+@@ -354,6 +372,8 @@ Only registered in sessions where `pi-subagents` supplied the required child bri
+ 
+ **`ask`** — Sends a message and waits for the recipient to reply (10-minute timeout by default; configurable with `PI_INTERCOM_ASK_TIMEOUT_MS`). The reply is returned as the tool result. No confirmation dialog. Only one pending `ask` is allowed per session at a time. Use this when the agent needs the answer to continue working.
+ 
++**`aside`** — Sends a one-off question and waits like `ask`, but the recipient answers from a temporary read-only fork of its current context instead of being interrupted or recording the exchange in history.
++
+ **`reply`** — Replies to the current intercom-triggered message if there is one. Otherwise it falls back to the single unresolved inbound ask. If multiple asks are pending, pass `to` or inspect them with `pending` first. Under the hood this is still a normal `send` with the exact `replyTo` value.
+ 
+ **`pending`** — Lists unresolved inbound asks with sender, message ID, elapsed time, and a short preview. Useful when replying after the original triggered turn.
+@@ -499,7 +519,7 @@ Supported `config.json` keys include `stableId` for restart-stable addressing, `
+ 
+ **Auto-spawn with file lock.** The broker starts on first connection and exits after 5 seconds idle. There is no daemon to manage. A spawn lock file, keyed by PID and timestamp, prevents duplicate brokers when multiple sessions start at once.
+ 
+-**`ask` stays client-side.** The broker still routes plain messages; it does not have a special request/response mode for `ask`. The client waits for a matching reply before it triggers a new turn, then returns that reply as the tool result. Reply hints make that flow practical by showing the recipient the exact `send` call to use. Separately, `list` / `sessions` now carry a `requestId` so a delayed session-list reply cannot be mistaken for a newer one.
++**`ask` and `aside` use the normal message route.** An optional `aside` flag tells a capable recipient to answer out of band, while `aside-v1` broker and session capabilities prevent silent downgrade: an aside is refused when either the broker or target is too old, rather than interrupting that target as a normal ask. The client waits for a matching reply before it triggers a new turn, then returns that reply as the tool result. Reply hints make that flow practical by showing the recipient the exact `send` call to use. Separately, `list` / `sessions` now carry a `requestId` so a delayed session-list reply cannot be mistaken for a newer one.
+ 
+ ## pi-intercom vs pi-messenger
+ 
+diff --git a/broker/broker.ts b/broker/broker.ts
+index 91bfa43..8335666 100644
+--- a/broker/broker.ts
++++ b/broker/broker.ts
+@@ -16,7 +16,7 @@ import {
+ } from "./paths.ts";
+ import { getAskTimeoutMs } from "../config.ts";
+ import { sameCwd } from "../cwd.ts";
+-import { EXTENSION_BUS_FEATURE } from "../types.ts";
++import { ASIDE_FEATURE, EXTENSION_BUS_FEATURE } from "../types.ts";
+ import type { SessionInfo, Message, Attachment, BrokerMessage, SessionRegistration, ExtensionCapability, MessageControl, MessageReceipt, MessageReceiptStatus } from "../types.ts";
+ import { ExtensionStateManager } from "./extension-state.ts";
+ import { assertNoLiveBroker } from "./runtime-claim.ts";
+@@ -73,6 +73,7 @@ interface AskEdge {
+   from: string;
+   to: string;
+   createdAt: number;
++  aside: boolean;
+ }
+ 
+ interface MessageReceiptRoute {
+@@ -170,6 +171,14 @@ function isMessage(value: unknown): value is Message {
+     return false;
+   }
+ 
++  if (message.aside !== undefined && typeof message.aside !== "boolean") {
++    return false;
++  }
++
++  if (message.replyError !== undefined && typeof message.replyError !== "string") {
++    return false;
++  }
++
+   if (typeof message.content !== "object" || message.content === null) {
+     return false;
+   }
+@@ -208,6 +217,10 @@ function isSessionRegistration(value: unknown): value is SessionRegistration {
+     return false;
+   }
+ 
++  if (session.features !== undefined && (!Array.isArray(session.features) || !session.features.every((feature) => typeof feature === "string"))) {
++    return false;
++  }
++
+   return session.status === undefined || typeof session.status === "string";
+ }
+ 
+@@ -478,6 +491,7 @@ class IntercomBroker {
+           startedAt: session.startedAt,
+           lastActivity: session.lastActivity,
+           ...(session.status !== undefined ? { status: session.status } : {}),
++          ...(session.features !== undefined ? { features: [...session.features] } : {}),
+           trustedLocal: typeof LISTEN_TARGET === "string" && process.platform !== "win32",
+         };
+ 
+@@ -502,7 +516,7 @@ class IntercomBroker {
+         writeMessage(socket, {
+           type: "registered",
+           sessionId: id,
+-          features: [EXTENSION_BUS_FEATURE],
++          features: [EXTENSION_BUS_FEATURE, ASIDE_FEATURE],
+         });
+         this.broadcast({ type: "session_joined", session: info }, id);
+ 
+@@ -613,6 +627,15 @@ class IntercomBroker {
+           break;
+         }
+ 
++        if (message.aside && (!message.expectsReply || message.replyTo)) {
++          writeMessage(socket, {
++            type: "delivery_failed",
++            messageId: message.id,
++            reason: "Aside messages must be top-level requests that expect a reply",
++          });
++          break;
++        }
++
+         const brokerReceivedAt = Date.now();
+         this.pruneAskEdges();
+         this.pruneMessageReceiptRoutes(brokerReceivedAt);
+@@ -638,6 +661,14 @@ class IntercomBroker {
+             break;
+           }
+           const target = targets[0];
++          if (message.aside && !target.info.features?.includes(ASIDE_FEATURE)) {
++            writeMessage(socket, {
++              type: "delivery_failed",
++              messageId: message.id,
++              reason: "Target session does not support aside questions",
++            });
++            break;
++          }
+           if (message.supersedes) {
+             const supersededRoute = this.messageReceiptRoutes.get(message.supersedes);
+             if (!supersededRoute || supersededRoute.from !== currentId || supersededRoute.to !== target.info.id) {
+@@ -658,7 +689,13 @@ class IntercomBroker {
+             break;
+           }
+           if (message.expectsReply) {
+-            const reverseEdge = Array.from(this.askEdges.entries()).find(([edgeMessageId, edge]) => edgeMessageId !== message.replyTo && edge.from === target.info.id && edge.to === currentId);
++            const reverseEdge = Array.from(this.askEdges.entries()).find(([edgeMessageId, edge]) =>
++              edgeMessageId !== message.replyTo
++              && edge.from === target.info.id
++              && edge.to === currentId
++              && !message.aside
++              && !edge.aside
++            );
+             if (reverseEdge) {
+               writeMessage(socket, {
+                 type: "delivery_failed",
+@@ -667,7 +704,7 @@ class IntercomBroker {
+               });
+               break;
+             }
+-            this.askEdges.set(message.id, { from: currentId, to: target.info.id, createdAt: Date.now() });
++            this.askEdges.set(message.id, { from: currentId, to: target.info.id, createdAt: Date.now(), aside: message.aside === true });
+           }
+           const deliveredMessage: Message = {
+             ...message,
+@@ -675,6 +712,10 @@ class IntercomBroker {
+             brokerDeliveredAt: Date.now(),
+           };
+           if (message.supersedes) {
++            const supersededEdge = this.askEdges.get(message.supersedes);
++            if (supersededEdge?.from === currentId && supersededEdge.to === target.info.id) {
++              this.askEdges.delete(message.supersedes);
++            }
+             const control: MessageControl = {
+               action: "supersede",
+               messageId: message.supersedes,
+@@ -729,6 +770,14 @@ class IntercomBroker {
+             break;
+           }
+           const target = disconnectedTargets[0]!.info;
++          if (message.aside && !target.features?.includes(ASIDE_FEATURE)) {
++            writeMessage(socket, {
++              type: "delivery_failed",
++              messageId: message.id,
++              reason: "Target session does not support aside questions",
++            });
++            break;
++          }
+           if (message.supersedes) {
+             writeMessage(socket, {
+               type: "delivery_failed",
+@@ -748,7 +797,13 @@ class IntercomBroker {
+           const liveMailboxTarget = this.findUniqueLiveSessionForDisconnectedSession(target);
+           const effectiveTargetId = liveMailboxTarget?.info.id ?? target.id;
+           if (message.expectsReply) {
+-            const reverseEdge = Array.from(this.askEdges.entries()).find(([edgeMessageId, edge]) => edgeMessageId !== message.replyTo && edge.from === effectiveTargetId && edge.to === currentId);
++            const reverseEdge = Array.from(this.askEdges.entries()).find(([edgeMessageId, edge]) =>
++              edgeMessageId !== message.replyTo
++              && edge.from === effectiveTargetId
++              && edge.to === currentId
++              && !message.aside
++              && !edge.aside
++            );
+             if (reverseEdge) {
+               writeMessage(socket, {
+                 type: "delivery_failed",
+@@ -757,7 +812,7 @@ class IntercomBroker {
+               });
+               break;
+             }
+-            this.askEdges.set(message.id, { from: currentId, to: effectiveTargetId, createdAt: Date.now() });
++            this.askEdges.set(message.id, { from: currentId, to: effectiveTargetId, createdAt: Date.now(), aside: message.aside === true });
+           }
+           if (liveMailboxTarget) {
+             const deliveredMessage: Message = {
+@@ -823,9 +878,13 @@ class IntercomBroker {
+         if (!currentId) {
+           throw new Error("Received cancel_message before register");
+         }
+-        if (typeof clientMessage.messageId !== "string") {
++        if (
++          typeof clientMessage.messageId !== "string"
++          || (clientMessage.requestId !== undefined && typeof clientMessage.requestId !== "string")
++        ) {
+           throw new Error("Invalid cancel_message message");
+         }
++        const cancellationResponseId = clientMessage.requestId ?? clientMessage.messageId;
+         this.pruneMessageReceiptRoutes();
+         this.pruneMailboxMessages();
+         const sender = this.sessions.get(currentId);
+@@ -836,33 +895,35 @@ class IntercomBroker {
+           if (edge?.from === currentId) {
+             this.askEdges.delete(clientMessage.messageId);
+           }
+-          writeMessage(socket, { type: "delivered", messageId: clientMessage.messageId });
++          writeMessage(socket, { type: "delivered", messageId: cancellationResponseId });
+           break;
+         }
+         const route = this.messageReceiptRoutes.get(clientMessage.messageId);
+         const receiver = route ? this.sessions.get(route.to) : undefined;
+-        if (route?.from !== currentId || sender?.socket !== socket || !receiver) {
++        if (route?.from !== currentId || sender?.socket !== socket) {
+           writeMessage(socket, {
+             type: "delivery_failed",
+-            messageId: clientMessage.messageId,
++            messageId: cancellationResponseId,
+             reason: "Message cannot be cancelled by this session",
+           });
+           break;
+         }
+-        writeMessage(receiver.socket, {
+-          type: "message_control",
+-          from: sender.info,
+-          control: {
+-            action: "cancel",
+-            messageId: clientMessage.messageId,
+-            timestamp: Date.now(),
+-          },
+-        });
++        if (receiver) {
++          writeMessage(receiver.socket, {
++            type: "message_control",
++            from: sender.info,
++            control: {
++              action: "cancel",
++              messageId: clientMessage.messageId,
++              timestamp: Date.now(),
++            },
++          });
++        }
+         const edge = this.askEdges.get(clientMessage.messageId);
+         if (edge?.from === currentId) {
+           this.askEdges.delete(clientMessage.messageId);
+         }
+-        writeMessage(socket, { type: "delivered", messageId: clientMessage.messageId });
++        writeMessage(socket, { type: "delivered", messageId: cancellationResponseId });
+         break;
+       }
+ 
+diff --git a/broker/client.test.ts b/broker/client.test.ts
+index 50e15d2..ebe72dd 100644
+--- a/broker/client.test.ts
++++ b/broker/client.test.ts
+@@ -67,6 +67,47 @@ test("malformed extension broker messages are rejected", () => {
+   }));
+ });
+ 
++test("aside and replyError flags survive client message validation", () => {
++  const client = new IntercomClient();
++  (client as any)._sessionId = "session-1";
++  const from = {
++    id: "sender",
++    cwd: "/test",
++    model: "test",
++    pid: 2,
++    startedAt: 1,
++    lastActivity: 1,
++  };
++  const received: unknown[] = [];
++  client.on("message", (_from, message) => received.push(message));
++
++  (client as any).handleBrokerMessage({
++    type: "message",
++    from,
++    message: {
++      id: "aside-1",
++      timestamp: 1,
++      aside: true,
++      expectsReply: true,
++      content: { text: "question" },
++    },
++  });
++  (client as any).handleBrokerMessage({
++    type: "message",
++    from,
++    message: {
++      id: "reply-1",
++      timestamp: 2,
++      replyTo: "aside-1",
++      replyError: "failed",
++      content: { text: "failed" },
++    },
++  });
++
++  assert.equal((received[0] as { aside?: boolean }).aside, true);
++  assert.equal((received[1] as { replyError?: string }).replyError, "failed");
++});
++
+ test("cancelAsk ignores synchronous socket write failures", () => {
+   const client = new IntercomClient();
+   (client as any)._sessionId = "session-1";
+diff --git a/broker/client.ts b/broker/client.ts
+index 2231356..6ab86f8 100644
+--- a/broker/client.ts
++++ b/broker/client.ts
+@@ -21,6 +21,8 @@ interface SendOptions {
+   attachments?: Attachment[];
+   replyTo?: string;
+   expectsReply?: boolean;
++  aside?: boolean;
++  replyError?: string;
+   messageId?: string;
+   supersedes?: string;
+   retryOf?: string;
+@@ -136,6 +138,14 @@ function isMessage(value: unknown): value is Message {
+     return false;
+   }
+ 
++  if (message.aside !== undefined && typeof message.aside !== "boolean") {
++    return false;
++  }
++
++  if (message.replyError !== undefined && typeof message.replyError !== "string") {
++    return false;
++  }
++
+   if (typeof message.content !== "object" || message.content === null) {
+     return false;
+   }
+@@ -185,6 +195,10 @@ function isSessionInfo(value: unknown): value is SessionInfo {
+     }
+   }
+ 
++  if (session.features !== undefined && (!Array.isArray(session.features) || !session.features.every((feature) => typeof feature === "string"))) {
++    return false;
++  }
++
+   return session.trustedLocal === undefined || typeof session.trustedLocal === "boolean";
+ }
+ 
+@@ -702,6 +716,8 @@ export class IntercomClient extends EventEmitter {
+       retryOf: options.retryOf,
+       replyTo: options.replyTo,
+       expectsReply: options.expectsReply,
++      aside: options.aside,
++      replyError: options.replyError,
+       content: {
+         text: options.text,
+         attachments: options.attachments,
+@@ -800,6 +816,21 @@ export class IntercomClient extends EventEmitter {
+     }
+   }
+ 
++  /** Cancel an aside's broker edge and its queued or active recipient work. */
++  cancelAside(messageId: string): void {
++    if (this.disconnecting) return;
++    const socket = this.socket;
++    if (!socket || !this._sessionId || socket.destroyed || socket.writableEnded || !socket.writable) return;
++
++    try {
++      // Keep the cancellation acknowledgement separate from an in-flight send
++      // that uses messageId as its own correlation key.
++      writeMessage(socket, { type: "cancel_message", messageId, requestId: `aside-cancel-${randomUUID()}` });
++    } catch {
++      // Cancellation is best-effort; local waiter cleanup must still proceed.
++    }
++  }
++
+   updatePresence(updates: { name?: string; status?: string; model?: string; contextPct?: number | null; contextTokens?: number | null; contextWindow?: number | null }): void {
+     if (this.disconnecting) {
+       return;
+diff --git a/index.ts b/index.ts
+index da9cfa8..04c3317 100644
+--- a/index.ts
++++ b/index.ts
+@@ -9,7 +9,7 @@ import { SessionListOverlay } from "./ui/session-list.ts";
+ import { ComposeOverlay, type ComposeResult } from "./ui/compose.ts";
+ import { InlineMessageComponent } from "./ui/inline-message.ts";
+ import { getAskTimeoutMs, loadConfig, type IntercomConfig } from "./config.ts";
+-import { EXTENSION_BUS_FEATURE } from "./types.ts";
++import { ASIDE_FEATURE, EXTENSION_BUS_FEATURE } from "./types.ts";
+ import type { Attachment, BrokerMessage, Message, MessageControl, MessageReceiptStatus, SessionInfo, SessionRegistration } from "./types.ts";
+ import {
+   INTERCOM_EXTENSION_REGISTER_EVENT,
+@@ -21,6 +21,7 @@ import {
+   type IntercomExtensionState,
+ } from "./extension-api.ts";
+ import { ReplyTracker } from "./reply-tracker.ts";
++import { answerAside } from "./side-session.ts";
+ import { resolve as resolvePath } from "node:path";
+ import { sameCwd } from "./cwd.ts";
+ import { formatContextUsage } from "./format-context.ts";
+@@ -32,6 +33,7 @@ const INBOUND_FLUSH_DELAY_MS = 200;
+ const INBOUND_IDLE_RETRY_MS = 500;
+ const INBOUND_MESSAGE_DEDUPE_MAX = 1000;
+ const INBOUND_MESSAGE_DEDUPE_RETENTION_MS = 60 * 60 * 1000;
++const MAX_ACTIVE_ASIDES = 3;
+ const DEFAULT_UNNAMED_SESSION_ALIAS_PREFIX = "subagent-chat";
+ const SUBAGENT_ORCHESTRATOR_TARGET_ENV = "PI_SUBAGENT_ORCHESTRATOR_TARGET";
+ const SUBAGENT_ORCHESTRATOR_SESSION_ID_ENV = "PI_SUBAGENT_ORCHESTRATOR_SESSION_ID";
+@@ -497,6 +499,7 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
+   let runtimeGeneration = 0;
+   let agentRunning = false;
+   const activeTools = new Map<string, string>();
++  const activeAsides = new Map<string, { controller: AbortController; fromSessionId: string }>();
+   const replyTracker = new ReplyTracker();
+   const pendingIdleMessages: InboundMessageEntry[] = [];
+   const seenInboundMessages = new Map<string, number>();
+@@ -543,6 +546,17 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
+     }
+   }
+   function handleMessageControl(control: MessageControl): void {
++    const activeAside = activeAsides.get(control.messageId);
++    if (activeAside) {
++      activeAside.controller.abort();
++      if (control.action === "cancel") {
++        emitMessageReceipt(control.messageId, "cancelled", "cancelled while answering aside");
++      } else {
++        emitMessageReceipt(control.messageId, "superseded", control.supersededBy ? `superseded by ${control.supersededBy}` : undefined);
++      }
++      return;
++    }
++
+     const queuedIndex = pendingIdleMessages.findIndex((entry) => entry.message.id === control.messageId);
+     if (control.action === "cancel") {
+       if (queuedIndex >= 0) {
+@@ -780,6 +794,7 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
+       startedAt: sessionStartedAt,
+       lastActivity: Date.now(),
+       status: currentStatus(),
++      features: [ASIDE_FEATURE],
+       ...(localExtensions.size > 0
+         ? {
+             extensions: currentExtensionCapabilities(),
+@@ -939,6 +954,57 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
+     emitMessageReceipt(entry.message.id, "queued");
+     scheduleInboundFlush();
+   }
++  function answerAsideQuestion(ctx: ExtensionContext, from: SessionInfo, message: Message, generation = runtimeGeneration): void {
++    const asideClient = client;
++    const senderDisplay = from.name || from.id.slice(0, 8);
++    emitMessageReceipt(message.id, "acknowledged", "accepted for aside processing");
++    if (activeAsides.size >= MAX_ACTIVE_ASIDES) {
++      const error = `Aside capacity reached (${MAX_ACTIVE_ASIDES} active)`;
++      void asideClient?.send(from.id, { text: error, replyTo: message.id, replyError: error })
++        .catch(() => undefined);
++      return;
++    }
++
++    const attachmentText = message.content.attachments?.length ? formatAttachments(message.content.attachments) : "";
++    const question = `${message.content.text}${attachmentText}`;
++    const controller = new AbortController();
++    activeAsides.set(message.id, { controller, fromSessionId: from.id });
++    void (async () => {
++      let answer: string | undefined;
++      let failed = false;
++      try {
++        const liveCtx = getLiveContext(ctx, generation);
++        if (!liveCtx) return;
++        answer = await answerAside(liveCtx, question, { signal: controller.signal });
++      } catch (error) {
++        if (controller.signal.aborted) return;
++        failed = true;
++        answer = `Could not answer the aside: ${getErrorMessage(error)}`;
++      } finally {
++        activeAsides.delete(message.id);
++      }
++
++      if (
++        controller.signal.aborted
++        || answer === undefined
++        || !getLiveContext(ctx, generation)
++        || client !== asideClient
++        || !asideClient?.isConnected()
++      ) return;
++      try {
++        const result = await asideClient.send(from.id, {
++          text: answer,
++          replyTo: message.id,
++          ...(failed ? { replyError: answer } : {}),
++        });
++        if (!result.delivered) return;
++      } catch {
++        // Best-effort; the asker's waiter will time out if the reply cannot be sent.
++        return;
++      }
++      if (!failed) notifyIfLive(ctx, `Answered an aside from ${senderDisplay}`, "info", generation);
++    })();
++  }
+   function handleIncomingMessage(ctx: ExtensionContext, from: SessionInfo, message: Message): void {
+     const messageGeneration = runtimeGeneration;
+     const liveContext = getLiveContext(ctx, messageGeneration);
+@@ -963,6 +1029,10 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
+         return;
+       }
+     }
++    if (receivedMessage.aside && !receivedMessage.replyTo) {
++      answerAsideQuestion(liveContext, from, receivedMessage, messageGeneration);
++      return;
++    }
+     const attachmentText = receivedMessage.content.attachments?.length
+       ? formatAttachments(receivedMessage.content.attachments)
+       : "";
+@@ -1071,6 +1141,12 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
+           }
+           break;
+         case "session_left":
++          for (const [messageId, activeAside] of activeAsides) {
++            if (activeAside.fromSessionId === message.sessionId) {
++              activeAside.controller.abort();
++              activeAsides.delete(messageId);
++            }
++          }
+           for (const namespace of localExtensions.keys()) {
+             emitLocalExtensionEvent(namespace, { type: "session_left", sessionId: message.sessionId });
+           }
+@@ -1177,31 +1253,29 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
+     reconnectPromiseGeneration = generationAtStart;
+     return nextReconnectPromise;
+   }
+-  async function resolveSessionTarget(activeClient: IntercomClient, nameOrId: string): Promise<string | null> {
++  async function resolveSessionInfo(activeClient: IntercomClient, nameOrId: string): Promise<SessionInfo | null> {
+     const sessions = await activeClient.listSessions();
+     const byId = sessions.find(s => s.id === nameOrId);
+-    if (byId) {
+-      return byId.id;
+-    }
++    if (byId) return byId;
++
+     const lowerName = nameOrId.toLowerCase();
+     const byName = sessions.filter(s => s.name?.toLowerCase() === lowerName);
+     if (byName.length > 1) {
+       const ids = byName.map(s => shortSessionId(s.id)).join(", ");
+       throw new Error(`Multiple sessions named "${nameOrId}" are connected. Address one by the id shown in parentheses by "list" (${ids}).`);
+     }
+-    if (byName.length === 1) {
+-      return byName[0]!.id;
+-    }
++    if (byName.length === 1) return byName[0]!;
+ 
+     const byIdPrefix = sessions.filter(s => s.id.startsWith(nameOrId));
+-    if (byIdPrefix.length === 1) {
+-      return byIdPrefix[0]!.id;
+-    }
++    if (byIdPrefix.length === 1) return byIdPrefix[0]!;
+     if (byIdPrefix.length > 1) {
+       throw new Error(`Multiple sessions match ID prefix "${nameOrId}". Use a longer session ID prefix.`);
+     }
+     return null;
+   }
++  async function resolveSessionTarget(activeClient: IntercomClient, nameOrId: string): Promise<string | null> {
++    return (await resolveSessionInfo(activeClient, nameOrId))?.id ?? null;
++  }
+   async function resolveSupervisorTarget(activeClient: IntercomClient, metadata: ChildOrchestratorMetadata): Promise<string> {
+     if (metadata.orchestratorSessionId) {
+       const bySessionId = await resolveSessionTarget(activeClient, metadata.orchestratorSessionId);
+@@ -1253,6 +1327,8 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
+     clearNamePollTimer();
+     clearInboundFlushTimer();
+     rejectReplyWaiter(new Error("Session replaced"));
++    for (const { controller } of activeAsides.values()) controller.abort();
++    activeAsides.clear();
+     replyTracker.reset();
+     expirePendingIdleMessages("receiver session replaced before injection");
+     if (previousClient) {
+@@ -1399,6 +1475,8 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
+     clearNamePollTimer();
+     restoreIntercomSessionId();
+     rejectReplyWaiter(new Error("Session shutting down"));
++    for (const { controller } of activeAsides.values()) controller.abort();
++    activeAsides.clear();
+     replyTracker.reset();
+     expirePendingIdleMessages("receiver session shut down before injection");
+     clearInboundFlushTimer();
+@@ -1783,7 +1861,8 @@ Usage:
+   intercom({ action: "list-cwd" })                → List sessions in the current working directory
+   intercom({ action: "list-cwd", cwd: "/path" })  → List sessions in a specific directory
+   intercom({ action: "send", to: "name-or-id", message: "..." })  → Send message
+-  intercom({ action: "ask", to: "name-or-id", message: "..." })   → Ask and wait for reply
++  intercom({ action: "ask", to: "name-or-id", message: "..." })   → Ask and wait for reply (interrupts the peer, enters its history)
++  intercom({ action: "aside", to: "name-or-id", message: "..." }) → Ask a one-off question answered out of band without interrupting the peer or touching its history
+   intercom({ action: "cancel", messageId: "..." })                 → Request cancellation of a sent message
+   intercom({ action: "reply", message: "..." })                      → Reply to the active/single pending ask
+   intercom({ action: "pending" })                                      → List unresolved inbound asks
+@@ -1792,14 +1871,14 @@ Usage:
+       "Use to coordinate with other local pi sessions: list peers, send updates, ask for help, or check intercom connectivity.",
+ 
+     parameters: Type.Object({
+-      action: StringEnum(["list", "list-cwd", "send", "ask", "reply", "pending", "status", "cancel"] as const, {
+-        description: "Action: 'list', 'list-cwd', 'send', 'ask', 'reply', 'pending', 'status', or 'cancel'",
++      action: StringEnum(["list", "list-cwd", "send", "ask", "aside", "reply", "pending", "status", "cancel"] as const, {
++        description: "Action: 'list', 'list-cwd', 'send', 'ask', 'aside', 'reply', 'pending', 'status', or 'cancel'",
+       }),
+       to: Type.Optional(Type.String({
+-        description: "Target session: name, full session ID, or the short id shown in parentheses by 'list' (a leading ID prefix resolves). For 'send', 'ask', or disambiguating 'reply'.",
++        description: "Target session: name, full session ID, or the short id shown in parentheses by 'list' (a leading ID prefix resolves). For 'send', 'ask', 'aside', or disambiguating 'reply'.",
+       })),
+       message: Type.Optional(Type.String({
+-        description: "Message to send (for 'send', 'ask', or 'reply' action)",
++        description: "Message to send (for 'send', 'ask', 'aside', or 'reply' action)",
+       })),
+       attachments: Type.Optional(Type.Array(Type.Object({
+         type: StringEnum(["file", "snippet", "context"] as const),
+@@ -2015,7 +2094,9 @@ Usage:
+           }
+         }
+ 
+-        case "ask": {
++        case "ask":
++        case "aside": {
++          const isAside = action === "aside";
+           if (!to || !message) {
+             return {
+               content: [{ type: "text", text: "Missing 'to' or 'message' parameter" }],
+@@ -2023,6 +2104,12 @@ Usage:
+             };
+           }
+ 
++          if (isAside && replyTo) {
++            return {
++              content: [{ type: "text", text: "Aside questions cannot also reply to another request" }],
++              details: { error: true },
++            };
++          }
+           if (replyWaiter) {
+             return {
+               content: [{ type: "text", text: "Already waiting for a reply" }],
+@@ -2041,7 +2128,17 @@ Usage:
+           let questionId: string | null = null;
+ 
+           try {
+-            const sendTo = await resolveSessionTarget(connectedClient, to) ?? to;
++            if (isAside && !connectedClient.supportsFeature(ASIDE_FEATURE)) {
++              throw new Error("Connected intercom broker does not support aside questions");
++            }
++            const targetSession = await resolveSessionInfo(connectedClient, to);
++            const sendTo = targetSession?.id ?? to;
++            if (isAside && !targetSession) {
++              throw new Error("Aside questions require a currently connected target session");
++            }
++            if (isAside && !targetSession?.features?.includes(ASIDE_FEATURE)) {
++              throw new Error(`Target session "${to}" does not support aside questions`);
++            }
+             if (_signal?.aborted) {
+               return {
+                 content: [{ type: "text", text: "Cancelled" }],
+@@ -2061,7 +2158,13 @@ Usage:
+               };
+             }
+             questionId = randomUUID();
+-            replyPromise = waitForReply(sendTo, questionId, _signal, () => connectedClient.cancelAsk(questionId!), () => latestDeliveryState(questionId, deliveryState));
++            replyPromise = waitForReply(
++              sendTo,
++              questionId,
++              _signal,
++              () => isAside ? connectedClient.cancelAside(questionId!) : connectedClient.cancelAsk(questionId!),
++              () => latestDeliveryState(questionId, deliveryState),
++            );
+             replyPromise.catch(() => undefined);
+             const sendResult = await connectedClient.send(sendTo, {
+               messageId: questionId,
+@@ -2069,6 +2172,7 @@ Usage:
+               attachments,
+               replyTo,
+               expectsReply: true,
++              aside: isAside,
+               supersedes,
+               retryOf,
+             });
+@@ -2096,6 +2200,12 @@ Usage:
+               timestamp: Date.now(),
+             });
+             const replyMessage = await replyPromise;
++            if (replyMessage.replyError) {
++              return {
++                content: [{ type: "text", text: `${isAside ? "Aside" : "Reply"} failed: ${replyMessage.replyError}` }],
++                details: { error: true },
++              };
++            }
+             const replyText = replyMessage.content.text;
+             const replyAttachments = replyMessage.content.attachments?.length
+               ? formatAttachments(replyMessage.content.attachments)
+@@ -2107,7 +2217,7 @@ Usage:
+               timestamp: replyMessage.timestamp,
+             });
+             return {
+-              content: [{ type: "text", text: `**Reply from ${to}:**\n${replyText}${replyAttachments}` }],
++              content: [{ type: "text", text: `**${isAside ? "Aside reply" : "Reply"} from ${to}:**\n${replyText}${replyAttachments}` }],
+               details: {},
+             };
+           } catch (error) {
+@@ -2203,7 +2313,7 @@ Usage:
+             return {
+               content: [{
+                 type: "text",
+-                text: `**Intercom Status:**\nConnected: Yes\nSession ID: ${mySessionId}\nActive sessions: ${sessions.length}`,
++                text: `**Intercom Status:**\nConnected: Yes\nSession ID: ${mySessionId}\nActive sessions: ${sessions.length}\nActive asides: ${activeAsides.size}/${MAX_ACTIVE_ASIDES}`,
+               }],
+               details: {},
+             };
+@@ -2228,7 +2338,7 @@ Usage:
+       const messagePreview = previewText(args.message, 96);
+       const attachmentCount = Array.isArray(args.attachments) ? args.attachments.length : 0;
+       let text = theme.fg("toolTitle", theme.bold("intercom "));
+-      text += theme.fg(action === "ask" ? "warning" : action === "reply" ? "success" : "accent", action);
++      text += theme.fg(action === "ask" ? "warning" : action === "aside" ? "mdLink" : action === "reply" ? "success" : "accent", action);
+       if (target) {
+         text += " " + theme.fg("muted", "→") + " " + theme.fg("accent", target);
+       }
+diff --git a/intercom.integration.test.ts b/intercom.integration.test.ts
+index a3f2738..98261dd 100644
+--- a/intercom.integration.test.ts
++++ b/intercom.integration.test.ts
+@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
+ import { EventEmitter, once } from "node:events";
+ import { spawn, type ChildProcess } from "node:child_process";
+ import { ReplyTracker } from "./reply-tracker.ts";
++import { ASIDE_FEATURE } from "./types.ts";
+ import type { BrokerMessage, Message, SessionInfo } from "./types.ts";
+ import { INTERCOM_EXTENSION_REGISTER_EVENT, type IntercomExtensionChannel } from "./extension-api.ts";
+ 
+@@ -353,7 +354,7 @@ test("opt-in TCP broker requires endpoint state for health and registration", {
+     assert.deepEqual(registerMessages, [{
+       type: "registered",
+       sessionId: "authorized-tcp-client",
+-      features: ["extension-bus-v1"],
++      features: ["extension-bus-v1", ASIDE_FEATURE],
+     }]);
+   } finally {
+     if (broker.exitCode === null && broker.signalCode === null) {
+@@ -800,6 +801,89 @@ test("broker resolves unique short IDs and rejects ambiguous prefixes", { concur
+   }
+ });
+ 
++test("the aside flag reaches capable peers and is refused for old peers", { concurrency: false }, async () => {
++  const { planner, orchestrator, cleanup } = await setupClients();
++  const capable = new IntercomClient();
++
++  try {
++    await capable.connect({
++      name: "aside-capable",
++      cwd: repoDir,
++      model: "test-model",
++      pid: process.pid,
++      startedAt: Date.now(),
++      lastActivity: Date.now(),
++      features: [ASIDE_FEATURE],
++    });
++    const received = once(capable, "message") as Promise<[SessionInfo, Message]>;
++    const delivered = await planner.send(capable.sessionId!, {
++      messageId: "aside-roundtrip",
++      text: "quick question",
++      expectsReply: true,
++      aside: true,
++    });
++    assert.equal(delivered.delivered, true);
++    const [, message] = await received;
++    assert.equal(message.aside, true);
++    assert.equal(message.expectsReply, true);
++
++    const refused = await planner.send(orchestrator.sessionId!, {
++      messageId: "aside-old-peer",
++      text: "do not interrupt",
++      expectsReply: true,
++      aside: true,
++    });
++    assert.equal(refused.delivered, false);
++    assert.match(refused.reason ?? "", /does not support aside/);
++  } finally {
++    await capable.disconnect().catch(() => undefined);
++    await cleanup();
++  }
++});
++
++test("aside requests break mutual-ask cycles and can be actively cancelled", { concurrency: false }, async () => {
++  const { planner, cleanup } = await setupClients();
++  const capable = new IntercomClient();
++
++  try {
++    await capable.connect({
++      name: "aside-capable",
++      cwd: repoDir,
++      model: "test-model",
++      pid: process.pid,
++      startedAt: Date.now(),
++      lastActivity: Date.now(),
++      features: [ASIDE_FEATURE],
++    });
++
++    const inbound = once(capable, "message") as Promise<[SessionInfo, Message]>;
++    const first = await planner.send(capable.sessionId!, {
++      messageId: "aside-mutual-first",
++      text: "quick question",
++      expectsReply: true,
++      aside: true,
++    });
++    assert.equal(first.delivered, true);
++    await inbound;
++
++    const reverse = await capable.send(planner.sessionId!, {
++      messageId: "aside-mutual-reverse",
++      text: "regular question while aside is open",
++      expectsReply: true,
++    });
++    assert.equal(reverse.delivered, true);
++
++    const controlPromise = once(capable, "message_control") as Promise<[SessionInfo, { action: string; messageId: string }]>;
++    planner.cancelAside("aside-mutual-first");
++    const [, control] = await controlPromise;
++    assert.equal(control.action, "cancel");
++    assert.equal(control.messageId, "aside-mutual-first");
++  } finally {
++    await capable.disconnect().catch(() => undefined);
++    await cleanup();
++  }
++});
++
+ test("intercom tool prefers exact names over ID prefixes", { concurrency: false }, async () => {
+   const { orchestrator, cleanup } = await setupClients();
+   const { default: piIntercomExtension } = await import("./index.ts");
+diff --git a/package.json b/package.json
+index 82b5a05..5a11c09 100644
+--- a/package.json
++++ b/package.json
+@@ -12,12 +12,13 @@
+     "extension-api.ts",
+     "format-context.ts",
+     "reply-tracker.ts",
++    "side-session.ts",
+     "broker/**/*.ts",
+     "ui/**/*.ts",
+     "skills/**/*"
+   ],
+   "scripts": {
+-    "test": "tsx --test broker/client.test.ts broker/extension.test.ts broker/framing.test.ts broker/paths.test.ts broker/runtime-claim.test.ts broker/spawn.test.ts config.test.ts cwd.test.ts format-context.test.ts reply-tracker.test.ts intercom.integration.test.ts test/inline-message.test.ts test/overlay-width.test.ts"
++    "test": "tsx --test broker/client.test.ts broker/extension.test.ts broker/framing.test.ts broker/paths.test.ts broker/runtime-claim.test.ts broker/spawn.test.ts config.test.ts cwd.test.ts format-context.test.ts reply-tracker.test.ts intercom.integration.test.ts test/inline-message.test.ts test/overlay-width.test.ts test/side-session.test.ts"
+   },
+   "keywords": [
+     "pi-package"
+diff --git a/side-session.ts b/side-session.ts
+new file mode 100644
+index 0000000..2aada49
+--- /dev/null
++++ b/side-session.ts
+@@ -0,0 +1,179 @@
++import {
++  buildSessionContext,
++  createAgentSession,
++  createExtensionRuntime,
++  SessionManager,
++  type AgentSession,
++  type ExtensionContext,
++  type ResourceLoader,
++} from "@earendil-works/pi-coding-agent";
++import type { AssistantMessage, Message as AiMessage } from "@earendil-works/pi-ai";
++
++/**
++ * Answers an intercom "aside" question out of band, without disturbing the
++ * recipient session.
++ *
++ * The recipient's persisted session history, its on-screen timeline, and its
++ * current turn are all untouched: we spin up a throwaway, fully in-memory
++ * {@link AgentSession} seeded with a read-only snapshot of the recipient's
++ * current context, run a single prompt against it, and return the assistant's
++ * text. Nothing here writes back to `ctx.sessionManager`.
++ */
++
++/** Read-only built-in tools the aside sub-session may use to inspect the repo. */
++export const ASIDE_TOOLS = ["read", "ls", "find", "grep"] as const;
++
++/** Default wall-clock budget for a single aside answer. */
++export const ASIDE_TIMEOUT_MS = 120_000;
++
++const ASIDE_SYSTEM_PROMPT = [
++  "You are answering a one-off side question from another pi session (an aside), separate from your main working session.",
++  "The preceding messages, if any, are a read-only snapshot of your main session's context — that work is being handled elsewhere and you must not try to continue or modify it.",
++  "You have read-only tools (read/ls/find/grep) to inspect the working directory if it helps you answer accurately.",
++  "Answer the question directly and concisely. Do not attempt to take actions, make changes, or hand work back to the main session.",
++].join(" ");
++
++/** Strip pi's dynamic system-prompt footer so the sub-session re-derives its own. */
++function stripDynamicSystemPromptFooter(systemPrompt: string): string {
++  return systemPrompt
++    .replace(/\nCurrent date and time:[^\n]*(?:\nCurrent working directory:[^\n]*)?$/u, "")
++    .replace(/\nCurrent working directory:[^\n]*$/u, "")
++    .trim();
++}
++
++function createAsideResourceLoader(ctx: ExtensionContext): ResourceLoader {
++  const extensionsResult = { extensions: [], errors: [], runtime: createExtensionRuntime() };
++  const systemPrompt = stripDynamicSystemPromptFooter(ctx.getSystemPrompt());
++
++  const loader = {
++    getExtensions: () => extensionsResult,
++    getSkills: () => ({ skills: [], diagnostics: [] }),
++    getPrompts: () => ({ prompts: [], diagnostics: [] }),
++    getThemes: () => ({ themes: [], diagnostics: [] }),
++    getAgentsFiles: () => ({ agentsFiles: [] }),
++    getSystemPrompt: () => systemPrompt,
++    // Required by pi >=0.83. Keep these out of the contextual object type so
++    // the same source remains loadable against older pi SDK ResourceLoaders.
++    getSystemPromptSource: () => undefined,
++    getAppendSystemPrompt: () => [ASIDE_SYSTEM_PROMPT],
++    getAppendSystemPromptSources: () => [],
++    extendResources: () => {},
++    reload: async () => {},
++  };
++  return loader as ResourceLoader;
++}
++
++function lastAssistantText(session: AgentSession): string {
++  for (let i = session.state.messages.length - 1; i >= 0; i--) {
++    const message = session.state.messages[i];
++    if (message.role === "assistant") {
++      const assistant = message as AssistantMessage & { stopReason?: string; errorMessage?: string };
++      if (assistant.stopReason === "aborted") throw new Error("aborted");
++      if (assistant.stopReason === "error") {
++        throw new Error(assistant.errorMessage || "aside model request failed");
++      }
++      const text = assistant.content
++        .filter((part): part is Extract<typeof part, { type: "text" }> => part.type === "text")
++        .map((part) => part.text)
++        .join("\n")
++        .trim();
++      if (!text) throw new Error("aside returned no text response");
++      return text;
++    }
++  }
++  throw new Error("aside returned no assistant response");
++}
++
++export interface AnswerAsideOptions {
++  timeoutMs?: number;
++  /** Optional external cancellation (e.g. extension shutdown). */
++  signal?: AbortSignal;
++}
++
++/**
++ * Run `question` against an in-memory fork of the recipient's context and
++ * return the assistant's answer text. Throws if no model is available or the
++ * run times out / is aborted.
++ */
++export async function answerAside(
++  ctx: ExtensionContext,
++  question: string,
++  options: AnswerAsideOptions = {},
++): Promise<string> {
++  const model = ctx.model;
++  if (!model) {
++    throw new Error("no active model in the target session");
++  }
++
++  const registry = ctx.modelRegistry as unknown as { runtime?: unknown };
++  const sessionOptions: Record<string, unknown> = {
++    cwd: ctx.cwd,
++    sessionManager: SessionManager.inMemory(ctx.cwd),
++    model,
++    tools: [...ASIDE_TOOLS],
++    resourceLoader: createAsideResourceLoader(ctx),
++  };
++  // Pi <=0.79 accepted ModelRegistry directly; Pi >=0.80 accepts the
++  // underlying ModelRuntime. Select at runtime so one patch works across the
++  // SDK range supported by upstream pi-intercom.
++  if (registry.runtime) {
++    sessionOptions.modelRuntime = registry.runtime;
++  } else {
++    sessionOptions.modelRegistry = ctx.modelRegistry;
++  }
++
++  const { session } = await createAgentSession(
++    sessionOptions as Parameters<typeof createAgentSession>[0],
++  );
++
++  const timeoutMs = options.timeoutMs ?? ASIDE_TIMEOUT_MS;
++  let timer: ReturnType<typeof setTimeout> | undefined;
++  let rejectAbort: ((error: Error) => void) | undefined;
++  const aborted = new Promise<never>((_resolve, reject) => {
++    rejectAbort = reject;
++  });
++  const onExternalAbort = () => {
++    void session.abort();
++    rejectAbort?.(new Error("aborted"));
++  };
++
++  try {
++    // Capture the leaf before entries so a concurrently advancing main session
++    // cannot give buildSessionContext a leaf newer than the snapshot.
++    try {
++      const leafId = ctx.sessionManager.getLeafId();
++      const entries = ctx.sessionManager.getEntries();
++      const seed = buildSessionContext(entries, leafId).messages;
++      if (seed.length > 0) {
++        session.agent.state.messages = seed as AiMessage[] as typeof session.agent.state.messages;
++      }
++    } catch {
++      // If the snapshot can't be built, answer from the question alone.
++    }
++
++    if (options.signal) {
++      if (options.signal.aborted) throw new Error("aborted");
++      options.signal.addEventListener("abort", onExternalAbort, { once: true });
++    }
++
++    const run = session.prompt(question, { source: "extension" });
++    const timeout = new Promise<never>((_, reject) => {
++      timer = setTimeout(() => {
++        void session.abort();
++        reject(new Error(`aside timed out after ${Math.round(timeoutMs / 1000)}s`));
++      }, timeoutMs);
++    });
++
++    await Promise.race([run, timeout, aborted]);
++    return lastAssistantText(session);
++  } finally {
++    if (timer) clearTimeout(timer);
++    options.signal?.removeEventListener("abort", onExternalAbort);
++    try {
++      await session.abort();
++    } catch {
++      // best-effort
++    }
++    session.dispose();
++  }
++}
+diff --git a/skills/pi-intercom/SKILL.md b/skills/pi-intercom/SKILL.md
+index a4b39aa..f623525 100644
+--- a/skills/pi-intercom/SKILL.md
++++ b/skills/pi-intercom/SKILL.md
+@@ -198,6 +198,7 @@ it as a `contact_supervisor` escalation.
+ |--------|----------|----------|
+ | `send` | Fire-and-forget | You don't need a response |
+ | `ask` | Blocks until reply (10 min default, configurable with `PI_INTERCOM_ASK_TIMEOUT_MS`) | You need an answer to continue |
++| `aside` | Blocks like `ask`, but the peer answers out of band without interruption or history changes | You need a quick answer from a busy peer's current context |
+ | `reply` | Responds to the active or pending inbound ask | You were asked something and need to answer naturally |
+ | `pending` | Lists unresolved inbound asks | You need to see who is waiting before replying |
+ | `list` | Returns all sessions with live status | You need to discover targets or choose an idle peer |
+@@ -299,11 +300,12 @@ If neither `cmux` nor `tmux` is available, skip this path and use normal `interc
+ 
+ ## Important Constraints
+ 
+-### `ask` Limitations
++### `ask` and `aside` Limitations
+ 
+ - **Configurable timeout**: If no reply arrives before the shared ask timeout, the ask fails. The default is 10 minutes; set `PI_INTERCOM_ASK_TIMEOUT_MS` to a positive millisecond value to change it.
+-- **One at a time**: Cannot have multiple pending asks from the same session
++- **One at a time**: Cannot have multiple pending asks/asides from the same session
+ - **Cannot self-target**: A session cannot ask itself
++- **Aside is read-only**: The recipient answers from a temporary context fork with only read/ls/find/grep tools; it cannot make changes or continue its main task
+ 
+ ```typescript
+ // Check if already waiting before asking
+diff --git a/test/side-session.test.ts b/test/side-session.test.ts
+new file mode 100644
+index 0000000..0c1d05b
+--- /dev/null
++++ b/test/side-session.test.ts
+@@ -0,0 +1,19 @@
++import assert from "node:assert/strict";
++import test from "node:test";
++import { answerAside, ASIDE_TOOLS, ASIDE_TIMEOUT_MS } from "../side-session.ts";
++
++test("answerAside exposes read-only inspection tools and a default timeout", () => {
++  // The aside sub-session must never get mutating tools (bash/edit/write): it
++  // answers out of band while the main session continues owning the workspace.
++  assert.deepEqual([...ASIDE_TOOLS], ["read", "ls", "find", "grep"]);
++  assert.ok(ASIDE_TIMEOUT_MS > 0);
++});
++
++test("answerAside rejects when the target session has no active model", async () => {
++  const ctx = {
++    model: undefined,
++    cwd: process.cwd(),
++  } as unknown as Parameters<typeof answerAside>[0];
++
++  await assert.rejects(() => answerAside(ctx, "anything?"), /no active model/);
++});
+diff --git a/types.ts b/types.ts
+index bdb1ef4..88bf60e 100644
+--- a/types.ts
++++ b/types.ts
+@@ -1,4 +1,5 @@
+ export const EXTENSION_BUS_FEATURE = "extension-bus-v1";
++export const ASIDE_FEATURE = "aside-v1";
+ 
+ export interface SessionInfo {
+   id: string;
+@@ -11,6 +12,8 @@ export interface SessionInfo {
+   status?: string;
+   peerUid?: number;
+   trustedLocal?: boolean;
++  /** Recipient-side capabilities advertised by this session. */
++  features?: string[];
+   /** Live context-window usage, pushed via presence from the source session's
+    *  getContextUsage(). contextPct is 0..100 (rounded); contextTokens /
+    *  contextWindow are raw token counts. All optional: unknown right after a
+@@ -33,6 +36,14 @@ export interface Message {
+   retryOf?: string;
+   replyTo?: string;
+   expectsReply?: boolean;
++  /**
++   * Marks this as a one-off "aside" question: the recipient answers it out of
++   * band using an in-memory forked sub-session seeded with its current context,
++   * instead of injecting it into the timeline / triggering a turn.
++   */
++  aside?: boolean;
++  /** Machine-readable failure for a reply (rather than successful answer text). */
++  replyError?: string;
+   content: {
+     text: string;
+     attachments?: Attachment[];
+@@ -81,7 +92,7 @@ export type ClientMessage =
+   | { type: "list"; requestId: string }
+   | { type: "send"; to: string; message: Message }
+   | { type: "message_receipt"; receipt: MessageReceipt }
+-  | { type: "cancel_message"; messageId: string }
++  | { type: "cancel_message"; messageId: string; requestId?: string }
+   | { type: "cancel_ask"; messageId: string }
+   | { type: "presence"; name?: string; status?: string; model?: string; contextPct?: number | null; contextTokens?: number | null; contextWindow?: number | null }
+   | {
+-- 
+2.54.0
+

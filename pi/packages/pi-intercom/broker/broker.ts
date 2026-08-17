@@ -1,243 +1,493 @@
 import net from "net";
-import { writeFileSync, unlinkSync, mkdirSync, chmodSync, readFileSync, statSync } from "fs";
+import { writeFileSync, unlinkSync } from "fs";
 import { join } from "path";
-import { homedir } from "os";
 import { randomUUID } from "crypto";
-import { writeMessage, writeFrame, encodeMessage, createMessageReader, MAX_FRAME_BYTES } from "./framing.js";
-import { classifySocketProbeError, getBrokerSocketPath } from "./paths.js";
-import { isMessage, isSessionRegistration } from "./validation.js";
-import type { SessionInfo, BrokerMessage } from "../types.js";
-import { PROTOCOL_VERSION } from "../types.js";
+import { MAX_FRAME_BYTES, createMessageReader, encodeMessage, writeFrame, writeMessage } from "./framing.ts";
+import {
+  classifySocketProbeError,
+  ensureIntercomRuntimeDir,
+  getBrokerListenTarget,
+  getBrokerPortFilePath,
+  getIntercomDirPath,
+  INTERCOM_PROTOCOL_NAME,
+  INTERCOM_PROTOCOL_VERSION,
+  INTERCOM_RUNTIME_FILE_MODE,
+  restrictIntercomRuntimeFile,
+  type BrokerConnectTarget,
+} from "./paths.ts";
+import { getAskTimeoutMs } from "../config.ts";
+import { sameCwd } from "../cwd.ts";
+import { ASIDE_FEATURE, EXTENSION_BUS_FEATURE } from "../types.ts";
+import type { SessionInfo, Message, Attachment, BrokerMessage, SessionRegistration, ExtensionCapability, MessageControl, MessageReceipt, MessageReceiptStatus } from "../types.ts";
+import { ExtensionStateManager } from "./extension-state.ts";
+import {
+  assertNoLiveBroker,
+  captureRuntimeFileIdentity,
+  pidFileIsOwnedBy,
+  runtimeFileHasIdentity,
+  tcpEndpointFileIsOwnedBy,
+  type RuntimeFileIdentity,
+} from "./runtime-claim.ts";
 
-const INTERCOM_DIR = join(homedir(), ".pi/agent/intercom");
-const SOCKET_PATH = getBrokerSocketPath();
+const INTERCOM_DIR = getIntercomDirPath();
+const LISTEN_TARGET = getBrokerListenTarget();
 const PID_PATH = join(INTERCOM_DIR, "broker.pid");
-// If a peer's outbound buffer grows past this, the consumer isn't reading (a
-// wedged or SIGKILL'd-but-not-closed socket). Node would otherwise buffer the
-// data in broker memory without bound; treat such a peer as dead and reap it.
-// Override with PI_INTERCOM_MAX_SOCKET_BUFFER_BYTES.
-//
-// The cap is floored at 2x the max frame size: a single legal message can be
-// up to MAX_FRAME_BYTES, and the re-framed forward adds the sender's
-// SessionInfo, so one in-flight message to a momentarily-slow (but healthy)
-// consumer must NOT be mistaken for a wedge and reaped mid-delivery. Headroom
-// for one in-flight + one queued max frame is the smallest safe bound.
-const MAX_SOCKET_BUFFER_FLOOR = MAX_FRAME_BYTES * 2;
-const MAX_SOCKET_BUFFER_BYTES: number = (() => {
-  const raw = Number(process.env.PI_INTERCOM_MAX_SOCKET_BUFFER_BYTES);
-  const configured = Number.isInteger(raw) && raw > 0 ? raw : 8 * 1024 * 1024;
-  return Math.max(configured, MAX_SOCKET_BUFFER_FLOOR);
-})();
-// Period for the liveness sweep that reaps sessions whose owning process is
-// gone. A SIGKILL'd peer's socket `close` may never fire (e.g. its FD was
-// inherited by an ancestor terminal), so event-driven teardown alone leaves
-// zombies. Override with PI_INTERCOM_REAPER_INTERVAL_MS; 0 disables the sweep.
-const REAPER_INTERVAL_MS: number = (() => {
-  const raw = Number(process.env.PI_INTERCOM_REAPER_INTERVAL_MS);
-  return Number.isInteger(raw) && raw >= 0 ? raw : 30_000;
+const PORT_PATH = getBrokerPortFilePath(INTERCOM_DIR);
+const BROKER_STATE_ID = randomUUID();
+const MAX_SESSIONS = 128;
+const MAX_UNREGISTERED_CONNECTIONS = 32;
+const REGISTRATION_TIMEOUT_MS = 1000;
+const RATE_LIMIT_CAPACITY = 240;
+const RATE_LIMIT_REFILL_PER_SECOND = 120;
+const PRESENCE_HEARTBEAT_MS = 1000;
+const MAX_EXTENSIONS_PER_SESSION = 32;
+const MAX_EXTENSION_MESSAGE_BYTES = 16 * 1024;
+const MAX_EXTENSION_STATE_BYTES = 64 * 1024;
+const MESSAGE_RECEIPT_ROUTE_RETENTION_MS = 60 * 60 * 1000;
+const DISCONNECTED_SESSION_RETENTION_MS = 24 * 60 * 60 * 1000;
+const MAILBOX_MESSAGE_RETENTION_MS = 24 * 60 * 60 * 1000;
+const MAX_MAILBOX_MESSAGES = 256;
+// Keep room for at least two maximum-sized frames before treating a peer as
+// wedged. One additional frame can be queued before the next guarded write.
+const MIN_SOCKET_BUFFER_BYTES = MAX_FRAME_BYTES * 2;
+const MAX_SOCKET_BUFFER_BYTES = (() => {
+  const configured = Number(process.env.PI_INTERCOM_MAX_SOCKET_BUFFER_BYTES);
+  const requested = Number.isInteger(configured) && configured > 0
+    ? configured
+    : 8 * 1024 * 1024;
+  return Math.max(requested, MIN_SOCKET_BUFFER_BYTES);
 })();
 
-/**
- * Whether a pid is definitively gone. Returns true only on ESRCH (no such
- * process); EPERM (exists, not ours), invalid pids, and live processes all
- * return false so we never reap a session we can't prove is dead.
- */
-function isProcessLikelyDead(pid: number): boolean {
-  if (!Number.isInteger(pid) || pid <= 0) {
-    return false;
-  }
+function serializedPayloadSize(payload: unknown): number | null {
   try {
-    process.kill(pid, 0);
-    return false;
-  } catch (error) {
-    return (error as NodeJS.ErrnoException).code === "ESRCH";
+    const json = JSON.stringify(payload);
+    return json === undefined ? null : Buffer.byteLength(json, "utf8");
+  } catch {
+    return null;
   }
 }
 
 interface ConnectedSession {
   socket: net.Socket;
   info: SessionInfo;
+  lastPresenceBroadcastAt: number;
+  ownerOrder: number;
+  extensions?: ExtensionCapability[];
 }
 
-interface SessionLookup {
-  targets: ConnectedSession[];
-  match: "id" | "name" | "idPrefix" | "none";
+interface NamespaceOwner {
+  sessionId: string;
+  socket: net.Socket;
+  epoch: string;
+}
+
+interface ConnectionState {
+  socket: net.Socket;
+  tokens: number;
+  lastRefillAt: number;
+}
+
+interface AskEdge {
+  from: string;
+  to: string;
+  createdAt: number;
+  aside: boolean;
+}
+
+interface MessageReceiptRoute {
+  from: string;
+  to: string;
+  createdAt: number;
+}
+
+interface DisconnectedSession {
+  info: SessionInfo;
+  disconnectedAt: number;
+}
+
+interface MailboxMessage {
+  from: SessionInfo;
+  target: SessionInfo;
+  message: Message;
+  queuedAt: number;
+}
+
+function isMessageReceiptStatus(value: unknown): value is MessageReceiptStatus {
+  return value === "receiver_received"
+    || value === "queued"
+    || value === "injected"
+    || value === "acknowledged"
+    || value === "expired"
+    || value === "cancelled"
+    || value === "superseded"
+    || value === "cancellation_requested";
+}
+
+function isMessageReceipt(value: unknown): value is MessageReceipt {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return false;
+  }
+  const receipt = value as Record<string, unknown>;
+  if (typeof receipt.messageId !== "string" || !isMessageReceiptStatus(receipt.status) || typeof receipt.timestamp !== "number") {
+    return false;
+  }
+  return receipt.detail === undefined || typeof receipt.detail === "string";
+}
+
+function isAttachment(value: unknown): value is Attachment {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+
+  const attachment = value as Record<string, unknown>;
+
+  if (
+    attachment.type !== "file"
+    && attachment.type !== "snippet"
+    && attachment.type !== "context"
+  ) {
+    return false;
+  }
+
+  if (typeof attachment.name !== "string" || typeof attachment.content !== "string") {
+    return false;
+  }
+
+  return attachment.language === undefined || typeof attachment.language === "string";
+}
+
+function isMessage(value: unknown): value is Message {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+
+  const message = value as Record<string, unknown>;
+
+  if (typeof message.id !== "string" || typeof message.timestamp !== "number") {
+    return false;
+  }
+
+  for (const key of ["senderSequence", "brokerReceivedAt", "brokerDeliveredAt", "receiverReceivedAt", "injectedAt"] as const) {
+    if (message[key] !== undefined && typeof message[key] !== "number") {
+      return false;
+    }
+  }
+
+  if (message.supersedes !== undefined && typeof message.supersedes !== "string") {
+    return false;
+  }
+
+  if (message.retryOf !== undefined && typeof message.retryOf !== "string") {
+    return false;
+  }
+
+  if (message.replyTo !== undefined && typeof message.replyTo !== "string") {
+    return false;
+  }
+
+  if (message.expectsReply !== undefined && typeof message.expectsReply !== "boolean") {
+    return false;
+  }
+
+  if (message.aside !== undefined && typeof message.aside !== "boolean") {
+    return false;
+  }
+
+  if (message.replyError !== undefined && typeof message.replyError !== "string") {
+    return false;
+  }
+
+  if (typeof message.content !== "object" || message.content === null) {
+    return false;
+  }
+
+  const content = message.content as Record<string, unknown>;
+  if (typeof content.text !== "string") {
+    return false;
+  }
+
+  return content.attachments === undefined
+    || (Array.isArray(content.attachments) && content.attachments.every(isAttachment));
+}
+
+function isSessionId(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+function isSessionRegistration(value: unknown): value is SessionRegistration {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return false;
+  }
+
+  const session = value as Record<string, unknown>;
+
+  if (
+    typeof session.cwd !== "string"
+    || typeof session.model !== "string"
+    || typeof session.pid !== "number"
+    || typeof session.startedAt !== "number"
+    || typeof session.lastActivity !== "number"
+  ) {
+    return false;
+  }
+
+  if (session.name !== undefined && typeof session.name !== "string") {
+    return false;
+  }
+  if (session.runtimeFallbackAlias !== undefined && typeof session.runtimeFallbackAlias !== "boolean") {
+    return false;
+  }
+
+  if (session.features !== undefined && (!Array.isArray(session.features) || !session.features.every((feature) => typeof feature === "string"))) {
+    return false;
+  }
+
+  return session.status === undefined || typeof session.status === "string";
 }
 
 class IntercomBroker {
   private sessions = new Map<string, ConnectedSession>();
+  private askEdges = new Map<string, AskEdge>();
+  private messageReceiptRoutes = new Map<string, MessageReceiptRoute>();
+  private disconnectedSessions = new Map<string, DisconnectedSession>();
+  private mailboxMessages: MailboxMessage[] = [];
+  private connections = new Set<net.Socket>();
+  private unregisteredConnections = new Set<net.Socket>();
   private server: net.Server;
   private shutdownTimer: NodeJS.Timeout | null = null;
-  private reapTimer: NodeJS.Timeout | null = null;
-  private boundSocketIdentity: { dev: number; ino: number } | null = null;
+  private readonly askTimeoutMs = getAskTimeoutMs();
+  private namespaceOwners = new Map<string, NamespaceOwner>();
+  private nextOwnerOrder = 1;
+  private extensionStateManager: ExtensionStateManager;
+  private boundSocketIdentity: RuntimeFileIdentity | null = null;
+  private startupComplete = false;
+  private shuttingDown = false;
 
   constructor() {
-    mkdirSync(INTERCOM_DIR, { recursive: true });
-    if (process.platform !== "win32") {
-      // Lock the intercom dir to the owner (0700). The socket lives inside it,
-      // and connecting requires traversing the dir, so this is the primary
-      // access-control boundary: another local user cannot reach the socket.
-      // mkdirSync's mode only applies on creation, so chmod unconditionally to
-      // also tighten a pre-existing, looser-permission dir.
-      try {
-        chmodSync(INTERCOM_DIR, 0o700);
-      } catch {
-        // Best effort; a failure here doesn't make things less safe than before.
-      }
-      // NOTE: the stale-socket unlink is deliberately NOT done here. Unlinking
-      // unconditionally would delete a LIVE broker's socket if a second broker
-      // ever starts; bindSocket() probes first and only unlinks a dead socket.
-    }
+    ensureIntercomRuntimeDir(INTERCOM_DIR);
+    this.extensionStateManager = new ExtensionStateManager(INTERCOM_DIR);
     this.server = net.createServer(this.handleConnection.bind(this));
   }
 
   start(): void {
-    // Without an 'error' listener, a listen failure (EADDRINUSE race, EACCES,
-    // permissions on the socket dir) is thrown as an uncaught exception and the
-    // broker dies silently. Surface it deterministically and exit non-zero so
-    // the spawning client reports a real startup failure.
-    this.server.on("error", (error) => {
-      if ((error as NodeJS.ErrnoException).code === "EADDRINUSE") {
-        // Another broker bound the socket between our probe and listen (a
-        // narrow race the spawn lock normally prevents). It won; exit cleanly
-        // rather than reporting a startup failure.
-        console.log("Intercom broker socket already in use; another broker won the race, exiting");
-        process.exit(0);
-      }
-      console.error("Intercom broker server error:", error);
-      process.exit(1);
-    });
-    // Defense-in-depth: the shared broker serves every session, so one stray
-    // throw/rejection outside the per-connection framing guard must not take
-    // the whole mesh down. Log and keep serving.
-    process.on("uncaughtException", (error) => {
-      console.error("Intercom broker uncaught exception:", error);
-    });
-    process.on("unhandledRejection", (reason) => {
-      console.error("Intercom broker unhandled rejection:", reason);
-    });
-    this.bindSocket();
-    if (REAPER_INTERVAL_MS > 0) {
-      this.reapTimer = setInterval(() => this.reapDeadSessions(), REAPER_INTERVAL_MS);
-      // Don't keep the process alive solely for the sweep.
-      this.reapTimer.unref();
-    }
-    process.on("SIGTERM", () => this.shutdown());
-    process.on("SIGINT", () => this.shutdown());
+    this.server.on("error", (error) => this.handleServerError(error));
+    process.once("SIGTERM", () => this.shutdown());
+    process.once("SIGINT", () => this.shutdown());
+    this.bindListenTarget();
   }
 
-  /**
-   * Claim the listening socket safely. On POSIX, probe the socket path first:
-   * if a live broker answers, this broker lost the spawn race and exits; only
-   * a non-connectable (stale) socket is unlinked before listening. This avoids
-   * the split-brain where an unconditional unlink deletes a live broker's
-   * socket (old clients keep the orphaned inode, new clients hit this broker).
-   */
-  private bindSocket(): void {
-    const listen = (): void => {
-      this.server.listen(SOCKET_PATH, () => {
-        if (process.platform !== "win32") {
-          // Defense-in-depth alongside the 0700 dir: restrict the socket file
-          // itself to the owner so it is never connectable by other users
-          // even if the dir permissions are somehow relaxed.
-          try {
-            chmodSync(SOCKET_PATH, 0o600);
-          } catch {
-            // The dir 0700 is the real boundary; this is extra hardening.
-          }
-        }
-        writeFileSync(PID_PATH, String(process.pid), { mode: 0o600 });
-        chmodSync(PID_PATH, 0o600);
-        if (process.platform !== "win32") {
-          try {
-            const stat = statSync(SOCKET_PATH);
-            this.boundSocketIdentity = { dev: stat.dev, ino: stat.ino };
-          } catch {
-            this.boundSocketIdentity = null;
-          }
-        }
-        console.log(`Intercom broker started (pid: ${process.pid})`);
-      });
-    };
-
-    if (process.platform === "win32") {
-      // Named pipes leave no stale filesystem entry to unlink or probe.
-      listen();
+  private bindListenTarget(): void {
+    const isUnixSocket = typeof LISTEN_TARGET === "string" && process.platform !== "win32";
+    if (!isUnixSocket) {
+      try {
+        assertNoLiveBroker(PID_PATH);
+        this.listen();
+      } catch (error) {
+        this.failStartup("Intercom broker could not claim its runtime", error);
+      }
       return;
     }
 
+    // Keep the identity observed before probing so a refused socket cannot be
+    // replaced by a new live broker in the probe-to-unlink window.
+    const probedSocketIdentity = captureRuntimeFileIdentity(LISTEN_TARGET);
     let settled = false;
-    const probe = net.connect(SOCKET_PATH);
-    const finish = (result: "live" | "stale" | "indeterminate"): void => {
+    const probe = net.connect(LISTEN_TARGET);
+    const finish = (result: "live" | "missing" | "refused" | "indeterminate", error?: Error): void => {
       if (settled) return;
       settled = true;
       probe.destroy();
+
       if (result === "live") {
         console.log("Intercom broker already running; exiting");
         process.exit(0);
       }
       if (result === "indeterminate") {
-        console.error("Intercom broker socket probe failed or timed out; refusing to replace an unverified socket");
-        process.exit(1);
+        this.failStartup("Intercom broker socket probe was inconclusive; refusing to replace it", error);
       }
+
       try {
-        unlinkSync(SOCKET_PATH);
-      } catch {
-        // No stale socket to remove.
+        if (result === "refused" && !runtimeFileHasIdentity(LISTEN_TARGET, probedSocketIdentity)) {
+          this.bindListenTarget();
+          return;
+        }
+        assertNoLiveBroker(PID_PATH);
+        if (result === "refused") {
+          unlinkSync(LISTEN_TARGET);
+        }
+        this.listen();
+      } catch (claimError) {
+        this.failStartup("Intercom broker could not claim its Unix socket", claimError);
       }
-      listen();
     };
+
     probe.once("connect", () => finish("live"));
-    probe.once("error", (error: NodeJS.ErrnoException) => finish(classifySocketProbeError(error)));
-    // A timeout is inconclusive: unlinking here could split a slow live broker.
-    probe.setTimeout(1000, () => finish("indeterminate"));
+    probe.once("error", (error: NodeJS.ErrnoException) => {
+      if (classifySocketProbeError(error) === "indeterminate") {
+        finish("indeterminate", error);
+      } else {
+        finish(error.code === "ENOENT" ? "missing" : "refused");
+      }
+    });
+    probe.setTimeout(1000, () => finish("indeterminate", new Error("Unix socket probe timed out")));
   }
 
-  private reapDeadSessions(): void {
-    const dead: Array<{ id: string; pid: number }> = [];
-    for (const [id, session] of this.sessions) {
-      if (isProcessLikelyDead(session.info.pid)) {
-        dead.push({ id, pid: session.info.pid });
+  private listen(): void {
+    const onListening = () => {
+      try {
+        if (typeof LISTEN_TARGET === "string") {
+          restrictIntercomRuntimeFile(LISTEN_TARGET);
+          if (process.platform !== "win32") {
+            this.boundSocketIdentity = captureRuntimeFileIdentity(LISTEN_TARGET);
+          }
+        } else {
+          const address = this.server.address();
+          if (!address || typeof address === "string") {
+            throw new Error("Intercom TCP broker started without a TCP address");
+          }
+          const endpoint: BrokerConnectTarget = {
+            transport: "tcp",
+            host: LISTEN_TARGET.host,
+            port: address.port,
+            stateId: BROKER_STATE_ID,
+          };
+          writeFileSync(PORT_PATH, `${JSON.stringify(endpoint)}\n`, { mode: INTERCOM_RUNTIME_FILE_MODE });
+          restrictIntercomRuntimeFile(PORT_PATH);
+        }
+        writeFileSync(PID_PATH, String(process.pid), { mode: INTERCOM_RUNTIME_FILE_MODE });
+        restrictIntercomRuntimeFile(PID_PATH);
+        this.startupComplete = true;
+        console.log(`Intercom broker started (pid: ${process.pid})`);
+      } catch (error) {
+        this.failStartup("Intercom broker failed to publish its runtime state", error);
       }
+    };
+
+    if (typeof LISTEN_TARGET === "string") {
+      this.server.listen(LISTEN_TARGET, onListening);
+    } else {
+      this.server.listen({ host: LISTEN_TARGET.host, port: LISTEN_TARGET.port }, onListening);
     }
-    for (const { id, pid } of dead) {
-      this.removeSession(id, `Owning process ${pid} no longer running`);
+  }
+
+  private handleServerError(error: Error): void {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (!this.startupComplete && code === "EADDRINUSE") {
+      console.log("Intercom broker listen target already in use; another broker won the race, exiting");
+      process.exit(0);
     }
+    this.failStartup(this.startupComplete
+      ? "Intercom broker server error"
+      : "Intercom broker listen failed", error);
+  }
+
+  private failStartup(message: string, error?: unknown): never {
+    console.error(`${message}:`, error instanceof Error ? error : String(error ?? "unknown error"));
+    this.removeOwnedRuntimeFiles();
+    process.exit(1);
   }
 
   private handleConnection(socket: net.Socket): void {
+    this.connections.add(socket);
     let sessionId: string | null = null;
-
-    const cleanupRegisteredSession = (): void => {
-      if (!sessionId) {
-        return;
+    let registrationTimeout: NodeJS.Timeout | null = null;
+    const armRegistrationTimeout = () => {
+      if (registrationTimeout) {
+        clearTimeout(registrationTimeout);
       }
-      const id = sessionId;
-      sessionId = null;
-      if (this.sessions.delete(id)) {
-        this.broadcast({ type: "session_left", sessionId: id }, id);
-        this.scheduleShutdownCheck();
+      this.unregisteredConnections.delete(socket);
+      this.unregisteredConnections.add(socket);
+      this.evictOldestUnregisteredConnections(socket);
+      registrationTimeout = setTimeout(() => {
+        if (!sessionId) {
+          socket.destroy();
+        }
+      }, REGISTRATION_TIMEOUT_MS);
+      registrationTimeout.unref?.();
+    };
+    const clearRegistrationTimeout = () => {
+      if (registrationTimeout) {
+        clearTimeout(registrationTimeout);
+        registrationTimeout = null;
       }
+      this.unregisteredConnections.delete(socket);
+    };
+    armRegistrationTimeout();
+    const connection: ConnectionState = {
+      socket,
+      tokens: RATE_LIMIT_CAPACITY,
+      lastRefillAt: Date.now(),
     };
 
     const reader = createMessageReader((msg) => {
+      if (!this.consumeToken(connection)) {
+        writeMessage(socket, { type: "error", error: "Intercom broker rate limit exceeded" });
+        socket.destroy(new Error("Intercom broker rate limit exceeded"));
+        return;
+      }
       this.handleMessage(socket, msg, sessionId, (id) => {
         sessionId = id;
+        if (id) {
+          clearRegistrationTimeout();
+        } else {
+          armRegistrationTimeout();
+        }
       });
     }, (error) => {
       socket.destroy(error);
     });
 
     socket.on("data", reader);
-    socket.on("close", cleanupRegisteredSession);
+
+    socket.on("close", () => {
+      clearRegistrationTimeout();
+      this.connections.delete(socket);
+      if (sessionId) {
+        const existing = this.sessions.get(sessionId);
+        if (existing?.socket === socket) {
+          this.rememberDisconnectedSession(existing.info);
+          this.sessions.delete(sessionId);
+          this.clearMessageReceiptRoutesForSession(sessionId);
+          this.broadcast({ type: "session_left", sessionId }, sessionId);
+          this.recomputeNamespaceOwners();
+          this.scheduleShutdownCheck();
+        }
+      }
+    });
 
     socket.on("error", (error) => {
       console.error("Socket error:", error);
-      cleanupRegisteredSession();
-      if (!socket.destroyed) {
-        socket.destroy();
-      }
     });
+  }
+
+  private evictOldestUnregisteredConnections(currentSocket: net.Socket): void {
+    while (this.unregisteredConnections.size > MAX_UNREGISTERED_CONNECTIONS) {
+      const [oldest] = this.unregisteredConnections;
+      if (!oldest) {
+        return;
+      }
+      if (oldest === currentSocket && this.unregisteredConnections.size === 1) {
+        return;
+      }
+      this.unregisteredConnections.delete(oldest);
+      oldest.destroy();
+    }
+  }
+
+  private consumeToken(connection: ConnectionState, now = Date.now()): boolean {
+    const elapsedMs = now - connection.lastRefillAt;
+    if (elapsedMs > 0) {
+      connection.tokens = Math.min(
+        RATE_LIMIT_CAPACITY,
+        connection.tokens + elapsedMs * RATE_LIMIT_REFILL_PER_SECOND / 1000,
+      );
+      connection.lastRefillAt = now;
+    }
+    if (connection.tokens < 1) {
+      return false;
+    }
+    connection.tokens -= 1;
+    return true;
   }
 
   private scheduleShutdownCheck(): void {
@@ -263,6 +513,28 @@ class IntercomBroker {
     }
 
     const clientMessage = msg as { type: string } & Record<string, unknown>;
+    const requiresEndpointAuth = typeof LISTEN_TARGET !== "string";
+    const hasEndpointAuth = clientMessage.stateId === BROKER_STATE_ID;
+
+    if (clientMessage.type === "health") {
+      if (typeof clientMessage.requestId !== "string") {
+        throw new Error("Invalid health message");
+      }
+      if (requiresEndpointAuth && !hasEndpointAuth) {
+        throw new Error("Invalid intercom TCP endpoint credentials");
+      }
+      writeMessage(socket, {
+        type: "health_ok",
+        requestId: clientMessage.requestId,
+        protocol: INTERCOM_PROTOCOL_NAME,
+        version: INTERCOM_PROTOCOL_VERSION,
+      });
+      return;
+    }
+
+    if (requiresEndpointAuth && clientMessage.type === "register" && !hasEndpointAuth) {
+      throw new Error("Invalid intercom TCP endpoint credentials");
+    }
 
     if (currentId === null && clientMessage.type !== "register") {
       throw new Error(`Received ${clientMessage.type} before register`);
@@ -278,59 +550,157 @@ class IntercomBroker {
           throw new Error("Received duplicate register message");
         }
 
-        // Evict any prior registration from the same pi session. When a
-        // session reconnects (transient drop or broker restart) it registers
-        // with a fresh UUID; the old row is only cleaned when its previous
-        // socket emits `close`, which does not always fire. Keying eviction on
-        // the stable originSessionId removes the duplicate immediately, even
-        // when the stale socket still looks writable.
-        //
-        // Eviction is gated on the reconnecting registration reporting the SAME
-        // pid as the row it supersedes. A genuine reconnect is the same OS
-        // process (pid is stable across socket drops and reloads within one
-        // process), so the pid always matches. This prevents a different
-        // process from spoofing another session's originSessionId to evict or
-        // hijack it: a mismatched pid leaves the existing row untouched (the
-        // liveness reaper still clears it if that process is actually gone).
-        const originSessionId = clientMessage.session.originSessionId;
-        if (originSessionId) {
-          const claimedPid = clientMessage.session.pid;
-          const superseded = Array.from(this.sessions.values()).filter(
-            existing =>
-              existing.info.originSessionId === originSessionId
-              && existing.socket !== socket
-              && existing.info.pid === claimedPid,
-          );
-          for (const existing of superseded) {
-            this.removeSession(existing.info.id, "superseded by reconnect");
+        let id: string = randomUUID();
+        if (clientMessage.sessionId !== undefined) {
+          if (!isSessionId(clientMessage.sessionId)) {
+            throw new Error("Invalid register sessionId");
+          }
+          id = clientMessage.sessionId;
+        }
+        const session = clientMessage.session;
+        const extensions = session.extensions;
+        if (extensions !== undefined) {
+          if (!Array.isArray(extensions) || extensions.length > MAX_EXTENSIONS_PER_SESSION) {
+            throw new Error(`Invalid extensions field (maximum ${MAX_EXTENSIONS_PER_SESSION})`);
+          }
+          for (const extension of extensions) {
+            if (!this.validateExtensionCapability(extension)) {
+              throw new Error(`Invalid extension capability: ${JSON.stringify(extension)}`);
+            }
           }
         }
 
-        const id = randomUUID();
+        this.pruneDisconnectedSessions();
+        this.pruneMailboxMessages();
+        const previous = this.sessions.get(id);
+        if (!previous && this.sessions.size >= MAX_SESSIONS) {
+          writeMessage(socket, { type: "error", error: "Too many registered intercom sessions" });
+          socket.destroy();
+          break;
+        }
+        if (previous) {
+          this.clearAskEdgesForSession(id);
+          this.clearMessageReceiptRoutesForSession(id);
+          previous.socket.end();
+        }
         setId(id);
-        const info: SessionInfo = { ...clientMessage.session, id };
-        this.sessions.set(id, { socket, info });
+        const info: SessionInfo = {
+          id,
+          ...(session.name !== undefined ? { name: session.name } : {}),
+          ...(session.runtimeFallbackAlias !== undefined ? { runtimeFallbackAlias: session.runtimeFallbackAlias } : {}),
+          cwd: session.cwd,
+          model: session.model,
+          pid: session.pid,
+          startedAt: session.startedAt,
+          lastActivity: session.lastActivity,
+          ...(session.status !== undefined ? { status: session.status } : {}),
+          ...(session.features !== undefined ? { features: [...session.features] } : {}),
+          trustedLocal: typeof LISTEN_TARGET === "string" && process.platform !== "win32",
+        };
+
+        const connectedSession: ConnectedSession = {
+          socket,
+          info,
+          lastPresenceBroadcastAt: Date.now(),
+          ownerOrder: previous?.ownerOrder ?? this.nextOwnerOrder++,
+          extensions,
+        };
+        this.sessions.set(id, connectedSession);
+        this.disconnectedSessions.delete(id);
         
         if (this.shutdownTimer) {
           clearTimeout(this.shutdownTimer);
           this.shutdownTimer = null;
         }
 
-        writeMessage(socket, { type: "registered", sessionId: id, version: PROTOCOL_VERSION });
+        // This must be the first broker message. Older clients ignore the
+        // additive features field; newer clients use it to avoid sending
+        // extension operations to an older broker.
+        writeMessage(socket, {
+          type: "registered",
+          sessionId: id,
+          features: [EXTENSION_BUS_FEATURE, ASIDE_FEATURE],
+        });
         this.broadcast({ type: "session_joined", session: info }, id);
+
+        this.recomputeNamespaceOwners();
+        this.flushMailboxForSession(connectedSession);
+
+        if (extensions) {
+          for (const ext of extensions) {
+            const owner = this.namespaceOwners.get(ext.namespace);
+            writeMessage(socket, {
+              type: "extension_owner",
+              namespace: ext.namespace,
+              ...(owner ? { ownerId: owner.sessionId, ownerEpoch: owner.epoch } : {}),
+            });
+            const state = this.extensionStateManager.loadState(ext.namespace);
+            if (state) {
+              writeMessage(socket, {
+                type: "extension_state",
+                namespace: ext.namespace,
+                revision: state.revision,
+                payload: state.payload,
+              });
+            }
+          }
+        }
         break;
       }
 
       case "unregister": {
-        const registeredId = currentId as string;
-        this.sessions.delete(registeredId);
+        if (!currentId) {
+          throw new Error("Received unregister before register");
+        }
+        const existing = this.sessions.get(currentId);
+        if (existing?.socket === socket) {
+          this.rememberDisconnectedSession(existing.info);
+          this.sessions.delete(currentId);
+          this.clearMessageReceiptRoutesForSession(currentId);
+          this.broadcast({ type: "session_left", sessionId: currentId }, currentId);
+          this.recomputeNamespaceOwners();
+          this.scheduleShutdownCheck();
+        }
         setId(null);
-        this.broadcast({ type: "session_left", sessionId: registeredId }, registeredId);
-        // The client always `socket.end()`s right after sending `unregister`
-        // and never reuses this socket, so destroy it now to release the FD
-        // immediately instead of waiting for the end/close roundtrip.
-        socket.destroy();
-        this.scheduleShutdownCheck();
+        break;
+      }
+
+      case "extension_capabilities_update": {
+        if (!currentId) {
+          throw new Error("Received extension_capabilities_update before register");
+        }
+        const session = this.sessions.get(currentId);
+        if (!session || session.socket !== socket) {
+          throw new Error("Extension capability session not found");
+        }
+        const extensions = clientMessage.extensions;
+        if (!Array.isArray(extensions) || extensions.length > MAX_EXTENSIONS_PER_SESSION) {
+          throw new Error(`Invalid extensions field (maximum ${MAX_EXTENSIONS_PER_SESSION})`);
+        }
+        for (const extension of extensions) {
+          if (!this.validateExtensionCapability(extension)) {
+            throw new Error(`Invalid extension capability: ${JSON.stringify(extension)}`);
+          }
+        }
+        session.extensions = extensions;
+        this.recomputeNamespaceOwners();
+        for (const extension of extensions) {
+          const owner = this.namespaceOwners.get(extension.namespace);
+          writeMessage(socket, {
+            type: "extension_owner",
+            namespace: extension.namespace,
+            ...(owner ? { ownerId: owner.sessionId, ownerEpoch: owner.epoch } : {}),
+          });
+          const state = this.extensionStateManager.loadState(extension.namespace);
+          if (state) {
+            writeMessage(socket, {
+              type: "extension_state",
+              namespace: extension.namespace,
+              revision: state.revision,
+              payload: state.payload,
+            });
+          }
+        }
         break;
       }
 
@@ -345,6 +715,9 @@ class IntercomBroker {
       }
 
       case "send": {
+        if (!currentId) {
+          throw new Error("Received send before register");
+        }
         const message = clientMessage.message;
         const messageId = isMessage(message) ? message.id : "unknown";
 
@@ -357,14 +730,24 @@ class IntercomBroker {
           break;
         }
 
-        const lookup = this.findSessions(clientMessage.to);
-        const targets = lookup.targets;
+        if (message.aside && (!message.expectsReply || message.replyTo)) {
+          writeMessage(socket, {
+            type: "delivery_failed",
+            messageId: message.id,
+            reason: "Aside messages must be top-level requests that expect a reply",
+          });
+          break;
+        }
+
+        const brokerReceivedAt = Date.now();
+        this.pruneAskEdges();
+        this.pruneMessageReceiptRoutes(brokerReceivedAt);
+        const replyEdge = message.replyTo ? this.askEdges.get(message.replyTo) : undefined;
+
+        const targets = this.findSessions(clientMessage.to);
         if (targets.length === 1) {
-          const target = targets[0];
+          const target = targets[0]!;
           if (target.info.id === currentId) {
-            // Authoritative self-send guard: clients no longer pre-resolve the
-            // target, so the broker rejects messages a session addresses to
-            // itself (by id, name, or id prefix) here.
             writeMessage(socket, {
               type: "delivery_failed",
               messageId: message.id,
@@ -372,8 +755,16 @@ class IntercomBroker {
             });
             break;
           }
-          const fromSession = this.sessions.get(currentId as string);
-          if (!fromSession) {
+          if (message.replyTo && !replyEdge) {
+            writeMessage(socket, {
+              type: "delivery_failed",
+              messageId: message.id,
+              reason: "Reply target does not match a pending ask",
+            });
+            break;
+          }
+          const fromSession = this.sessions.get(currentId);
+          if (!fromSession || fromSession.socket !== socket) {
             writeMessage(socket, {
               type: "delivery_failed",
               messageId: message.id,
@@ -381,8 +772,53 @@ class IntercomBroker {
             });
             break;
           }
+          if (message.aside && !target.info.features?.includes(ASIDE_FEATURE)) {
+            writeMessage(socket, {
+              type: "delivery_failed",
+              messageId: message.id,
+              reason: "Target session does not support aside questions",
+            });
+            break;
+          }
+          if (message.supersedes) {
+            const supersededRoute = this.messageReceiptRoutes.get(message.supersedes);
+            if (!supersededRoute || supersededRoute.from !== currentId || supersededRoute.to !== target.info.id) {
+              writeMessage(socket, {
+                type: "delivery_failed",
+                messageId: message.id,
+                reason: "Supersede target does not match a previous message from this sender to this receiver",
+              });
+              break;
+            }
+          }
+          if (replyEdge && (replyEdge.to !== currentId || replyEdge.from !== target.info.id)) {
+            writeMessage(socket, {
+              type: "delivery_failed",
+              messageId: message.id,
+              reason: "Reply target does not match the pending ask",
+            });
+            break;
+          }
+          if (message.expectsReply) {
+            const reverseEdge = Array.from(this.askEdges.entries()).find(([edgeMessageId, edge]) =>
+              edgeMessageId !== message.replyTo
+              && edge.from === target.info.id
+              && edge.to === currentId
+              && !message.aside
+              && !edge.aside
+            );
+            if (reverseEdge) {
+              writeMessage(socket, {
+                type: "delivery_failed",
+                messageId: message.id,
+                reason: "Mutual ask refused: target session is already waiting for a reply from this session.",
+              });
+              break;
+            }
+
+          }
           if (!this.isSocketWritable(target.socket)) {
-            this.removeSession(target.info.id, "Session disconnected");
+            target.socket.destroy();
             writeMessage(socket, {
               type: "delivery_failed",
               messageId: message.id,
@@ -391,7 +827,7 @@ class IntercomBroker {
             break;
           }
           if (this.isSocketBackedUp(target.socket)) {
-            this.removeSession(target.info.id, "Backpressure: outbound buffer exceeded");
+            target.socket.destroy();
             writeMessage(socket, {
               type: "delivery_failed",
               messageId: message.id,
@@ -399,18 +835,18 @@ class IntercomBroker {
             });
             break;
           }
-          // Encode the forward frame BEFORE writing. The forward adds the
-          // sender's SessionInfo, so a message at/near the cap inbound can
-          // exceed MAX_FRAME_BYTES once re-framed and make encodeMessage throw.
-          // That is the SENDER's fault (oversized payload) — it must not be
-          // mistaken for the recipient's socket dying and evict an innocent,
-          // healthy session.
+
+          const deliveredMessage: Message = {
+            ...message,
+            brokerReceivedAt,
+            brokerDeliveredAt: Date.now(),
+          };
           let forwardFrame: Buffer;
           try {
             forwardFrame = encodeMessage({
               type: "message",
               from: fromSession.info,
-              message,
+              message: deliveredMessage,
             });
           } catch {
             writeMessage(socket, {
@@ -420,10 +856,28 @@ class IntercomBroker {
             });
             break;
           }
+
           try {
+            if (message.supersedes) {
+              const supersededEdge = this.askEdges.get(message.supersedes);
+              if (supersededEdge?.from === currentId && supersededEdge.to === target.info.id) {
+                this.askEdges.delete(message.supersedes);
+              }
+              const control: MessageControl = {
+                action: "supersede",
+                messageId: message.supersedes,
+                supersededBy: message.id,
+                timestamp: Date.now(),
+              };
+              writeMessage(target.socket, {
+                type: "message_control",
+                from: fromSession.info,
+                control,
+              });
+            }
             writeFrame(target.socket, forwardFrame);
           } catch {
-            this.removeSession(target.info.id, "Session disconnected");
+            target.socket.destroy();
             writeMessage(socket, {
               type: "delivery_failed",
               messageId: message.id,
@@ -431,7 +885,15 @@ class IntercomBroker {
             });
             break;
           }
-          writeMessage(socket, { type: "delivered", messageId: message.id, recipientId: target.info.id });
+
+          if (message.expectsReply) {
+            this.askEdges.set(message.id, { from: currentId, to: target.info.id, createdAt: Date.now(), aside: message.aside === true });
+          }
+          if (message.replyTo) {
+            this.askEdges.delete(message.replyTo);
+          }
+          this.messageReceiptRoutes.set(message.id, { from: currentId, to: target.info.id, createdAt: brokerReceivedAt });
+          writeMessage(socket, { type: "delivered", messageId: message.id });
           break;
         }
 
@@ -439,9 +901,125 @@ class IntercomBroker {
           writeMessage(socket, {
             type: "delivery_failed",
             messageId: message.id,
-            reason: lookup.match === "idPrefix"
-              ? `Multiple sessions match ID prefix \"${clientMessage.to}\". Use the full session ID instead.`
-              : `Multiple sessions named \"${clientMessage.to}\" are connected. Use the session ID instead.`,
+            reason: `Multiple sessions named \"${clientMessage.to}\" are connected. Use the session ID instead.`,
+          });
+          break;
+        }
+
+        const disconnectedTargets = this.findDisconnectedSessions(clientMessage.to);
+        if (disconnectedTargets.length === 1) {
+          if (message.replyTo && !replyEdge) {
+            writeMessage(socket, {
+              type: "delivery_failed",
+              messageId: message.id,
+              reason: "Reply target does not match a pending ask",
+            });
+            break;
+          }
+          const fromSession = this.sessions.get(currentId);
+          if (!fromSession || fromSession.socket !== socket) {
+            writeMessage(socket, {
+              type: "delivery_failed",
+              messageId: message.id,
+              reason: "Sender session not found",
+            });
+            break;
+          }
+          const target = disconnectedTargets[0]!.info;
+          if (message.aside && !target.features?.includes(ASIDE_FEATURE)) {
+            writeMessage(socket, {
+              type: "delivery_failed",
+              messageId: message.id,
+              reason: "Target session does not support aside questions",
+            });
+            break;
+          }
+          if (message.supersedes) {
+            writeMessage(socket, {
+              type: "delivery_failed",
+              messageId: message.id,
+              reason: "Supersede target is not connected",
+            });
+            break;
+          }
+          if (replyEdge && (replyEdge.to !== currentId || replyEdge.from !== target.id)) {
+            writeMessage(socket, {
+              type: "delivery_failed",
+              messageId: message.id,
+              reason: "Reply target does not match the pending ask",
+            });
+            break;
+          }
+          if (message.expectsReply) {
+            writeMessage(socket, {
+              type: "delivery_failed",
+              messageId: message.id,
+              reason: "Target session is not currently connected; blocking asks are not queued",
+            });
+            break;
+          }
+          const liveMailboxTarget = this.findUniqueLiveSessionForDisconnectedSession(target, currentId);
+
+          const deliveredMessage: Message = {
+            ...message,
+            brokerReceivedAt,
+            brokerDeliveredAt: Date.now(),
+          };
+          let forwardFrame: Buffer;
+          try {
+            // Validate queued mail against the eventual forwarding envelope too,
+            // so an accepted mailbox entry cannot become permanently undeliverable.
+            forwardFrame = encodeMessage({
+              type: "message",
+              from: fromSession.info,
+              message: deliveredMessage,
+            });
+          } catch {
+            writeMessage(socket, {
+              type: "delivery_failed",
+              messageId: message.id,
+              reason: "Message too large",
+            });
+            break;
+          }
+
+          if (liveMailboxTarget) {
+            if (!this.isSocketWritable(liveMailboxTarget.socket) || this.isSocketBackedUp(liveMailboxTarget.socket)) {
+              liveMailboxTarget.socket.destroy();
+              writeMessage(socket, {
+                type: "delivery_failed",
+                messageId: message.id,
+                reason: "Recipient is not reading messages",
+              });
+              break;
+            }
+            try {
+              writeFrame(liveMailboxTarget.socket, forwardFrame);
+            } catch {
+              liveMailboxTarget.socket.destroy();
+              writeMessage(socket, {
+                type: "delivery_failed",
+                messageId: message.id,
+                reason: "Session disconnected",
+              });
+              break;
+            }
+            this.messageReceiptRoutes.set(message.id, { from: currentId, to: liveMailboxTarget.info.id, createdAt: brokerReceivedAt });
+          } else {
+            this.queueMailboxMessage(fromSession.info, target, message, brokerReceivedAt);
+          }
+          if (message.replyTo) {
+            this.askEdges.delete(message.replyTo);
+          }
+          writeMessage(socket, { type: "delivered", messageId: message.id });
+          break;
+        }
+
+        if (disconnectedTargets.length > 1) {
+          writeMessage(socket, {
+            type: "delivery_failed",
+            messageId: message.id,
+            reason: `Multiple disconnected sessions named \"${clientMessage.to}\" can receive queued mail. Use the session ID instead.`,
           });
           break;
         }
@@ -454,178 +1032,825 @@ class IntercomBroker {
         break;
       }
 
+      case "message_receipt": {
+        if (!currentId) {
+          throw new Error("Received message_receipt before register");
+        }
+        if (!isMessageReceipt(clientMessage.receipt)) {
+          throw new Error("Invalid message_receipt message");
+        }
+        this.pruneMessageReceiptRoutes();
+        const route = this.messageReceiptRoutes.get(clientMessage.receipt.messageId);
+        const receiver = this.sessions.get(currentId);
+        const sender = route ? this.sessions.get(route.from) : undefined;
+        if (route?.to === currentId && receiver?.socket === socket && sender) {
+          writeMessage(sender.socket, {
+            type: "message_receipt",
+            from: receiver.info,
+            receipt: clientMessage.receipt,
+          });
+        }
+        break;
+      }
+
+      case "cancel_message": {
+        if (!currentId) {
+          throw new Error("Received cancel_message before register");
+        }
+        if (
+          typeof clientMessage.messageId !== "string"
+          || (clientMessage.requestId !== undefined && typeof clientMessage.requestId !== "string")
+        ) {
+          throw new Error("Invalid cancel_message message");
+        }
+        const cancellationResponseId = clientMessage.requestId ?? clientMessage.messageId;
+        this.pruneMessageReceiptRoutes();
+        this.pruneMailboxMessages();
+        const sender = this.sessions.get(currentId);
+        const queuedIndex = this.mailboxMessages.findIndex(entry => entry.message.id === clientMessage.messageId && entry.from.id === currentId);
+        if (queuedIndex >= 0 && sender?.socket === socket) {
+          this.mailboxMessages.splice(queuedIndex, 1);
+          const edge = this.askEdges.get(clientMessage.messageId);
+          if (edge?.from === currentId) {
+            this.askEdges.delete(clientMessage.messageId);
+          }
+          writeMessage(socket, { type: "delivered", messageId: cancellationResponseId });
+          break;
+        }
+        const route = this.messageReceiptRoutes.get(clientMessage.messageId);
+        const receiver = route ? this.sessions.get(route.to) : undefined;
+        if (route?.from !== currentId || sender?.socket !== socket) {
+          writeMessage(socket, {
+            type: "delivery_failed",
+            messageId: cancellationResponseId,
+            reason: "Message cannot be cancelled by this session",
+          });
+          break;
+        }
+        if (receiver) {
+          writeMessage(receiver.socket, {
+            type: "message_control",
+            from: sender.info,
+            control: {
+              action: "cancel",
+              messageId: clientMessage.messageId,
+              timestamp: Date.now(),
+            },
+          });
+        }
+        const edge = this.askEdges.get(clientMessage.messageId);
+        if (edge?.from === currentId) {
+          this.askEdges.delete(clientMessage.messageId);
+        }
+        writeMessage(socket, { type: "delivered", messageId: cancellationResponseId });
+        break;
+      }
+
+      case "cancel_ask": {
+        if (!currentId) {
+          throw new Error("Received cancel_ask before register");
+        }
+        if (typeof clientMessage.messageId !== "string") {
+          throw new Error("Invalid cancel_ask message");
+        }
+        const session = this.sessions.get(currentId);
+        const edge = this.askEdges.get(clientMessage.messageId);
+        if (session?.socket === socket && edge?.from === currentId) {
+          this.askEdges.delete(clientMessage.messageId);
+        }
+        break;
+      }
+
       case "presence": {
-        const session = this.sessions.get(currentId as string);
-        if (session) {
+        if (!currentId) {
+          throw new Error("Received presence before register");
+        }
+        const session = this.sessions.get(currentId);
+        if (session?.socket === socket) {
+          let changed = false;
           if (clientMessage.name !== undefined) {
             if (typeof clientMessage.name !== "string") {
               throw new Error("Invalid presence name");
             }
-            session.info.name = clientMessage.name;
+            if (session.info.name !== clientMessage.name) {
+              session.info.name = clientMessage.name;
+              changed = true;
+            }
+          }
+          if (clientMessage.runtimeFallbackAlias !== undefined) {
+            if (typeof clientMessage.runtimeFallbackAlias !== "boolean") {
+              throw new Error("Invalid presence runtimeFallbackAlias");
+            }
+            if (session.info.runtimeFallbackAlias !== clientMessage.runtimeFallbackAlias) {
+              session.info.runtimeFallbackAlias = clientMessage.runtimeFallbackAlias;
+              changed = true;
+            }
           }
           if (clientMessage.status !== undefined) {
             if (typeof clientMessage.status !== "string") {
               throw new Error("Invalid presence status");
             }
-            session.info.status = clientMessage.status;
+            if (session.info.status !== clientMessage.status) {
+              session.info.status = clientMessage.status;
+              changed = true;
+            }
           }
           if (clientMessage.model !== undefined) {
             if (typeof clientMessage.model !== "string") {
               throw new Error("Invalid presence model");
             }
-            session.info.model = clientMessage.model;
+            if (session.info.model !== clientMessage.model) {
+              session.info.model = clientMessage.model;
+              changed = true;
+            }
           }
-          session.info.lastActivity = Date.now();
-          this.broadcast({ type: "presence_update", session: session.info }, currentId as string);
+          // Context-usage fields: a number updates, an explicit null CLEARS (the
+          // value is unknown right after a compaction — delete rather than carry
+          // the stale-high value forward), undefined leaves the field untouched.
+          if (clientMessage.contextPct !== undefined) {
+            if (clientMessage.contextPct === null) {
+              if (session.info.contextPct !== undefined) { delete session.info.contextPct; changed = true; }
+            } else if (typeof clientMessage.contextPct !== "number") {
+              throw new Error("Invalid presence contextPct");
+            } else if (session.info.contextPct !== clientMessage.contextPct) {
+              session.info.contextPct = clientMessage.contextPct;
+              changed = true;
+            }
+          }
+          if (clientMessage.contextTokens !== undefined) {
+            if (clientMessage.contextTokens === null) {
+              if (session.info.contextTokens !== undefined) { delete session.info.contextTokens; changed = true; }
+            } else if (typeof clientMessage.contextTokens !== "number") {
+              throw new Error("Invalid presence contextTokens");
+            } else if (session.info.contextTokens !== clientMessage.contextTokens) {
+              session.info.contextTokens = clientMessage.contextTokens;
+              changed = true;
+            }
+          }
+          if (clientMessage.contextWindow !== undefined) {
+            if (clientMessage.contextWindow === null) {
+              if (session.info.contextWindow !== undefined) { delete session.info.contextWindow; changed = true; }
+            } else if (typeof clientMessage.contextWindow !== "number") {
+              throw new Error("Invalid presence contextWindow");
+            } else if (session.info.contextWindow !== clientMessage.contextWindow) {
+              session.info.contextWindow = clientMessage.contextWindow;
+              changed = true;
+            }
+          }
+          const now = Date.now();
+          session.info.lastActivity = now;
+          if (changed || now - session.lastPresenceBroadcastAt >= PRESENCE_HEARTBEAT_MS) {
+            session.lastPresenceBroadcastAt = now;
+            this.broadcast({ type: "presence_update", session: session.info }, currentId);
+          }
         }
         break;
       }
 
-      default:
-        // Forward compatibility: a newer client may send a request type this
-        // (older, long-lived) broker doesn't know. Ignore it rather than
-        // throwing — throwing reaches the reader's onError and destroys the
-        // socket, disconnecting a newer client the moment it uses a new request
-        // type. The newer client's request simply goes unanswered (and times
-        // out client-side) instead of taking down the whole connection.
-        // Known-but-malformed messages are still rejected in their own cases,
-        // and a pre-registration unknown type is still rejected above.
-        console.log(`Ignoring unknown client message type: ${clientMessage.type}`);
+      case "extension_publish": {
+        this.handleExtensionPublish(socket, currentId, clientMessage);
         break;
+      }
+
+      case "extension_state_commit": {
+        this.handleExtensionStateCommit(socket, currentId, clientMessage);
+        break;
+      }
+
+      default:
+        throw new Error(`Unknown client message type: ${clientMessage.type}`);
     }
   }
 
-  private findSessions(nameOrId: string): SessionLookup {
-    const target = nameOrId.trim();
-    if (!target) {
-      return { targets: [], match: "none" };
-    }
+  private rememberDisconnectedSession(info: SessionInfo, now = Date.now()): void {
+    this.disconnectedSessions.set(info.id, { info: { ...info }, disconnectedAt: now });
+    this.pruneDisconnectedSessions(now);
+  }
 
-    const byId = this.sessions.get(target);
+  private pruneDisconnectedSessions(now = Date.now()): void {
+    for (const [sessionId, session] of this.disconnectedSessions) {
+      if (now - session.disconnectedAt > DISCONNECTED_SESSION_RETENTION_MS) {
+        this.disconnectedSessions.delete(sessionId);
+      }
+    }
+  }
+
+  private pruneMailboxMessages(now = Date.now()): void {
+    for (let index = this.mailboxMessages.length - 1; index >= 0; index -= 1) {
+      const entry = this.mailboxMessages[index]!;
+      if (now - entry.queuedAt > MAILBOX_MESSAGE_RETENTION_MS) {
+        if (entry.message.expectsReply) {
+          this.askEdges.delete(entry.message.id);
+        }
+        this.messageReceiptRoutes.delete(entry.message.id);
+        this.mailboxMessages.splice(index, 1);
+      }
+    }
+  }
+
+  private queueMailboxMessage(from: SessionInfo, target: SessionInfo, message: Message, brokerReceivedAt: number): void {
+    this.pruneMailboxMessages(brokerReceivedAt);
+    while (this.mailboxMessages.length >= MAX_MAILBOX_MESSAGES) {
+      const evicted = this.mailboxMessages.shift();
+      if (!evicted) break;
+      if (evicted.message.expectsReply) {
+        this.askEdges.delete(evicted.message.id);
+      }
+      this.messageReceiptRoutes.delete(evicted.message.id);
+    }
+    this.mailboxMessages.push({
+      from: { ...from },
+      target: { ...target },
+      message: { ...message, brokerReceivedAt },
+      queuedAt: brokerReceivedAt,
+    });
+  }
+
+  private flushMailboxForSession(session: ConnectedSession, now = Date.now()): void {
+    this.pruneMailboxMessages(now);
+    const sessionName = session.info.name?.toLowerCase();
+    const uniqueMailboxIdentity = this.findLiveSessionsSharingMailboxIdentity(session.info).length === 1;
+
+    for (let index = 0; index < this.mailboxMessages.length;) {
+      const entry = this.mailboxMessages[index]!;
+      const matchesId = entry.target.id === session.info.id;
+      const matchesSenderIdentity = Boolean(
+        sessionName
+        && entry.from.name?.toLowerCase() === sessionName
+        && sameCwd(entry.from.cwd, session.info.cwd),
+      );
+      const matchesUniqueName = Boolean(
+        uniqueMailboxIdentity
+        && sessionName
+        && !matchesSenderIdentity
+        && entry.target.name?.toLowerCase() === sessionName
+        && sameCwd(entry.target.cwd, session.info.cwd),
+      );
+      if (!matchesId && !matchesUniqueName) {
+        index += 1;
+        continue;
+      }
+
+      const deliveredMessage: Message = {
+        ...entry.message,
+        brokerDeliveredAt: Date.now(),
+      };
+      let forwardFrame: Buffer;
+      try {
+        forwardFrame = encodeMessage({
+          type: "message",
+          from: entry.from,
+          message: deliveredMessage,
+        });
+      } catch {
+        // Initial mailbox admission validates this envelope. If it can no
+        // longer be encoded, discard it rather than blocking later entries.
+        this.mailboxMessages.splice(index, 1);
+        this.askEdges.delete(entry.message.id);
+        this.messageReceiptRoutes.delete(entry.message.id);
+        continue;
+      }
+      if (!this.isSocketWritable(session.socket) || this.isSocketBackedUp(session.socket)) {
+        session.socket.destroy();
+        return;
+      }
+      try {
+        writeFrame(session.socket, forwardFrame);
+      } catch {
+        session.socket.destroy();
+        return;
+      }
+
+      this.mailboxMessages.splice(index, 1);
+      const edge = this.askEdges.get(entry.message.id);
+      if (edge?.to === entry.target.id) {
+        edge.to = session.info.id;
+      }
+      this.messageReceiptRoutes.set(entry.message.id, {
+        from: entry.from.id,
+        to: session.info.id,
+        createdAt: entry.message.brokerReceivedAt ?? entry.queuedAt,
+      });
+    }
+  }
+
+  private pruneAskEdges(now = Date.now()): void {
+    for (const [messageId, edge] of this.askEdges) {
+      if (now - edge.createdAt > this.askTimeoutMs) {
+        this.askEdges.delete(messageId);
+      }
+    }
+  }
+
+  private clearAskEdgesForSession(sessionId: string): void {
+    for (const [messageId, edge] of this.askEdges) {
+      if (edge.from === sessionId || edge.to === sessionId) {
+        this.askEdges.delete(messageId);
+      }
+    }
+  }
+
+  private pruneMessageReceiptRoutes(now = Date.now()): void {
+    for (const [messageId, route] of this.messageReceiptRoutes) {
+      if (now - route.createdAt > MESSAGE_RECEIPT_ROUTE_RETENTION_MS) {
+        this.messageReceiptRoutes.delete(messageId);
+      }
+    }
+  }
+
+  private clearMessageReceiptRoutesForSession(sessionId: string): void {
+    for (const [messageId, route] of this.messageReceiptRoutes) {
+      if (route.from === sessionId || route.to === sessionId) {
+        this.messageReceiptRoutes.delete(messageId);
+      }
+    }
+  }
+
+  private findSessions(nameOrId: string): ConnectedSession[] {
+    const byId = this.sessions.get(nameOrId);
     if (byId) {
-      return { targets: [byId], match: "id" };
+      return [byId];
     }
 
-    const lowerTarget = target.toLowerCase();
-    const byName = Array.from(this.sessions.values()).filter(session => session.info.name?.toLowerCase() === lowerTarget);
+    const lowerName = nameOrId.toLowerCase();
+    const byName = Array.from(this.sessions.values()).filter(session => session.info.name?.toLowerCase() === lowerName);
     if (byName.length > 0) {
-      return { targets: byName, match: "name" };
+      return byName;
     }
 
-    const byIdPrefix = Array.from(this.sessions.values()).filter(session => session.info.id.toLowerCase().startsWith(lowerTarget));
-    if (byIdPrefix.length > 0) {
-      return { targets: byIdPrefix, match: "idPrefix" };
+    return Array.from(this.sessions.entries())
+      .filter(([id]) => id.startsWith(nameOrId))
+      .map(([, session]) => session);
+  }
+
+  private findDisconnectedSessions(nameOrId: string): DisconnectedSession[] {
+    this.pruneDisconnectedSessions();
+    const byId = this.disconnectedSessions.get(nameOrId);
+    if (byId) {
+      return [byId];
     }
 
-    return { targets: [], match: "none" };
+    const lowerName = nameOrId.toLowerCase();
+    const byName = Array.from(this.disconnectedSessions.values()).filter(session => session.info.name?.toLowerCase() === lowerName);
+    if (byName.length > 0) {
+      return byName;
+    }
+
+    return Array.from(this.disconnectedSessions.entries())
+      .filter(([id]) => id.startsWith(nameOrId))
+      .map(([, session]) => session);
+  }
+
+  private findUniqueLiveSessionForDisconnectedSession(info: SessionInfo, senderId?: string): ConnectedSession | null {
+    const matches = this.findLiveSessionsSharingMailboxIdentity(info)
+      .filter((session) => session.info.id !== senderId);
+    return matches.length === 1 ? matches[0]! : null;
+  }
+
+  /**
+   * Mailbox identity is an explicit name plus directory, never name alone. A
+   * runtime fallback alias is derived from the session id rather than chosen as
+   * a durable identity, so it must not transfer mail to another process.
+   * Directories compare through sameCwd so a relaunch that reports the same
+   * directory differently (trailing slash, "."/"..", or a symlink such as macOS
+   * /tmp vs /private/tmp) still matches.
+   */
+  private findLiveSessionsSharingMailboxIdentity(info: SessionInfo): ConnectedSession[] {
+    const lowerName = info.name?.toLowerCase();
+    if (!lowerName || info.runtimeFallbackAlias) {
+      return [];
+    }
+    return Array.from(this.sessions.values()).filter(session =>
+      !session.info.runtimeFallbackAlias
+      && session.info.name?.toLowerCase() === lowerName
+      && sameCwd(session.info.cwd, info.cwd)
+    );
   }
 
   private isSocketWritable(socket: net.Socket): boolean {
     return !socket.destroyed && !socket.writableEnded && socket.writable;
   }
 
-  /**
-   * True when a peer's outbound buffer has grown past the high-water mark,
-   * indicating the consumer isn't draining it (slow, wedged, or half-open).
-   * Such a peer must be reaped rather than written to, to bound broker memory.
-   */
   private isSocketBackedUp(socket: net.Socket): boolean {
     return socket.writableLength > MAX_SOCKET_BUFFER_BYTES;
   }
 
-  private removeSession(sessionId: string, reason: string): void {
-    const session = this.sessions.get(sessionId);
-    if (!session) {
-      return;
-    }
-    this.sessions.delete(sessionId);
-    session.socket.destroy();
-    console.log(`Removed intercom session ${sessionId}: ${reason}`);
-    this.broadcast({ type: "session_left", sessionId }, sessionId);
-    this.scheduleShutdownCheck();
-  }
-
-  private broadcast(msg: BrokerMessage, exclude?: string): void {
-    // Serialize once and reuse the frame for every recipient instead of
-    // re-stringifying + re-encoding per peer (the dominant broadcast cost,
-    // O(N) JSON.stringify otherwise).
+  private broadcastToSessions(
+    msg: BrokerMessage,
+    shouldReceive: (id: string, session: ConnectedSession) => boolean,
+  ): void {
     let frame: Buffer;
     try {
       frame = encodeMessage(msg);
     } catch (error) {
-      console.error("Failed to encode broadcast message:", error);
+      console.error("Failed to encode intercom broadcast:", error);
       return;
     }
-    // A write can throw synchronously (e.g. ERR_STREAM_WRITE_AFTER_END on a
-    // half-closed socket). Isolate each write so one dead peer can't abort the
-    // loop and starve the remaining sessions of the broadcast. Reap the dead
-    // entry after the loop; removeSession re-broadcasts session_left, but its
-    // own guard (missing entry => no-op) bounds the recursion.
-    const dead: string[] = [];
+
+    const deadSockets: net.Socket[] = [];
     for (const [id, session] of this.sessions) {
-      if (id === exclude) continue;
-      // Don't pile more onto a peer that isn't draining; reap it instead.
-      if (this.isSocketBackedUp(session.socket)) {
-        dead.push(id);
+      if (!shouldReceive(id, session)) {
+        continue;
+      }
+      if (!this.isSocketWritable(session.socket) || this.isSocketBackedUp(session.socket)) {
+        deadSockets.push(session.socket);
         continue;
       }
       try {
+        // Reuse the encoded frame, and isolate each write so one slow or dead
+        // recipient cannot prevent later recipients from seeing the broadcast.
         writeFrame(session.socket, frame);
       } catch {
-        dead.push(id);
+        deadSockets.push(session.socket);
       }
     }
-    for (const id of dead) {
-      this.removeSession(id, "Broadcast write failed or backpressured peer");
+    for (const socket of deadSockets) {
+      socket.destroy();
+    }
+  }
+
+  private broadcast(msg: BrokerMessage, exclude?: string): void {
+    this.broadcastToSessions(msg, (id) => id !== exclude);
+  }
+
+  private validateExtensionCapability(cap: unknown): cap is ExtensionCapability {
+    if (typeof cap !== "object" || cap === null) {
+      return false;
+    }
+    const c = cap as Record<string, unknown>;
+    if (typeof c.namespace !== "string" || typeof c.ownerEligible !== "boolean") {
+      return false;
+    }
+    return this.validateNamespace(c.namespace);
+  }
+
+  private validateNamespace(ns: string): boolean {
+    // ^[a-z0-9][a-z0-9._/-]{0,63}$
+    if (ns.length === 0 || ns.length > 64) {
+      return false;
+    }
+    if (!/^[a-z0-9]/.test(ns)) {
+      return false;
+    }
+    if (!/^[a-z0-9][a-z0-9._/-]*$/.test(ns)) {
+      return false;
+    }
+    return true;
+  }
+
+  private recomputeNamespaceOwners(): void {
+    const namespaces = new Set(this.namespaceOwners.keys());
+    for (const session of this.sessions.values()) {
+      for (const extension of session.extensions ?? []) {
+        namespaces.add(extension.namespace);
+      }
+    }
+
+    // For each namespace, elect owner by (startedAt, sessionId).
+    for (const namespace of namespaces) {
+      const candidates: Array<{ sessionId: string; session: ConnectedSession }> = [];
+      for (const [sessionId, session] of this.sessions) {
+        if (session.extensions) {
+          const hasNamespace = session.extensions.some(
+            (ext) => ext.namespace === namespace && ext.ownerEligible
+          );
+          if (hasNamespace) {
+            candidates.push({ sessionId, session });
+          }
+        }
+      }
+
+      if (candidates.length === 0) {
+        if (this.namespaceOwners.delete(namespace)) {
+          this.broadcastToSessions(
+            { type: "extension_owner", namespace },
+            (_id, session) => Boolean(session.extensions?.some((extension) => extension.namespace === namespace)),
+          );
+        }
+        continue;
+      }
+
+      // Use broker-owned registration order so clients cannot seize authority
+      // by backdating their advertised session start time. Stable-ID socket
+      // replacements preserve the original order.
+      candidates.sort((a, b) => {
+        if (a.session.ownerOrder !== b.session.ownerOrder) {
+          return a.session.ownerOrder - b.session.ownerOrder;
+        }
+        return a.sessionId.localeCompare(b.sessionId);
+      });
+
+      const winner = candidates[0];
+      const existing = this.namespaceOwners.get(namespace);
+
+      // Check if owner changed or socket changed
+      const ownerChanged = !existing || existing.sessionId !== winner.sessionId;
+      const socketChanged = existing && existing.socket !== winner.session.socket;
+
+      if (ownerChanged || socketChanged) {
+        // Generate new epoch
+        const epoch = randomUUID();
+        this.namespaceOwners.set(namespace, {
+          sessionId: winner.sessionId,
+          socket: winner.session.socket,
+          epoch,
+        });
+
+        // Broadcast owner change to all capable sessions.
+        this.broadcastToSessions(
+          {
+            type: "extension_owner",
+            namespace,
+            ownerId: winner.sessionId,
+            ownerEpoch: epoch,
+          },
+          (_id, session) => Boolean(session.extensions?.some((ext) => ext.namespace === namespace)),
+        );
+      }
+    }
+  }
+
+  private handleExtensionPublish(
+    socket: net.Socket,
+    currentId: string | null,
+    msg: Record<string, unknown>
+  ): void {
+    if (!currentId) {
+      throw new Error("Received extension_publish before register");
+    }
+
+    const session = this.sessions.get(currentId);
+    if (!session || session.socket !== socket) {
+      writeMessage(socket, { type: "error", error: "Session not found" });
+      return;
+    }
+
+    if (!session.extensions?.length) {
+      writeMessage(socket, { type: "error", error: "Session has not advertised extension capability" });
+      return;
+    }
+
+    const namespace = msg.namespace;
+    const audience = msg.audience;
+    const ownerOnly = msg.ownerOnly === true;
+    const ownerEpoch = msg.ownerEpoch;
+    const payload = msg.payload;
+
+    if (typeof namespace !== "string" || !this.validateNamespace(namespace)) {
+      writeMessage(socket, { type: "error", error: "Invalid namespace" });
+      return;
+    }
+
+    if (audience !== "owner" && audience !== "capable") {
+      writeMessage(socket, { type: "error", error: "Invalid audience" });
+      return;
+    }
+
+    const payloadSize = serializedPayloadSize(payload);
+    if (payloadSize === null || payloadSize > MAX_EXTENSION_MESSAGE_BYTES) {
+      writeMessage(socket, { type: "error", error: "Invalid extension payload or payload exceeds 16 KiB limit" });
+      return;
+    }
+
+    // Verify sender has capability for this namespace
+    const hasCapability = session.extensions?.some((ext) => ext.namespace === namespace);
+    if (!hasCapability) {
+      writeMessage(socket, { type: "error", error: "Sender does not have capability for this namespace" });
+      return;
+    }
+
+    const owner = this.namespaceOwners.get(namespace);
+    if ((audience === "owner" || ownerOnly) && !owner) {
+      writeMessage(socket, { type: "error", error: "No owner for this namespace" });
+      return;
+    }
+
+    // For owner-only messages, validate exact socket and epoch
+    if (ownerOnly && owner) {
+      if (typeof ownerEpoch !== "string") {
+        writeMessage(socket, { type: "error", error: "ownerEpoch required for owner-only messages" });
+        return;
+      }
+      if (currentId !== owner.sessionId || socket !== owner.socket || ownerEpoch !== owner.epoch) {
+        writeMessage(socket, { type: "error", error: "Owner validation failed" });
+        return;
+      }
+    }
+
+    // Route message to the selected audience with one shared encoded frame.
+    this.broadcastToSessions(
+      {
+        type: "extension_message",
+        namespace,
+        fromSessionId: currentId,
+        ...(owner ? { ownerId: owner.sessionId, ownerEpoch: owner.epoch } : {}),
+        payload,
+      },
+      (recipientId, recipientSession) => Boolean(
+        recipientSession.extensions?.some((ext) => ext.namespace === namespace)
+        && (audience === "capable" || (
+          audience === "owner"
+          && owner !== undefined
+          && recipientId === owner.sessionId
+          && recipientSession.socket === owner.socket
+        )),
+      ),
+    );
+  }
+
+  private handleExtensionStateCommit(
+    socket: net.Socket,
+    currentId: string | null,
+    msg: Record<string, unknown>
+  ): void {
+    if (!currentId) {
+      throw new Error("Received extension_state_commit before register");
+    }
+
+    const session = this.sessions.get(currentId);
+    if (!session || session.socket !== socket) {
+      writeMessage(socket, {
+        type: "extension_state_result",
+        namespace: String(msg.namespace || ""),
+        committed: false,
+        revision: 0,
+        reason: "Session not found",
+      });
+      return;
+    }
+
+    if (!session.extensions?.length) {
+      writeMessage(socket, {
+        type: "extension_state_result",
+        namespace: String(msg.namespace || ""),
+        committed: false,
+        revision: 0,
+        reason: "Session has not advertised extension capability",
+      });
+      return;
+    }
+
+    const namespace = msg.namespace;
+    const ownerEpoch = msg.ownerEpoch;
+    const expectedRevision = msg.expectedRevision;
+    const payload = msg.payload;
+
+    if (typeof namespace !== "string" || !this.validateNamespace(namespace)) {
+      writeMessage(socket, {
+        type: "extension_state_result",
+        namespace: String(namespace),
+        committed: false,
+        revision: 0,
+        reason: "Invalid namespace",
+      });
+      return;
+    }
+
+    if (typeof ownerEpoch !== "string") {
+      writeMessage(socket, {
+        type: "extension_state_result",
+        namespace,
+        committed: false,
+        revision: this.extensionStateManager.getCurrentRevision(namespace),
+        reason: "Invalid ownerEpoch",
+      });
+      return;
+    }
+
+    if (typeof expectedRevision !== "number" || !Number.isSafeInteger(expectedRevision) || expectedRevision < 0) {
+      writeMessage(socket, {
+        type: "extension_state_result",
+        namespace,
+        committed: false,
+        revision: this.extensionStateManager.getCurrentRevision(namespace),
+        reason: "Invalid expectedRevision",
+      });
+      return;
+    }
+
+    const payloadSize = serializedPayloadSize(payload);
+    if (payloadSize === null || payloadSize > MAX_EXTENSION_STATE_BYTES) {
+      writeMessage(socket, {
+        type: "extension_state_result",
+        namespace,
+        committed: false,
+        revision: this.extensionStateManager.getCurrentRevision(namespace),
+        reason: "Invalid extension state or payload exceeds 64 KiB limit",
+      });
+      return;
+    }
+
+    // Verify sender has capability for this namespace
+    const hasCapability = session.extensions?.some((ext) => ext.namespace === namespace);
+    if (!hasCapability) {
+      writeMessage(socket, {
+        type: "extension_state_result",
+        namespace,
+        committed: false,
+        revision: this.extensionStateManager.getCurrentRevision(namespace),
+        reason: "Sender does not have capability for this namespace",
+      });
+      return;
+    }
+
+    const owner = this.namespaceOwners.get(namespace);
+    if (!owner) {
+      writeMessage(socket, {
+        type: "extension_state_result",
+        namespace,
+        committed: false,
+        revision: this.extensionStateManager.getCurrentRevision(namespace),
+        reason: "No owner for this namespace",
+      });
+      return;
+    }
+
+    // Validate owner, socket, and epoch
+    if (currentId !== owner.sessionId || socket !== owner.socket || ownerEpoch !== owner.epoch) {
+      writeMessage(socket, {
+        type: "extension_state_result",
+        namespace,
+        committed: false,
+        revision: this.extensionStateManager.getCurrentRevision(namespace),
+        reason: "Owner validation failed",
+      });
+      return;
+    }
+
+    const result = this.extensionStateManager.commitState(namespace, expectedRevision, payload);
+
+    // Send result to committer
+    writeMessage(socket, {
+      type: "extension_state_result",
+      namespace,
+      committed: result.committed,
+      revision: result.revision,
+      reason: result.reason,
+    });
+
+    // If committed, broadcast new state to all capable sessions.
+    if (result.committed) {
+      this.broadcastToSessions(
+        {
+          type: "extension_state",
+          namespace,
+          revision: result.revision,
+          payload,
+        },
+        (_id, recipientSession) => Boolean(
+          recipientSession.extensions?.some((ext) => ext.namespace === namespace),
+        ),
+      );
     }
   }
 
   private shutdown(): void {
+    if (this.shuttingDown) return;
+    this.shuttingDown = true;
     console.log("Broker shutting down");
-    
+
     for (const session of this.sessions.values()) {
       session.socket.end();
     }
     this.sessions.clear();
-    if (process.platform !== "win32" && this.ownsSocketPath()) {
-      try {
-        unlinkSync(SOCKET_PATH);
-      } catch {
-        // The socket may already be gone if shutdown started after a disconnect.
-      }
-    }
-    if (this.ownsPidFile()) {
-      try {
-        unlinkSync(PID_PATH);
-      } catch {
-        // The PID file may already be gone if startup never completed.
-      }
-    }
-    if (this.reapTimer) {
-      clearInterval(this.reapTimer);
-      this.reapTimer = null;
-    }
-    // Do not call server.close(): Node may unlink SOCKET_PATH even when that
-    // pathname has since been replaced by another broker. process.exit closes
-    // our listening descriptor without touching an unowned replacement path.
+    this.askEdges.clear();
+    this.messageReceiptRoutes.clear();
+    this.disconnectedSessions.clear();
+    this.mailboxMessages.length = 0;
+    this.removeOwnedRuntimeFiles();
+
+    // Avoid server.close() here: for Unix sockets Node may unlink the current
+    // pathname even if another broker has replaced the inode since we bound.
+    // Exiting closes this broker's listening descriptor without touching an
+    // unowned replacement path.
     process.exit(0);
   }
 
-  private ownsSocketPath(): boolean {
-    if (!this.boundSocketIdentity) return false;
-    try {
-      const stat = statSync(SOCKET_PATH);
-      return stat.dev === this.boundSocketIdentity.dev && stat.ino === this.boundSocketIdentity.ino;
-    } catch {
-      return false;
+  private removeOwnedRuntimeFiles(): void {
+    if (
+      typeof LISTEN_TARGET === "string"
+      && process.platform !== "win32"
+      && runtimeFileHasIdentity(LISTEN_TARGET, this.boundSocketIdentity)
+    ) {
+      try {
+        unlinkSync(LISTEN_TARGET);
+      } catch {
+        // The owned socket may already have been removed.
+      }
     }
-  }
-
-  private ownsPidFile(): boolean {
-    try {
-      return readFileSync(PID_PATH, "utf8").trim() === String(process.pid);
-    } catch {
-      return false;
+    if (tcpEndpointFileIsOwnedBy(PORT_PATH, BROKER_STATE_ID)) {
+      try {
+        unlinkSync(PORT_PATH);
+      } catch {
+        // The owned TCP endpoint may already have been removed.
+      }
+    }
+    if (pidFileIsOwnedBy(PID_PATH, process.pid)) {
+      try {
+        unlinkSync(PID_PATH);
+      } catch {
+        // The owned PID file may already have been removed.
+      }
     }
   }
 }

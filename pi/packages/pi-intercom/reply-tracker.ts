@@ -1,3 +1,4 @@
+import { getAskTimeoutMs } from "./config.ts";
 import type { Message, SessionInfo } from "./types.ts";
 
 export interface IntercomContext {
@@ -6,51 +7,42 @@ export interface IntercomContext {
   receivedAt: number;
 }
 
-/** State of an in-flight outbound `ask`/`aside` awaiting its reply. */
-export interface ReplyWaiterMatch {
-  /** The question message id; the reply must carry this as `replyTo`. This is the correlation key. */
-  questionId: string;
-  /** The raw target string passed to `ask` (may be a full id, name, or short/prefix id). */
-  expectedSenderTarget: string;
-  /** Broker-resolved full id of the recipient, captured from the delivery ack. */
-  expectedSenderId?: string;
-}
-
-/**
- * Decide whether an inbound message resolves a given outbound ask-waiter.
- *
- * Correlation is the unique `questionId` (the caller normally looks the waiter
- * up by `message.replyTo` directly). The sender comparison here is a defensive
- * ASSERTION, not the correlation key: it rejects a reply that carries a valid
- * questionId but comes from a session other than the one we addressed (a
- * confused or malicious peer). When the broker-resolved `expectedSenderId` is
- * known it is authoritative; otherwise we fall back to a permissive match
- * against the raw target (full id, id prefix, or name) so a valid reply is
- * never dropped over an addressing-format mismatch.
- */
-export function replyResolvesWaiter(
-  waiter: ReplyWaiterMatch,
-  from: Pick<SessionInfo, "id" | "name">,
-  message: Pick<Message, "replyTo">,
-): boolean {
-  if (message.replyTo !== waiter.questionId) {
-    return false;
-  }
-  if (waiter.expectedSenderId !== undefined) {
-    return from.id === waiter.expectedSenderId;
-  }
-  const target = waiter.expectedSenderTarget.toLowerCase();
-  return from.id.toLowerCase() === target
-    || from.id.toLowerCase().startsWith(target)
-    || from.name?.toLowerCase() === target;
-}
-
 function matchesPendingSender(context: IntercomContext, to: string): boolean {
-  if (context.from.id === to) {
+  if (context.from.id === to || context.from.id.startsWith(to)) {
     return true;
   }
 
   return context.from.name?.toLowerCase() === to.toLowerCase();
+}
+
+function resolvePendingSender(pending: IntercomContext[], to: string): IntercomContext {
+  const exactIdMatches = pending.filter((context) => context.from.id === to);
+  if (exactIdMatches.length === 1) {
+    return exactIdMatches[0]!;
+  }
+  if (exactIdMatches.length > 1) {
+    throw new Error(`Multiple pending asks from session ID "${to}" — specify \`replyTo\``);
+  }
+
+  const lowerTo = to.toLowerCase();
+  const exactNameMatches = pending.filter((context) => context.from.name?.toLowerCase() === lowerTo);
+  if (exactNameMatches.length === 1) {
+    return exactNameMatches[0]!;
+  }
+  if (exactNameMatches.length > 1) {
+    const pendingIds = exactNameMatches.map((context) => context.message.id).join(", ");
+    throw new Error(`Multiple pending asks from "${to}" — use \`replyTo\` with a message ID from \`pending\` (${pendingIds}), or specify a full session ID.`);
+  }
+
+  const idPrefixMatches = pending.filter((context) => context.from.id.startsWith(to));
+  if (idPrefixMatches.length === 1) {
+    return idPrefixMatches[0]!;
+  }
+  if (idPrefixMatches.length > 1) {
+    throw new Error(`Multiple pending asks match ID prefix "${to}" — use a longer session ID prefix or specify \`replyTo\``);
+  }
+
+  throw new Error(`No pending ask from "${to}"`);
 }
 
 export class ReplyTracker {
@@ -59,10 +51,7 @@ export class ReplyTracker {
   private currentTurnContext: IntercomContext | null = null;
 
   constructor(
-    private readonly askTimeoutMs = 10 * 60 * 1000,
-    // Bound the queue of turn contexts so a long non-idle stretch with steady
-    // inbound messages can't grow it without limit (only beginTurn drains it,
-    // one per turn). Oldest entries are dropped first.
+    private readonly askTimeoutMs = getAskTimeoutMs(),
     private readonly maxPendingTurnContexts = 200,
   ) {}
 
@@ -99,76 +88,59 @@ export class ReplyTracker {
   resolveReplyTarget(options: { to?: string; replyTo?: string }, now = Date.now()): IntercomContext {
     this.pruneExpired(now);
 
-    // 1. An explicit message id is unambiguous — it selects exactly one ask,
-    //    including two asks from the SAME sender (which no sender-based key
-    //    can disambiguate). `pending` prints these ids for this purpose.
     if (options.replyTo) {
-      const byId = this.pendingAsks.get(options.replyTo);
-      if (byId) {
-        return byId;
+      const target = this.pendingAsks.get(options.replyTo);
+      if (!target) {
+        throw new Error(`No pending ask with message ID "${options.replyTo}"`);
       }
-      throw new Error(`No pending ask with id \"${options.replyTo}\"`);
+      if (options.to && !matchesPendingSender(target, options.to)) {
+        throw new Error(`Pending ask "${options.replyTo}" is not from "${options.to}"`);
+      }
+      return target;
     }
 
     const pending = Array.from(this.pendingAsks.values());
-
-    // 2. An explicit sender wins over the implicit current-turn context (an
-    //    explicit `to` is clear intent; the triggered-message default must not
-    //    override it).
     if (options.to) {
-      const matches = pending.filter((context) => matchesPendingSender(context, options.to!));
-      if (matches.length === 1) {
-        return matches[0]!;
-      }
-      if (matches.length > 1) {
-        throw new Error(`Multiple pending asks from \"${options.to}\" — reply with the message id (from \`pending\`) via \`replyTo\`.`);
-      }
-      // No pending ask matched the sender; fall back to the triggered message
-      // only if it is from that same sender ("reply to what triggered me").
-      if (this.currentTurnContext && matchesPendingSender(this.currentTurnContext, options.to)) {
-        return this.currentTurnContext;
-      }
-      throw new Error(`No pending ask from \"${options.to}\"`);
+      return resolvePendingSender(pending, options.to);
     }
 
-    // 3. No explicit target — the triggered message, then the single pending ask.
     if (this.currentTurnContext) {
       return this.currentTurnContext;
     }
+
     if (pending.length === 1) {
       return pending[0]!;
     }
     if (pending.length === 0) {
       throw new Error("No active intercom context to reply to");
     }
-    throw new Error("Multiple pending asks — specify `to` or `replyTo`");
+
+    throw new Error("Multiple pending asks — specify `to` or `replyTo` using a message ID from `pending`");
+  }
+
+  findUniquePendingAskFrom(to: string, now = Date.now()): IntercomContext | null {
+    const candidates = Array.from(this.pendingAsks.values()).filter((context) => {
+      if (now - context.receivedAt > this.askTimeoutMs) {
+        return false;
+      }
+      return context.from.id === to || context.from.name?.toLowerCase() === to.toLowerCase();
+    });
+    return candidates.length === 1 ? candidates[0]! : null;
   }
 
   markReplied(replyTo: string): void {
-    this.pendingAsks.delete(replyTo);
-    if (this.currentTurnContext?.message.id === replyTo) {
-      this.currentTurnContext = null;
-    }
+    this.dismissPendingAsk(replyTo);
   }
 
-  /**
-   * Drop all inbound state from a sender that has left. Its pending asks can no
-   * longer be usefully replied to (the reply would just fail to deliver), so
-   * remove them here rather than let them linger until the 10-minute TTL.
-   */
-  dropPendingFromSender(sessionId: string): void {
-    for (const [messageId, context] of this.pendingAsks) {
-      if (context.from.id === sessionId) {
-        this.pendingAsks.delete(messageId);
+  dismissPendingAsk(replyTo: string): void {
+    this.pendingAsks.delete(replyTo);
+    for (let index = this.pendingTurnContexts.length - 1; index >= 0; index -= 1) {
+      if (this.pendingTurnContexts[index]?.message.id === replyTo) {
+        this.pendingTurnContexts.splice(index, 1);
       }
     }
-    if (this.currentTurnContext?.from.id === sessionId) {
+    if (this.currentTurnContext?.message.id === replyTo) {
       this.currentTurnContext = null;
-    }
-    for (let i = this.pendingTurnContexts.length - 1; i >= 0; i--) {
-      if (this.pendingTurnContexts[i]!.from.id === sessionId) {
-        this.pendingTurnContexts.splice(i, 1);
-      }
     }
   }
 
@@ -180,20 +152,13 @@ export class ReplyTracker {
   private pruneExpired(now: number): void {
     for (const [messageId, context] of this.pendingAsks) {
       if (now - context.receivedAt > this.askTimeoutMs) {
-        this.pendingAsks.delete(messageId);
+        this.dismissPendingAsk(messageId);
       }
     }
-    // Turn contexts are FIFO by receivedAt, so stale entries form a prefix.
-    const cutoff = now - this.askTimeoutMs;
-    let expired = 0;
-    while (
-      expired < this.pendingTurnContexts.length
-      && this.pendingTurnContexts[expired]!.receivedAt <= cutoff
-    ) {
-      expired += 1;
-    }
-    if (expired > 0) {
-      this.pendingTurnContexts.splice(0, expired);
+    for (let index = this.pendingTurnContexts.length - 1; index >= 0; index -= 1) {
+      if (now - this.pendingTurnContexts[index]!.receivedAt > this.askTimeoutMs) {
+        this.pendingTurnContexts.splice(index, 1);
+      }
     }
   }
 }

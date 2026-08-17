@@ -1,31 +1,54 @@
-import type { KeybindingsManager, Theme } from "@earendil-works/pi-coding-agent";
 import type { Component } from "@earendil-works/pi-tui";
-import { Key, matchesKey } from "@earendil-works/pi-tui";
-import type { SessionInfo } from "../types.js";
-import { activityState, formatAge } from "./agent-picker-util.js";
-import { activityMarker, framedOverlay, hintLine, innerWidth } from "./frame.js";
-import { cwdLabel, middleTruncate, shortSessionId } from "./text.js";
+import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import type { KeybindingsManager, Theme } from "@earendil-works/pi-coding-agent";
+import type { SessionInfo } from "../types.ts";
 
-function sessionName(session: SessionInfo): string {
-  return session.name || "Unnamed session";
+function middleTruncate(text: string, maxWidth: number): string {
+  if (visibleWidth(text) <= maxWidth) {
+    return text;
+  }
+  if (maxWidth <= 3) {
+    return truncateToWidth(text, maxWidth, "");
+  }
+
+  const chars = [...text];
+  const targetSideWidth = Math.max(1, Math.floor((maxWidth - 1) / 2));
+
+  let left = "";
+  for (const char of chars) {
+    if (visibleWidth(left + char) > targetSideWidth) break;
+    left += char;
+  }
+
+  let right = "";
+  for (const char of chars.slice().reverse()) {
+    if (visibleWidth(char + right) > targetSideWidth) break;
+    right = char + right;
+  }
+
+  return truncateToWidth(`${left}…${right}`, maxWidth, "");
 }
 
-/**
- * Recipient picker for the `/intercom` (Alt+M) compose flow. Renders the same
- * subtle bordered card and activity language as the agent picker: a single
- * list of every connected session (yours tagged `self`), navigable with vim
- * keys, with `Enter` choosing the message target. Selecting `self` is a no-op
- * (you can't message yourself), matching the agent picker's behavior.
- */
+function shortSessionId(sessionId: string): string {
+  return sessionId.slice(0, 8);
+}
+
+function sessionTitle(session: SessionInfo, options?: { self?: boolean; sameCwd?: boolean }): string {
+  const name = session.name || "Unnamed session";
+  const tags = [options?.self ? "self" : undefined, options?.sameCwd ? "same cwd" : undefined]
+    .filter((tag): tag is string => Boolean(tag));
+  const suffix = tags.length ? ` [${tags.join(", ")}]` : "";
+  return `${name} (${shortSessionId(session.id)})${suffix}`;
+}
+
 export class SessionListOverlay implements Component {
   private theme: Theme;
   private keybindings: KeybindingsManager;
   private currentSession: SessionInfo;
-  private sessions: SessionInfo[];
   private done: (result: SessionInfo | undefined) => void;
-  private selected = 0;
-  private scrollTop = 0;
-  private maxVisibleRows = 12;
+  private sessions: SessionInfo[];
+  private selectedIndex = 0;
+  private maxVisible = 8;
 
   constructor(
     theme: Theme,
@@ -41,129 +64,103 @@ export class SessionListOverlay implements Component {
     this.done = done;
   }
 
+  private onSessionSelect(sessionId: string): void {
+    const session = this.sessions.find(s => s.id === sessionId);
+    if (!session) return;
+    this.done(session);
+  }
+
   invalidate(): void {}
 
-  private selectedSession(): SessionInfo | undefined {
-    return this.sessions[this.selected];
-  }
-
-  private move(delta: number): void {
-    const total = this.sessions.length;
-    if (total === 0) return;
-    this.selected = (this.selected + delta + total) % total;
-  }
-
   handleInput(data: string): void {
-    if (
-      matchesKey(data, Key.escape)
-      || matchesKey(data, Key.ctrl("c"))
-      || data === "q"
-      || this.keybindings.matches(data, "tui.select.cancel")
-    ) {
+    if (this.keybindings.matches(data, "tui.select.cancel")) {
       this.done(undefined);
       return;
     }
 
-    if (this.sessions.length === 0) return;
-
-    if (
-      matchesKey(data, Key.shift(Key.tab))
-      || matchesKey(data, Key.up)
-      || data === "k"
-      || this.keybindings.matches(data, "tui.select.up")
-    ) {
-      this.move(-1);
+    if (this.sessions.length === 0) {
       return;
     }
 
-    if (
-      matchesKey(data, Key.tab)
-      || matchesKey(data, Key.down)
-      || data === "j"
-      || this.keybindings.matches(data, "tui.select.down")
-    ) {
-      this.move(1);
+    if (this.keybindings.matches(data, "tui.select.up")) {
+      this.selectedIndex = this.selectedIndex === 0 ? this.sessions.length - 1 : this.selectedIndex - 1;
       return;
     }
 
-    if (data === "g") {
-      this.selected = 0;
+    if (this.keybindings.matches(data, "tui.select.down")) {
+      this.selectedIndex = this.selectedIndex === this.sessions.length - 1 ? 0 : this.selectedIndex + 1;
       return;
     }
 
-    if (data === "G") {
-      this.selected = this.sessions.length - 1;
-      return;
+    if (this.keybindings.matches(data, "tui.select.confirm")) {
+      const session = this.sessions[this.selectedIndex];
+      if (session) {
+        this.onSessionSelect(session.id);
+      }
     }
-
-    if (this.keybindings.matches(data, "tui.select.confirm") || matchesKey(data, Key.enter)) {
-      const session = this.selectedSession();
-      // The `self` row is shown for context but isn't a message target; ignore
-      // Enter on it (you can't message yourself).
-      if (session && session.id !== this.currentSession.id) this.done(session);
-    }
-  }
-
-  private formatSummary(): string {
-    const now = Date.now();
-    const active = this.sessions.filter((session) => activityState(session, now) === "active").length;
-    return `${this.theme.fg("dim", "Send to:")} ${this.theme.fg("accent", String(this.sessions.length))} ${this.theme.fg("muted", "connected")} ${this.theme.fg("dim", "·")} ${this.theme.fg("accent", String(active))} ${this.theme.fg("muted", "active")}`;
-  }
-
-  private formatRow(session: SessionInfo, isSelected: boolean, inner: number): string {
-    const stateKind = activityState(session);
-    const statusText = session.status || "idle";
-    const isSelf = session.id === this.currentSession.id;
-    const pointer = isSelected ? this.theme.fg("accent", "▸") : " ";
-    const marker = activityMarker(this.theme, stateKind);
-    const state = stateKind === "active"
-      ? this.theme.fg("accent", statusText)
-      : this.theme.fg("muted", stateKind === "stale" ? `stale ${statusText}` : "idle");
-    const tags = [
-      isSelf ? "self" : undefined,
-      !isSelf && session.cwd === this.currentSession.cwd ? "same cwd" : undefined,
-    ].filter((tag): tag is string => Boolean(tag));
-    const tagLabel = tags.length ? this.theme.fg("dim", ` [${tags.join(", ")}]`) : "";
-    const titleText = `${sessionName(session)} (${shortSessionId(session.id)})`;
-    const title = isSelected ? this.theme.bold(this.theme.fg("text", titleText)) : this.theme.fg("text", titleText);
-    const project = this.theme.fg("muted", cwdLabel(session.cwd));
-    const status = stateKind === "stale"
-      ? `${this.theme.fg("dim", " · ")}${this.theme.fg("muted", `last update ${formatAge(session.lastActivity)}`)}`
-      : "";
-    const model = `${this.theme.fg("dim", " · ")}${this.theme.fg("muted", session.model)}`;
-    const cwdBudget = Math.max(10, Math.min(32, Math.floor(inner / 4)));
-    const path = this.theme.fg("dim", ` (${middleTruncate(session.cwd, cwdBudget)})`);
-
-    return `${pointer} ${marker} ${state} ${title}${tagLabel} ${this.theme.fg("dim", "·")} ${project}${path}${model}${status}`;
   }
 
   render(width: number): string[] {
-    const inner = innerWidth(width);
-    const bodyLines: string[] = [
-      hintLine(this.theme, ["enter: compose", "j/k: move", "g/G: ends", "esc: cancel"]),
-    ];
+    const innerWidth = Math.max(1, Math.min(width, 88));
+    if (innerWidth === 1) {
+      return [this.theme.fg("accent", "│")];
+    }
+
+    const contentWidth = Math.max(0, innerWidth - 2);
+    const footer = `${this.keybindings.getKeys("tui.select.confirm").join("/")}: Message • ${this.keybindings.getKeys("tui.select.cancel").join("/")}: Close`;
+    const border = (text: string) => this.theme.fg("accent", text);
+    const row = (text = "") => {
+      const clipped = truncateToWidth(text, contentWidth, "", true);
+      return `${border("│")}${clipped}${" ".repeat(Math.max(0, contentWidth - visibleWidth(clipped)))}${border("│")}`;
+    };
+
+    const lines: string[] = [];
+    lines.push(border(`╭${"─".repeat(contentWidth)}╮`));
+    lines.push(row(this.theme.bold(" Current Session")));
+    lines.push(border(`├${"─".repeat(contentWidth)}┤`));
+    lines.push(row());
+    lines.push(row(`  ${this.theme.fg("dim", sessionTitle(this.currentSession, { self: true }))}`));
+    lines.push(row(`  ${this.theme.fg("dim", `${middleTruncate(this.currentSession.cwd, Math.max(8, contentWidth - 4))} • ${this.currentSession.model}`)}`));
+    lines.push(row());
+    lines.push(border(`├${"─".repeat(contentWidth)}┤`));
+    lines.push(row(this.theme.bold(" Other Sessions")));
+    lines.push(row());
 
     if (this.sessions.length === 0) {
-      bodyLines.push(this.theme.fg("muted", "  No intercom-connected Pi sessions"));
+      lines.push(row(this.theme.fg("dim", " No other intercom-connected sessions")));
     } else {
-      if (this.selected < 0) this.selected = 0;
-      if (this.selected >= this.sessions.length) this.selected = this.sessions.length - 1;
-      const maxRows = Math.min(this.maxVisibleRows, Math.max(3, this.sessions.length));
-      if (this.selected < this.scrollTop) this.scrollTop = this.selected;
-      if (this.selected >= this.scrollTop + maxRows) this.scrollTop = this.selected - maxRows + 1;
-      this.scrollTop = Math.max(0, Math.min(this.scrollTop, Math.max(0, this.sessions.length - maxRows)));
+      const startIndex = Math.max(
+        0,
+        Math.min(this.selectedIndex - Math.floor(this.maxVisible / 2), this.sessions.length - this.maxVisible),
+      );
+      const endIndex = Math.min(startIndex + this.maxVisible, this.sessions.length);
 
-      const windowSessions = this.sessions.slice(this.scrollTop, this.scrollTop + maxRows);
-      for (let index = 0; index < windowSessions.length; index++) {
-        const absoluteIndex = this.scrollTop + index;
-        bodyLines.push(this.formatRow(windowSessions[index]!, absoluteIndex === this.selected, inner));
+      for (let index = startIndex; index < endIndex; index += 1) {
+        const session = this.sessions[index];
+        const isSelected = index === this.selectedIndex;
+        const sameCwd = session.cwd === this.currentSession.cwd;
+        const prefix = isSelected ? this.theme.fg("accent", "→ ") : "  ";
+        const title = sessionTitle(session, { sameCwd });
+        const pathText = `${middleTruncate(session.cwd, Math.max(8, contentWidth - 4))} • ${session.model}`;
+
+        lines.push(row(`${prefix}${isSelected ? this.theme.fg("accent", title) : title}`));
+        lines.push(row(`  ${this.theme.fg("dim", pathText)}`));
+        if (index < endIndex - 1) {
+          lines.push(row());
+        }
       }
 
-      if (this.scrollTop > 0 || this.scrollTop + maxRows < this.sessions.length) {
-        bodyLines.push(this.theme.fg("dim", ` ${this.selected + 1}/${this.sessions.length}`));
+      if (startIndex > 0 || endIndex < this.sessions.length) {
+        lines.push(row());
+        lines.push(row(this.theme.fg("dim", ` ${this.selectedIndex + 1}/${this.sessions.length}`)));
       }
     }
 
-    return framedOverlay(this.theme, this.formatSummary(), bodyLines, width);
+    lines.push(row());
+    lines.push(border(`├${"─".repeat(contentWidth)}┤`));
+    lines.push(row(this.theme.fg("dim", ` ${footer}`)));
+    lines.push(border(`╰${"─".repeat(contentWidth)}╯`));
+
+    return lines;
   }
 }

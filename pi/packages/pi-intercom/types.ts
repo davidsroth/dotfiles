@@ -1,50 +1,50 @@
-/**
- * Wire protocol version. The broker is a long-lived daemon shared across
- * sessions and survives in-place package upgrades, so a newer session can talk
- * to an older broker (or vice-versa). Bump this when adding/changing message
- * shapes. The handshake is forward/backward compatible: the field rides on
- * `register`/`registered` as an optional sibling (old peers omit it, new peers
- * tolerate its absence), and unknown message *types* are ignored rather than
- * fatal (see the client/broker message dispatch defaults), so a newer peer can
- * introduce a new event type without disconnecting older peers.
- */
-export const PROTOCOL_VERSION = 2;
+export const EXTENSION_BUS_FEATURE = "extension-bus-v1";
+export const ASIDE_FEATURE = "aside-v1";
 
 export interface SessionInfo {
   id: string;
   name?: string;
+  /** True only when the extension synthesized the name for an unnamed runtime. */
+  runtimeFallbackAlias?: boolean;
   cwd: string;
   model: string;
   pid: number;
   startedAt: number;
   lastActivity: number;
   status?: string;
-  /**
-   * Stable per-session identity (the pi session id) that survives broker
-   * reconnects. The broker uses this to evict a prior registration from the
-   * same session when it reconnects with a fresh UUID, so duplicate rows do
-   * not accumulate when the old socket's `close` never fires. Optional for
-   * backward compatibility with clients that predate this field.
-   */
-  originSessionId?: string;
+  peerUid?: number;
+  trustedLocal?: boolean;
+  /** Recipient-side capabilities advertised by this session. */
+  features?: string[];
+  /** Live context-window usage, pushed via presence from the source session's
+   *  getContextUsage(). contextPct is 0..100 (rounded); contextTokens /
+   *  contextWindow are raw token counts. All optional: unknown right after a
+   *  compaction (before the next assistant response), when no model is selected,
+   *  or on older clients that never report it. */
+  contextPct?: number;
+  contextTokens?: number;
+  contextWindow?: number;
 }
 
 export interface Message {
   id: string;
   timestamp: number;
+  senderSequence?: number;
+  brokerReceivedAt?: number;
+  brokerDeliveredAt?: number;
+  receiverReceivedAt?: number;
+  injectedAt?: number;
+  supersedes?: string;
+  retryOf?: string;
   replyTo?: string;
   expectsReply?: boolean;
   /**
    * Marks this as a one-off "aside" question: the recipient answers it out of
-   * band using an in-memory forked sub-session seeded with its current
-   * context, instead of injecting it into the timeline / triggering a turn.
-   * The recipient's persisted history is never touched and its current work is
-   * not interrupted. The answer comes back through the normal reply path
-   * (`replyTo` = this message id). Optional and forward-compatible: peers that
-   * predate this field simply treat the message as a normal send.
+   * band using an in-memory forked sub-session seeded with its current context,
+   * instead of injecting it into the timeline / triggering a turn.
    */
   aside?: boolean;
-  /** Machine-readable failure for a reply (not successful answer text). */
+  /** Machine-readable failure for a reply (rather than successful answer text). */
   replyError?: string;
   content: {
     text: string;
@@ -59,20 +59,91 @@ export interface Attachment {
   language?: string;
 }
 
+export type MessageReceiptStatus = "receiver_received" | "queued" | "injected" | "acknowledged" | "expired" | "cancelled" | "superseded" | "cancellation_requested";
+
+export interface MessageReceipt {
+  messageId: string;
+  status: MessageReceiptStatus;
+  timestamp: number;
+  detail?: string;
+}
+
+export type MessageControlAction = "cancel" | "supersede";
+
+export interface MessageControl {
+  messageId: string;
+  action: MessageControlAction;
+  timestamp: number;
+  supersededBy?: string;
+  detail?: string;
+}
+
+export interface ExtensionCapability {
+  namespace: string;
+  ownerEligible: boolean;
+}
+
+export type SessionRegistration = Omit<SessionInfo, "id" | "peerUid" | "trustedLocal"> & {
+  extensions?: ExtensionCapability[];
+};
+
 export type ClientMessage =
-  | { type: "register"; session: Omit<SessionInfo, "id">; version?: number }
+  | { type: "register"; session: SessionRegistration; sessionId?: string; stateId?: string }
   | { type: "unregister" }
+  | { type: "extension_capabilities_update"; extensions: ExtensionCapability[] }
   | { type: "list"; requestId: string }
   | { type: "send"; to: string; message: Message }
-  | { type: "presence"; name?: string; status?: string; model?: string };
+  | { type: "message_receipt"; receipt: MessageReceipt }
+  | { type: "cancel_message"; messageId: string; requestId?: string }
+  | { type: "cancel_ask"; messageId: string }
+  | { type: "presence"; name?: string; runtimeFallbackAlias?: boolean; status?: string; model?: string; contextPct?: number | null; contextTokens?: number | null; contextWindow?: number | null }
+  | {
+      type: "extension_publish";
+      namespace: string;
+      audience: "owner" | "capable";
+      ownerEpoch?: string;
+      ownerOnly?: boolean;
+      payload: unknown;
+    }
+  | {
+      type: "extension_state_commit";
+      namespace: string;
+      ownerEpoch: string;
+      expectedRevision: number;
+      payload: unknown;
+    };
 
 export type BrokerMessage =
-  | { type: "registered"; sessionId: string; version?: number }
+  | { type: "registered"; sessionId: string; features?: string[] }
   | { type: "sessions"; requestId: string; sessions: SessionInfo[] }
   | { type: "message"; from: SessionInfo; message: Message }
   | { type: "presence_update"; session: SessionInfo }
   | { type: "session_joined"; session: SessionInfo }
   | { type: "session_left"; sessionId: string }
   | { type: "error"; error: string }
-  | { type: "delivered"; messageId: string; recipientId?: string }
-  | { type: "delivery_failed"; messageId: string; reason: string };
+  | { type: "delivered"; messageId: string }
+  | { type: "delivery_failed"; messageId: string; reason: string }
+  | { type: "message_receipt"; from: SessionInfo; receipt: MessageReceipt }
+  | { type: "message_control"; from: SessionInfo; control: MessageControl }
+  | { type: "extension_owner"; namespace: string; ownerId?: string; ownerEpoch?: string }
+  | {
+      type: "extension_message";
+      namespace: string;
+      fromSessionId: string;
+      ownerId?: string;
+      ownerEpoch?: string;
+      payload: unknown;
+    }
+  | {
+      type: "extension_state";
+      namespace: string;
+      revision: number;
+      payload: unknown;
+    }
+  | {
+      type: "extension_state_result";
+      namespace: string;
+      committed: boolean;
+      revision: number;
+      reason?: string;
+    };

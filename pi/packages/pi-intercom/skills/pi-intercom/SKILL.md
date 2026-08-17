@@ -128,12 +128,9 @@ intercom({
 
 ### Pattern 6: Handle Subagent Escalations (Orchestrator Side)
 
-When a delegated child process supplies child bridge metadata, that child can
-reach you through `contact_supervisor`. The current in-process `pi-subagents`
-runner cannot safely provide per-child environment metadata for concurrent
-children, so this bridge currently applies only to isolated child processes
-that set the metadata before extensions load. You receive a formatted message
-that includes run metadata:
+When `pi-subagents` spawns a delegated child and supplies child bridge metadata,
+that child can reach you through `contact_supervisor`. You receive a formatted
+message that includes run metadata:
 
 ```
 **From subagent-worker-78f659a3-1**
@@ -159,8 +156,8 @@ This works because `reply` resolves the correct sender and message ID automatica
 
 | Type | What it means | How to respond |
 |------|---------------|----------------|
-| `need_decision` | Subagent is blocked and waiting for your answer. Has a 10-minute timeout. | Reply promptly with a clear decision. If you need more context, ask follow-up questions via `reply`. |
-| `interview_request` | Subagent needs multiple structured answers in one blocking exchange. Has a 10-minute timeout. | Reply with plain JSON or a fenced `json` block using the provided `{ "responses": [...] }` shape. |
+| `need_decision` | Subagent is blocked and waiting for your answer. Uses the shared ask timeout: 10 minutes by default, configurable with `PI_INTERCOM_ASK_TIMEOUT_MS`. | Reply promptly with a clear decision. If you need more context, ask follow-up questions via `reply`. |
+| `interview_request` | Subagent needs multiple structured answers in one blocking exchange. Uses the shared ask timeout: 10 minutes by default, configurable with `PI_INTERCOM_ASK_TIMEOUT_MS`. | Reply with plain JSON or a fenced `json` block using the provided `{ "responses": [...] }` shape. |
 | `progress_update` | Subagent is sharing meaningful progress or a plan-changing discovery. Not blocking. | Read and acknowledge. No reply required unless you want to redirect. |
 
 **When a subagent asks:**
@@ -199,8 +196,9 @@ it as a `contact_supervisor` escalation.
 
 | Action | Behavior | Use When |
 |--------|----------|----------|
-| `send` | Fire-and-forget | You don't need a response |
-| `ask` | Blocks until reply (10 min timeout) | You need an answer to continue |
+| `send` | Fire-and-forget; infers the sole pending ask as its reply | You don't need a response |
+| `ask` | Blocks until reply (10 min default, configurable with `PI_INTERCOM_ASK_TIMEOUT_MS`) | You need an answer to continue |
+| `aside` | Blocks like `ask`, but the peer answers out of band without interruption or history changes | You need a quick answer from a busy peer's current context |
 | `reply` | Responds to the active or pending inbound ask | You were asked something and need to answer naturally |
 | `pending` | Lists unresolved inbound asks | You need to see who is waiting before replying |
 | `list` | Returns all sessions with live status | You need to discover targets or choose an idle peer |
@@ -212,7 +210,7 @@ If no suitable intercom-connected peer session already exists and the task benef
 
 Prefer `cmux new-split right` over new surfaces or workspaces so both sessions are visible side by side.
 
-If `cmux` is unavailable, `tmux` is an optional fallback when it is installed and relevant. Create the peer on the normal tmux server so it appears in the user's session picker. Do not use `tmux -S` or `tmux -L` unless the user explicitly requests an isolated server: sessions on private sockets are invisible to pickers connected to the normal server.
+If `cmux` is unavailable, `tmux` is an optional fallback when it is installed and relevant. Use it with a private socket so the session is isolated and observable.
 
 Use spawned peer sessions only for:
 - same-codebase worker/planner splits
@@ -244,25 +242,27 @@ cmux send --surface right 'cd /path/to/reference/repo && pi\n'
 Same codebase:
 
 ```bash
+SOCKET_DIR=${TMPDIR:-/tmp}/pi-tmux-sockets
+mkdir -p "$SOCKET_DIR"
+SOCKET="$SOCKET_DIR/pi.sock"
 SESSION=pi-worker
-tmux new-session -d -s "$SESSION" -c "/path/to/current/repo" 'pi'
+tmux -S "$SOCKET" new -d -s "$SESSION" -c "/path/to/current/repo" 'pi'
 ```
 
 Reference codebase:
 
 ```bash
+SOCKET_DIR=${TMPDIR:-/tmp}/pi-tmux-sockets
+mkdir -p "$SOCKET_DIR"
+SOCKET="$SOCKET_DIR/pi.sock"
 SESSION=pi-reference-auth
-tmux new-session -d -s "$SESSION" -c "/path/to/reference/repo" 'pi'
+tmux -S "$SOCKET" new -d -s "$SESSION" -c "/path/to/reference/repo" 'pi'
 ```
 
-Choose a descriptive session name and verify it is unused before launching (`tmux has-session -t "=$SESSION"`). When you use `tmux`, tell the user that the peer is available in their normal session picker. They can also watch it directly:
+When you use `tmux`, tell the user how to watch it:
 
 ```bash
-# From inside tmux
-tmux switch-client -t "=$SESSION"
-
-# From outside tmux
-tmux attach-session -t "=$SESSION"
+tmux -S "$SOCKET" attach -t "$SESSION"
 ```
 
 After launch, name the new session clearly so it is easy to target:
@@ -300,18 +300,29 @@ If neither `cmux` nor `tmux` is available, skip this path and use normal `interc
 
 ## Important Constraints
 
-### `ask` Limitations
+### `ask` and `aside` Limitations
 
-- **10-minute timeout**: If no reply comes within 10 minutes, the ask fails
-- **Concurrent asks supported**: Requests are correlated independently by message ID
-- **No nested asks**: `ask`/`aside` cannot use `replyTo`; answer the first request before starting another
-- **Cannot self-target**: A session cannot ask itself
+- **Connected targets only**: Blocking asks and asides fail immediately when the target is not in the live intercom roster. Use `send` for non-blocking mailbox delivery.
+- **Configurable timeout**: If no reply arrives before the shared ask timeout, the ask fails. The default is 10 minutes; set `PI_INTERCOM_ASK_TIMEOUT_MS` to a positive millisecond value to change it.
+- **Concurrency**: A session can have one pending ordinary `ask`; multiple `aside` requests may wait concurrently and are matched by message ID.
+- **Cannot self-target**: A session cannot ask itself, including through disconnected-mailbox remapping
+- **Aside is read-only**: The recipient answers from a temporary context fork with only read/ls/find/grep tools; it cannot make changes or continue its main task
+
+```typescript
+// Check if already waiting before asking
+const result = await intercom({ action: "ask", to: "planner", message: "..." });
+if (result.isError && result.content[0].text.includes("Already waiting")) {
+  // Use send instead, or wait for current ask to complete
+}
+```
 
 ### `send` Behavior
 
-- **10-second delivery timeout**: The broker acknowledgement must arrive within 10 seconds
-- **Confirmation dialogs**: If `confirmSend: true` in config, interactive sessions show a confirmation dialog
-- **Replies skip confirmation**: Messages with `replyTo` never show confirmation dialogs
+- **No timeout**: Message is delivered or fails immediately
+- **Sole pending ask inference**: If the destination has exactly one pending inbound ask, `send` attaches its `replyTo`
+- **Ambiguity stays unthreaded**: Zero or multiple matching asks leave the send as an ordinary message
+- **Confirmation dialogs**: If `confirmSend: true`, interactive sessions confirm ordinary and inferred sends
+- **Explicit replies skip confirmation**: A caller-supplied `replyTo` skips the dialog
 
 ## Best Practices
 
@@ -372,6 +383,15 @@ Use `/name` so others can target you easily:
 
 ### Common Errors and Solutions
 
+**"Already waiting for a reply"**
+```typescript
+// You can only have one pending ask at a time
+// Option 1: Use send instead
+intercom({ action: "send", to: "planner", message: "..." });
+
+// Option 2: Wait for current ask to complete first
+```
+
 **"Cannot message the current session"**
 ```typescript
 // You cannot target yourself
@@ -387,11 +407,13 @@ if (!result.delivered) {
   await intercom({ action: "list" });
 }
 ```
+Replies to recently disconnected explicitly named senders can be queued by the broker and delivered if that sender reconnects with the same name and directory. Runtime-only `subagent-chat-...` aliases are not reconnect identities. New `send` calls may target a known live or recently disconnected session; blocking `ask` and `aside` calls require a live target.
 
-**Ask timeout (after 10 minutes)**
+**Ask timeout**
 ```typescript
 // The ask will reject with a timeout error
-// Design your workflow so answers come within 10 minutes
+// Default: 10 minutes
+// Override: set PI_INTERCOM_ASK_TIMEOUT_MS to a positive millisecond value
 // For longer tasks, use send + follow-up ask pattern
 ```
 
@@ -475,7 +497,7 @@ intercom({ action: "send", to: "planner", message: "Task-3 complete. All done." 
 ### Long-Running Task with Checkpoints
 
 ```typescript
-// For tasks that might exceed 10 minutes, use send + periodic asks
+// For tasks that might exceed the ask timeout, use send + periodic asks
 
 // 1. Initial send with full context
 intercom({

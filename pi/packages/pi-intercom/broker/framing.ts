@@ -1,38 +1,31 @@
 import type { Socket } from "net";
 
-/**
- * Maximum accepted frame payload size. The 4-byte length prefix can declare up
- * to ~4 GiB; without a cap a single buggy or malicious local peer can make the
- * shared broker buffer unbounded bytes (OOM) or block the event loop parsing a
- * huge payload, taking down IPC for every session. Override with
- * PI_INTERCOM_MAX_FRAME_BYTES (bytes); defaults to 16 MiB.
- */
-export const MAX_FRAME_BYTES: number = (() => {
-  const raw = Number(process.env.PI_INTERCOM_MAX_FRAME_BYTES);
-  return Number.isInteger(raw) && raw > 0 ? raw : 16 * 1024 * 1024;
-})();
+export const MAX_FRAME_BYTES = 1024 * 1024;
 
-/**
- * Encode a message into a length-prefixed frame buffer.
- * Format: 4-byte big-endian length + JSON payload.
- * Encode once and reuse the returned buffer to write to many sockets
- * (e.g. broadcast) instead of re-serializing per recipient.
- */
+/** Encode one length-prefixed JSON message, enforcing the reader's frame cap. */
 export function encodeMessage(msg: unknown): Buffer {
   const json = JSON.stringify(msg);
-  const payload = Buffer.from(json, "utf-8");
-  if (payload.length > MAX_FRAME_BYTES) {
+  const payloadLength = Buffer.byteLength(json, "utf-8");
+  if (payloadLength > MAX_FRAME_BYTES) {
     throw new Error(
-      `Refusing to send intercom message of ${payload.length} bytes (max ${MAX_FRAME_BYTES}); a peer would reject it`,
+      `Refusing to send intercom message of ${payloadLength} bytes (maximum ${MAX_FRAME_BYTES} bytes)`,
     );
   }
-  const header = Buffer.alloc(4);
-  header.writeUInt32BE(payload.length, 0);
-  return Buffer.concat([header, payload]);
+
+  const frame = Buffer.allocUnsafe(4 + payloadLength);
+  frame.writeUInt32BE(payloadLength, 0);
+  frame.write(json, 4, payloadLength, "utf-8");
+  return frame;
 }
 
-/** Write an already-encoded frame buffer to a socket. */
+/** Write one already-encoded frame, without allowing the outbound cap to be bypassed. */
 export function writeFrame(socket: Socket, frame: Buffer): void {
+  const payloadLength = frame.length >= 4 ? frame.readUInt32BE(0) : frame.length;
+  if (payloadLength > MAX_FRAME_BYTES || frame.length > MAX_FRAME_BYTES + 4) {
+    throw new Error(
+      `Refusing to send intercom frame exceeding maximum ${MAX_FRAME_BYTES} bytes`,
+    );
+  }
   socket.write(frame);
 }
 
@@ -52,46 +45,91 @@ export function writeMessage(socket: Socket, msg: unknown): void {
 export function createMessageReader(
   onMessage: (msg: unknown) => void,
   onError: (error: Error) => void,
+  maxFrameBytes = MAX_FRAME_BYTES,
 ) {
-  let buffer = Buffer.alloc(0);
+  const header = Buffer.allocUnsafe(4);
+  let headerBytes = 0;
+  let payload: Buffer | null = null;
+  let payloadBytes = 0;
+  let payloadLength = 0;
+
+  function reportMessage(framePayload: Buffer): boolean {
+    let msg: unknown;
+    try {
+      msg = JSON.parse(framePayload.toString("utf-8"));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      onError(new Error(`Failed to parse intercom message: ${message}`, { cause: error }));
+      return false;
+    }
+
+    try {
+      onMessage(msg);
+      return true;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      onError(new Error(`Failed to handle intercom message: ${message}`, { cause: error }));
+      return false;
+    }
+  }
 
   return (data: Buffer) => {
-    buffer = Buffer.concat([buffer, data]);
+    let offset = 0;
 
-    while (buffer.length >= 4) {
-      const length = buffer.readUInt32BE(0);
+    while (offset < data.length) {
+      if (headerBytes < 4) {
+        const bytes = Math.min(4 - headerBytes, data.length - offset);
+        data.copy(header, headerBytes, offset, offset + bytes);
+        headerBytes += bytes;
+        offset += bytes;
+        if (headerBytes < 4) {
+          return;
+        }
 
-      if (length > MAX_FRAME_BYTES) {
-        // Reject as soon as the oversized header is visible, before buffering
-        // the declared payload, so a huge length can't drive unbounded growth.
-        buffer = Buffer.alloc(0);
-        onError(
-          new Error(`Intercom message too large: ${length} bytes exceeds max ${MAX_FRAME_BYTES}`),
-        );
+        payloadLength = header.readUInt32BE(0);
+        if (payloadLength > maxFrameBytes) {
+          headerBytes = 0;
+          onError(new Error(`Intercom frame length ${payloadLength} exceeds maximum ${maxFrameBytes} bytes`));
+          return;
+        }
+      }
+
+      // Fast path: the whole payload is already in this chunk, so parse it
+      // in place without copying into a reassembly buffer.
+      if (payloadBytes === 0 && data.length - offset >= payloadLength) {
+        const framePayload = data.subarray(offset, offset + payloadLength);
+        offset += payloadLength;
+        headerBytes = 0;
+        payload = null;
+        payloadLength = 0;
+        if (!reportMessage(framePayload)) {
+          return;
+        }
+        continue;
+      }
+
+      // A buffer allocated for a previous frame (e.g. when a chunk ended
+      // exactly on a header boundary) must not be reused for a frame of a
+      // different size, so the reassembly buffer is size-checked, not just
+      // presence-checked.
+      if (payload === null || payload.length !== payloadLength) {
+        payload = Buffer.allocUnsafe(payloadLength);
+      }
+      const bytes = Math.min(payloadLength - payloadBytes, data.length - offset);
+      data.copy(payload, payloadBytes, offset, offset + bytes);
+      payloadBytes += bytes;
+      offset += bytes;
+
+      if (payloadBytes < payloadLength) {
         return;
       }
 
-      if (buffer.length < 4 + length) {
-        break;
-      }
-
-      const payload = buffer.subarray(4, 4 + length);
-      buffer = buffer.subarray(4 + length);
-
-      let msg: unknown;
-      try {
-        msg = JSON.parse(payload.toString("utf-8"));
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        onError(new Error(`Failed to parse intercom message: ${message}`, { cause: error }));
-        return;
-      }
-
-      try {
-        onMessage(msg);
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        onError(new Error(`Failed to handle intercom message: ${message}`, { cause: error }));
+      const framePayload = payload;
+      headerBytes = 0;
+      payload = null;
+      payloadBytes = 0;
+      payloadLength = 0;
+      if (!reportMessage(framePayload)) {
         return;
       }
     }

@@ -1,29 +1,40 @@
 # Forked from
 
-This package is now maintained as `@davidroth/pi-intercom` in David Roth's
-dotfiles repo.
+This package is maintained as `@davidroth/pi-intercom` in David Roth's
+dotfiles repository.
 
-## Original upstream
+## Current upstream base
 
 - Repository: https://github.com/nicobailon/pi-intercom
-- Commit: `5caa4aa1bd060cf0aebbf1a5dfbb1abb6e23e457`
-- Released as: `pi-intercom@0.6.0`
-- Retrieved: 2026-05-04
+- Base commit: `63fb02eda4fbb847814d592617c83b3fd5e6cdf7`
+- Base release: `pi-intercom@0.9.2`
+- Rebased: 2026-08-05
+- Selectively synced through upstream commit `006af91` (post-`v0.10.1`): 2026-08-16
 - License: MIT
 
-## Local divergence
+The fork remains structurally based on `v0.9.2`; post-base changes were ported
+manually rather than merged wholesale. Integrated upstream commits:
 
-- Diverged: 2026-05-25
-- New package identity: `@davidroth/pi-intercom@0.7.0`
-- Directory remains `pi/packages/pi-intercom/` so existing dotfiles package
-  paths and broker scripts continue to work.
+- `c3543d6` (#85), `f260df0` (#88), `25ffb96` (#87), `5d76146` (#90)
+- `72309e0` + `fd30948` (#91/#92), `126875e` (#94)
+- `2ba9f53` (#100), the `tsx` resolution portion of `c9675a5` (#98), and `006af91` (#103)
 
-Notes:
-- `.git/`, `.github/`, and `node_modules/` were omitted from the vendored copy.
-- This package has runtime dependencies (`tsx`, `typebox`) declared in
-  `package.json`. Run `npm install` inside this directory once after vendoring
-  (or after refreshing) so the broker spawn path can resolve `tsx`. The
-  resulting `node_modules/` is gitignored by `packages/.gitignore`.
-- `typebox` is technically bundled by pi as a peer dependency, but upstream
-  lists it under `dependencies`; this is harmless since pi loads the package
-  with a separate module root.
+Intentionally not integrated: Herdr pane auto-launch (#95), tmux pane presence
+(#101), persisted blocking asks (#105), or the broad protocol refactor (#96).
+
+## Branch model
+
+The fork is rebuilt as an ordered stack:
+
+1. upstream `v0.9.2`
+2. portable `aside` feature commit, suitable for stock upstream
+3. fork-only hardening, presence, and agent-picker commits
+4. selected post-`v0.9.2` correctness/reliability ports listed above
+
+This keeps aside independently reviewable/shareable instead of encoding it in
+a monolithic vendored diff.
+
+## Fork package
+
+- Package: `@davidroth/pi-intercom@0.10.0`
+- Directory: `pi/packages/pi-intercom/`

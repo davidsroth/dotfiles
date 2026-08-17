@@ -1,110 +1,155 @@
-import test from "node:test";
 import assert from "node:assert/strict";
+import test from "node:test";
+import { visibleWidth } from "@earendil-works/pi-tui";
+import type { SessionInfo } from "../types.ts";
+import { AgentPickerOverlay } from "../ui/agent-picker.ts";
 import {
   activityState,
+  cwdLabel,
   formatAge,
-  parseTmuxTarget,
+  middleTruncate,
+  resolveAgentPickerKey,
   sessionActivityRank,
   sortSessionsForPicker,
 } from "../ui/agent-picker-util.ts";
-import { cwdLabel } from "../ui/text.ts";
-import { middleTruncate } from "../ui/text.ts";
-import type { SessionInfo } from "../types.ts";
 
-// Pure helpers behind the agent picker (Ctrl+Alt+A). The overlay's tmux/exec
-// side effects aren't unit-testable, but the parsing/sorting/formatting logic
-// that decides what the user sees and which pane we switch to is, and is the
-// part most likely to regress silently.
-
-// Anchored to real time because sortSessionsForPicker reads Date.now() internally
-// (no injectable clock); fixture offsets are seconds/minutes so ms drift is safe.
 const NOW = Date.now();
 
-function makeSession(overrides: Partial<SessionInfo> = {}): SessionInfo {
+function session(id: string, overrides: Partial<SessionInfo> = {}): SessionInfo {
   return {
-    id: "0123456789abcdef",
-    cwd: "/Users/me/projects/app",
-    model: "claude",
-    pid: 1234,
+    id,
+    name: id,
+    cwd: "/repo/app",
+    model: "test-model",
+    pid: 100,
     startedAt: NOW - 60_000,
     lastActivity: NOW,
+    status: "idle",
+    trustedLocal: true,
     ...overrides,
   };
 }
 
-test("parseTmuxTarget parses session:window.pane", () => {
-  assert.deepEqual(parseTmuxTarget("main:1.0"), { session: "main", window: "1" });
-  assert.deepEqual(parseTmuxTarget("work:12.3"), { session: "work", window: "12" });
-});
+const theme = {
+  fg(_name: string, text: string) { return text; },
+  bold(text: string) { return text; },
+};
 
-test("parseTmuxTarget keeps colons inside the session name (lastIndexOf)", () => {
-  assert.deepEqual(parseTmuxTarget("my:sess:2.1"), { session: "my:sess", window: "2" });
-});
+const keybindings = {
+  matches(data: string, id: string) {
+    return data === id;
+  },
+};
 
-test("parseTmuxTarget rejects malformed targets", () => {
-  assert.equal(parseTmuxTarget("nocolon"), null);
-  assert.equal(parseTmuxTarget(":1.0"), null); // empty session (colon at 0)
-  assert.equal(parseTmuxTarget("main:10"), null); // no pane dot
-  assert.equal(parseTmuxTarget("main:.0"), null); // empty window (dot at 0)
-  assert.equal(parseTmuxTarget(""), null);
-});
-
-test("activityState classifies idle / active / stale", () => {
-  assert.equal(activityState(makeSession({ status: undefined }), NOW), "idle");
-  assert.equal(activityState(makeSession({ status: "idle" }), NOW), "idle");
-  assert.equal(
-    activityState(makeSession({ status: "thinking", lastActivity: NOW - 1000 }), NOW),
-    "active",
+function picker(
+  sessions: SessionInfo[],
+  done: (result: SessionInfo | undefined) => void,
+  current = sessions[0]!,
+) {
+  let renders = 0;
+  const overlay = new AgentPickerOverlay(
+    { requestRender() { renders += 1; } } as any,
+    theme as any,
+    keybindings as any,
+    current,
+    sessions,
+    "ctrl+alt+a" as any,
+    done,
   );
-  assert.equal(
-    activityState(makeSession({ status: "tool:bash", lastActivity: NOW - 31 * 60 * 1000 }), NOW),
-    "stale",
-  );
-});
+  return { overlay, renderCount: () => renders };
+}
 
-test("sessionActivityRank orders active < idle < stale", () => {
-  const active = sessionActivityRank(makeSession({ status: "thinking", lastActivity: NOW }), NOW);
-  const idle = sessionActivityRank(makeSession({ status: "idle" }), NOW);
-  const stale = sessionActivityRank(
-    makeSession({ status: "thinking", lastActivity: NOW - 60 * 60 * 1000 }),
-    NOW,
-  );
-  assert.ok(active < idle && idle < stale, `expected ${active} < ${idle} < ${stale}`);
-});
-
-test("sortSessionsForPicker ranks active first then by recency, without mutating input", () => {
-  const stale = makeSession({ id: "stale", status: "thinking", lastActivity: NOW - 60 * 60 * 1000 });
-  const idle = makeSession({ id: "idle", status: "idle", lastActivity: NOW - 5_000 });
-  const activeOld = makeSession({ id: "active-old", status: "thinking", lastActivity: NOW - 10_000 });
-  const activeNew = makeSession({ id: "active-new", status: "tool:bash", lastActivity: NOW - 1_000 });
+test("activity helpers classify and sort active, idle, then stale without mutation", () => {
+  const stale = session("stale", { status: "thinking", lastActivity: NOW - 31 * 60_000 });
+  const idle = session("idle", { lastActivity: NOW - 1000 });
+  const activeOld = session("active-old", { status: "thinking", lastActivity: NOW - 2000 });
+  const activeNew = session("active-new", { status: "tool:bash", lastActivity: NOW - 1000 });
   const input = [stale, idle, activeOld, activeNew];
 
-  const sorted = sortSessionsForPicker(input);
-
-  assert.deepEqual(sorted.map(s => s.id), ["active-new", "active-old", "idle", "stale"]);
-  // input order is preserved (sort operates on a copy)
-  assert.deepEqual(input.map(s => s.id), ["stale", "idle", "active-old", "active-new"]);
+  assert.equal(activityState(idle, NOW), "idle");
+  assert.equal(activityState(activeNew, NOW), "active");
+  assert.equal(activityState(stale, NOW), "stale");
+  assert.ok(sessionActivityRank(activeNew, NOW) < sessionActivityRank(idle, NOW));
+  assert.deepEqual(sortSessionsForPicker(input, NOW).map((item) => item.id), ["active-new", "active-old", "idle", "stale"]);
+  assert.deepEqual(input.map((item) => item.id), ["stale", "idle", "active-old", "active-new"]);
 });
 
-test("formatAge renders coarse buckets", () => {
-  assert.equal(formatAge(NOW, NOW), "just now");
-  assert.equal(formatAge(NOW - 30_000, NOW), "just now");
+test("picker key defaults to ctrl+alt+a and accepts a configured override", () => {
+  assert.equal(resolveAgentPickerKey(undefined), "ctrl+alt+a");
+  assert.equal(resolveAgentPickerKey("  ctrl+shift+j  "), "ctrl+shift+j");
+  assert.equal(resolveAgentPickerKey("  "), "ctrl+alt+a");
+});
+
+test("formatting helpers produce compact labels", () => {
   assert.equal(formatAge(NOW - 5 * 60_000, NOW), "5m ago");
-  assert.equal(formatAge(NOW - 3 * 60 * 60_000, NOW), "3h ago");
-  assert.equal(formatAge(NOW - 2 * 24 * 60 * 60_000, NOW), "2d ago");
-  // clamps negative skew to "just now"
-  assert.equal(formatAge(NOW + 10_000, NOW), "just now");
+  assert.equal(formatAge(NOW + 1000, NOW), "just now");
+  assert.equal(cwdLabel("/repo/app/"), "app");
+  assert.match(middleTruncate("/a/very/long/project/path", 12), /…/);
 });
 
-test("cwdLabel returns the last path segment", () => {
-  assert.equal(cwdLabel("/Users/me/projects/app"), "app");
-  assert.equal(cwdLabel("/Users/me/projects/app/"), "app");
-  assert.equal(cwdLabel("/"), "/");
+test("picker anchors self visibly but only selects peers", () => {
+  const self = session("self-session", { name: "current" });
+  const selected: Array<SessionInfo | undefined> = [];
+  const { overlay } = picker([self], (result) => selected.push(result), self);
+
+  const text = overlay.render(100).join("\n");
+  assert.match(text, /current \(self-ses\) \[self\]/);
+  assert.match(text, /No other intercom-connected Pi sessions/);
+  overlay.handleInput("tui.select.confirm");
+  assert.deepEqual(selected, []);
 });
 
-test("middleTruncate keeps short text and fits within the budget", () => {
-  assert.equal(middleTruncate("short", 20), "short");
-  const truncated = middleTruncate("/Users/me/projects/some/very/deep/path", 16);
-  assert.ok(truncated.length <= 16, `"${truncated}" exceeds 16`);
-  assert.ok(truncated.includes("…"), `"${truncated}" should contain an ellipsis`);
+test("live refresh preserves peer selection by stable id across joins, activity re-sorts, and self updates", () => {
+  const self = session("self-session", { name: "current" });
+  const first = session("peer-first", { status: "thinking", lastActivity: NOW - 1000 });
+  const chosen = session("peer-chosen", { lastActivity: NOW - 2000 });
+  const results: Array<SessionInfo | undefined> = [];
+  const { overlay, renderCount } = picker([self, first, chosen], (result) => results.push(result), self);
+
+  overlay.handleInput("tui.select.down");
+  const joined = session("peer-joined", { status: "tool:read", lastActivity: NOW });
+  overlay.setSessions([
+    { ...self, status: "thinking", contextPct: 42 },
+    first,
+    { ...chosen, status: "thinking", lastActivity: NOW },
+    joined,
+  ]);
+  overlay.handleInput("tui.select.confirm");
+  overlay.setSessions([{ ...self, status: "thinking", contextPct: 42 }, { ...chosen, status: "thinking", lastActivity: NOW }, joined]);
+  overlay.handleInput("tui.select.confirm");
+  overlay.setSessions([{ ...self, status: "thinking", contextPct: 42 }, joined]);
+  overlay.handleInput("tui.select.confirm");
+
+  assert.deepEqual(results.map((result) => result?.id), ["peer-chosen", "peer-chosen", "peer-joined"]);
+  assert.ok(renderCount() >= 4);
+  assert.match(overlay.render(120).join("\n"), /current .*\[self\].*thinking.*42% ctx/);
+});
+
+test("rows use normalized cwd comparison, context usage, and trust metadata", () => {
+  const self = session("self-session", { cwd: "/repo/app" });
+  const peer = session("peer-session", {
+    cwd: "/repo/./app/",
+    contextPct: 72,
+    contextTokens: 144_000,
+    contextWindow: 200_000,
+    trustedLocal: false,
+  });
+  const { overlay } = picker([self, peer], () => {}, self);
+  const text = overlay.render(140).join("\n");
+
+  assert.match(text, /\[same cwd\]/);
+  assert.match(text, /72% ctx \(144k\/200k\)/);
+  assert.match(text, /unverified/);
+});
+
+test("picker frame never exceeds and normally fills its render width", () => {
+  const self = session("self-session");
+  const peer = session("peer-session", { name: "a very long peer name that should be clipped safely" });
+  const { overlay } = picker([self, peer], () => {}, self);
+
+  for (const width of [1, 2, 20, 80]) {
+    for (const line of overlay.render(width)) {
+      assert.equal(visibleWidth(line), width);
+    }
+  }
 });

@@ -5,7 +5,6 @@ import {
   SessionManager,
   type AgentSession,
   type ExtensionContext,
-  type ModelRuntime,
   type ResourceLoader,
 } from "@earendil-works/pi-coding-agent";
 import type { AssistantMessage, Message as AiMessage } from "@earendil-works/pi-ai";
@@ -46,32 +45,43 @@ function createAsideResourceLoader(ctx: ExtensionContext): ResourceLoader {
   const extensionsResult = { extensions: [], errors: [], runtime: createExtensionRuntime() };
   const systemPrompt = stripDynamicSystemPromptFooter(ctx.getSystemPrompt());
 
-  return {
+  const loader = {
     getExtensions: () => extensionsResult,
     getSkills: () => ({ skills: [], diagnostics: [] }),
     getPrompts: () => ({ prompts: [], diagnostics: [] }),
     getThemes: () => ({ themes: [], diagnostics: [] }),
     getAgentsFiles: () => ({ agentsFiles: [] }),
     getSystemPrompt: () => systemPrompt,
+    // Required by pi >=0.83. Keep these out of the contextual object type so
+    // the same source remains loadable against older pi SDK ResourceLoaders.
+    getSystemPromptSource: () => undefined,
     getAppendSystemPrompt: () => [ASIDE_SYSTEM_PROMPT],
+    getAppendSystemPromptSources: () => [],
     extendResources: () => {},
     reload: async () => {},
   };
+  return loader as ResourceLoader;
 }
 
 function lastAssistantText(session: AgentSession): string {
   for (let i = session.state.messages.length - 1; i >= 0; i--) {
     const message = session.state.messages[i];
     if (message.role === "assistant") {
-      const text = (message as AssistantMessage).content
+      const assistant = message as AssistantMessage & { stopReason?: string; errorMessage?: string };
+      if (assistant.stopReason === "aborted") throw new Error("aborted");
+      if (assistant.stopReason === "error") {
+        throw new Error(assistant.errorMessage || "aside model request failed");
+      }
+      const text = assistant.content
         .filter((part): part is Extract<typeof part, { type: "text" }> => part.type === "text")
         .map((part) => part.text)
         .join("\n")
         .trim();
-      return text || "(no text response)";
+      if (!text) throw new Error("aside returned no text response");
+      return text;
     }
   }
-  return "(no response)";
+  throw new Error("aside returned no assistant response");
 }
 
 export interface AnswerAsideOptions {
@@ -95,26 +105,45 @@ export async function answerAside(
     throw new Error("no active model in the target session");
   }
 
-  const { session } = await createAgentSession({
+  const registry = ctx.modelRegistry as unknown as { runtime?: unknown };
+  const sessionOptions: Record<string, unknown> = {
     cwd: ctx.cwd,
     sessionManager: SessionManager.inMemory(ctx.cwd),
     model,
-    // ExtensionContext exposes only the ModelRegistry facade; unwrap the
-    // underlying ModelRuntime that createAgentSession expects (pi >=0.80.7).
-    modelRuntime: (ctx.modelRegistry as unknown as { runtime: ModelRuntime }).runtime,
     tools: [...ASIDE_TOOLS],
     resourceLoader: createAsideResourceLoader(ctx),
-  });
+  };
+  // Pi <=0.79 accepted ModelRegistry directly; Pi >=0.80 accepts the
+  // underlying ModelRuntime. Select at runtime so one patch works across the
+  // SDK range supported by upstream pi-intercom.
+  if (registry.runtime) {
+    sessionOptions.modelRuntime = registry.runtime;
+  } else {
+    sessionOptions.modelRegistry = ctx.modelRegistry;
+  }
+
+  const { session } = await createAgentSession(
+    sessionOptions as Parameters<typeof createAgentSession>[0],
+  );
 
   const timeoutMs = options.timeoutMs ?? ASIDE_TIMEOUT_MS;
   let timer: ReturnType<typeof setTimeout> | undefined;
-  const onExternalAbort = () => void session.abort();
+  let rejectAbort: ((error: Error) => void) | undefined;
+  const aborted = new Promise<never>((_resolve, reject) => {
+    rejectAbort = reject;
+  });
+  const onExternalAbort = () => {
+    void session.abort();
+    rejectAbort?.(new Error("aborted"));
+  };
 
   try {
-    // Seed the fork with a read-only snapshot of the recipient's current
-    // context so the answer reflects what that session actually knows.
+    // Capture the leaf before entries so a concurrently advancing main session
+    // cannot give buildSessionContext a leaf newer than the snapshot.
     try {
-      const seed = buildSessionContext(ctx.sessionManager.getEntries(), ctx.sessionManager.getLeafId()).messages;
+      const leafId = ctx.sessionManager.getLeafId();
+      const entries = ctx.sessionManager.getEntries();
+      const seed = buildSessionContext(entries, leafId).messages;
       if (seed.length > 0) {
         session.agent.state.messages = seed as AiMessage[] as typeof session.agent.state.messages;
       }
@@ -135,7 +164,7 @@ export async function answerAside(
       }, timeoutMs);
     });
 
-    await Promise.race([run, timeout]);
+    await Promise.race([run, timeout, aborted]);
     return lastAssistantText(session);
   } finally {
     if (timer) clearTimeout(timer);
