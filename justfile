@@ -21,6 +21,32 @@ stow:
 stow-restow:
   stow -R -v {{stow_packages}}
 
+# Register local Herdr plugins, reapply the Pi patch after any manual `herdr integration install pi`, and capture a session snapshot.
+herdr-setup:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  repo="{{justfile_directory()}}"
+  root="$repo/core/.config/herdr/plugins"
+  herdr_root="$repo/core/.config/herdr"
+  herdr_bin="${HERDR_BIN_PATH:-herdr}"
+  bash "$repo/scripts/require-herdr-version.sh"
+  "$herdr_bin" plugin link "$root/non-idle-agent" --enabled >/dev/null
+  "$herdr_bin" plugin link "$root/session-guard" --enabled >/dev/null
+  # Do not modify the managed integration unless its exact v8 fixture passes.
+  python3 "$herdr_root/tests/test_herdr_pi_state_patcher.py"
+  python3 "$herdr_root/tests/test_non_idle_agent.py"
+  python3 "$herdr_root/bin/apply-herdr-pi-state-patch.py"
+  if "$herdr_bin" status server >/dev/null 2>&1; then
+    python3 "$root/session-guard/session_guard.py" snapshot --reason setup
+  else
+    echo "Herdr plugins linked; start Herdr to capture the first session snapshot."
+  fi
+
+# Back up Pi session references, stop Herdr, and verify the persisted snapshot.
+# Must run from a regular terminal outside Herdr.
+herdr-safe-stop *args:
+  bash {{justfile_directory()}}/core/.config/herdr/bin/herdr-safe-stop.sh {{args}}
+
 # Apply macOS defaults (prompts within script handle confirmations).
 macos-defaults:
   bash macos-defaults.sh
@@ -75,7 +101,7 @@ pi-memory:
     echo "Linked global memory: $DEST"
   fi
 
-# Run pi health-checks: settings drift, package paths, hooks, memory link, stow, toolchain, secrets.
+# Run pi health-checks: settings drift, package paths, Herdr Pi patch, hooks, memory link, stow, toolchain, secrets.
 pi-doctor:
   bash {{justfile_directory()}}/scripts/pi-doctor.sh
 
@@ -232,3 +258,7 @@ audit-links:
     echo "Link check reported failures (non-gating)." >&2
     exit 0
   }
+
+# Inspect how the terminal and multiplexer encode key chords
+keyprobe:
+  @node "{{justfile_directory()}}/scripts/keyprobe.mjs"

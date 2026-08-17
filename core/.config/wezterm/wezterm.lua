@@ -122,6 +122,11 @@ local switch_next_tab = herdr_or("\x1b[93;9u", wezterm.action.SendKey({ key = "]
 local switch_prev_workspace = herdr_or("\x1b[91;10u", wezterm.action.ActivateTabRelative(-1))
 local switch_next_workspace = herdr_or("\x1b[93;10u", wezterm.action.ActivateTabRelative(1))
 
+-- Opt+[ / Opt+]: Herdr agents. Same trick as the Cmd chords, with modifier
+-- 3 = alt(2) + 1; outside Herdr keep the default Meta behavior (ESC [ / ESC ]).
+local switch_prev_agent = herdr_or("\x1b[91;3u", wezterm.action.SendKey({ key = "[", mods = "ALT" }))
+local switch_next_agent = herdr_or("\x1b[93;3u", wezterm.action.SendKey({ key = "]", mods = "ALT" }))
+
 config.keys = {
 	-- ============================================================================
 	-- Pane Management
@@ -279,6 +284,10 @@ config.keys = {
 	{ key = "]", mods = "CMD", action = switch_next_tab },
 	{ key = "[", mods = "CMD|SHIFT", action = switch_prev_workspace },
 	{ key = "]", mods = "CMD|SHIFT", action = switch_next_workspace },
+
+	-- Switch Herdr agents with Opt+[ / Opt+] (CSI u alt encoding, see above).
+	{ key = "[", mods = "OPT", action = switch_prev_agent },
+	{ key = "]", mods = "OPT", action = switch_next_agent },
 
 	-- Force CSI u encoding for Ctrl+Shift+S so tmux can bind it distinctly
 	-- from plain Ctrl+S (which legacy xterm encoding collapses together).

@@ -1,0 +1,49 @@
+id = "local.session-guard"
+name = "Pi Session Guard"
+version = "0.1.0"
+min_herdr_version = "0.7.5"
+description = "Back up native Pi session references before macOS shutdown can erase them"
+platforms = ["macos", "linux"]
+
+[[startup]]
+command = ["python3", "session_guard.py", "snapshot", "--reason", "startup"]
+
+[[events]]
+on = "pane.agent_detected"
+command = ["python3", "session_guard.py", "snapshot", "--reason", "pane.agent_detected"]
+
+[[events]]
+on = "pane.agent_status_changed"
+command = ["python3", "session_guard.py", "snapshot", "--reason", "pane.agent_status_changed"]
+
+[[events]]
+on = "workspace.updated"
+command = ["python3", "session_guard.py", "snapshot", "--reason", "workspace.updated"]
+
+[[events]]
+on = "tab.renamed"
+command = ["python3", "session_guard.py", "snapshot", "--reason", "tab.renamed"]
+
+[[events]]
+on = "pane.moved"
+command = ["python3", "session_guard.py", "snapshot", "--reason", "pane.moved"]
+
+[[events]]
+on = "pane.closed"
+command = ["python3", "session_guard.py", "snapshot", "--reason", "pane.closed"]
+
+[[events]]
+on = "tab.moved"
+command = ["python3", "session_guard.py", "snapshot", "--reason", "tab.moved"]
+
+[[events]]
+on = "tab.closed"
+command = ["python3", "session_guard.py", "snapshot", "--reason", "tab.closed"]
+
+[[events]]
+on = "workspace.moved"
+command = ["python3", "session_guard.py", "snapshot", "--reason", "workspace.moved"]
+
+[[events]]
+on = "workspace.closed"
+command = ["python3", "session_guard.py", "snapshot", "--reason", "workspace.closed"]

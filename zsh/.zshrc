@@ -171,6 +171,13 @@ node() { unfunction nvm node npm npx 2>/dev/null; _load_nvm; node "$@" }
 npm() { unfunction nvm node npm npx 2>/dev/null; _load_nvm; npm "$@" }
 npx() { unfunction nvm node npm npx 2>/dev/null; _load_nvm; npx "$@" }
 
+# Google Workspace CLI - secondary account
+# gws 0.22.5 has no account switching: one credentials.enc per config dir, and
+# no --account flag. A separate config dir is the only isolation mechanism, and
+# keeping it out of the default path guarantees the granola pipeline can never
+# pick up the wrong account.
+gws-alt() { GOOGLE_WORKSPACE_CLI_CONFIG_DIR="$HOME/.config/gws-alt" gws "$@" }
+
 # ============================================================================
 # Editor Configuration
 # ============================================================================

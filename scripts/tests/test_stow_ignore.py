@@ -35,6 +35,8 @@ class StowIgnoreTest(unittest.TestCase):
                 ".config/herdr/herdr-server.log",
                 ".config/herdr/herdr.sock",
                 ".config/herdr/sessions/workspace.json",
+                ".config/herdr/plugins/non-idle-agent/runtime-token",
+                ".config/herdr/plugins/session-guard/runtime-token",
                 ".config/sunsama/session.json",
                 ".config/op/token",
                 ".config/raycast/state.db",
@@ -55,8 +57,11 @@ class StowIgnoreTest(unittest.TestCase):
                 ".config/opencode/opencode.json",
                 ".config/herdr/config.toml",
                 ".config/herdr/bin/workspace-picker.sh",
-                ".config/herdr/plugins/agent-indexes/herdr-plugin.toml",
-                ".config/herdr/plugins/agent-indexes/refresh.py",
+                ".config/herdr/bin/herdr-safe-stop.sh",
+                ".config/herdr/plugins/non-idle-agent/herdr-plugin.toml",
+                ".config/herdr/plugins/non-idle-agent/switch.py",
+                ".config/herdr/plugins/session-guard/herdr-plugin.toml",
+                ".config/herdr/plugins/session-guard/session_guard.py",
                 # Gitignored machine-local input, intentionally linked into the
                 # active config so init.lua can actually load the overrides.
                 ".hammerspoon/init.local.lua",

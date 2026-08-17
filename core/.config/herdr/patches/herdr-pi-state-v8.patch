@@ -1,0 +1,168 @@
+--- herdr-agent-state.ts
++++ herdr-agent-state.ts
+@@ -172,23 +172,70 @@
+   }
+ }
+ 
++// Local extension contract published by pi-subagents. The registry is keyed by
++// Pi session ID so an embedded child cannot overwrite its root's activity.
++const SUBAGENT_ACTIVITY_REGISTRY_KEY = Symbol.for("pi-subagents:activity-registry");
++
++type SubagentActivity = {
++  id: string;
++  type?: string;
++  description?: string;
++  status: "queued" | "running";
++};
++
++function normalizeSubagentActivity(value: unknown): SubagentActivity[] {
++  if (!Array.isArray(value)) return [];
++  return value.flatMap((candidate) => {
++    if (!candidate || typeof candidate !== "object") return [];
++    const record = candidate as Record<string, unknown>;
++    if (typeof record.id !== "string" || (record.status !== "queued" && record.status !== "running")) {
++      return [];
++    }
++    return [{
++      id: record.id,
++      ...(typeof record.type === "string" ? { type: record.type } : {}),
++      ...(typeof record.description === "string" ? { description: record.description } : {}),
++      status: record.status,
++    }];
++  });
++}
++
++function readSubagentSnapshot(sessionId: string | undefined): SubagentActivity[] {
++  if (!sessionId) return [];
++  try {
++    const store = (globalThis as Record<PropertyKey, unknown>)[SUBAGENT_ACTIVITY_REGISTRY_KEY] as {
++      registry?: { getActiveSubagents?: (id: string) => unknown };
++    } | undefined;
++    return normalizeSubagentActivity(store?.registry?.getActiveSubagents?.(sessionId));
++  } catch {
++    // Activity is optional. A malformed third-party global must not break Pi.
++    return [];
++  }
++}
++
++// PATCHED_BY_DOTFILES_HERDR_PI_STATE_V8
+ export default function (pi) {
+   if (!enabled()) {
+     return;
+   }
+ 
+   let agentActive = false;
+-  let blockedCount = 0;
+-  let blockedMessage: string | undefined;
++  const blockers = new Map<string, string | undefined>();
++  let legacyBlockerSequence = 0;
++  const activeSubagents = new Map<string, SubagentActivity>();
+   let lastState: AgentState | undefined;
+   let lastMessage: string | undefined;
+   let rootSession = false;
+ 
++  function blockedMessage(): string | undefined {
++    return [...blockers.values()].at(-1);
++  }
++
+   function desiredState() {
+-    if (blockedCount > 0) {
+-      return { state: "blocked" as const, message: blockedMessage };
++    if (blockers.size > 0) {
++      return { state: "blocked" as const, message: blockedMessage() };
+     }
+-    if (agentActive) {
++    if (agentActive || activeSubagents.size > 0) {
+       return { state: "working" as const, message: undefined };
+     }
+     return { state: "idle" as const, message: undefined };
+@@ -204,24 +251,72 @@
+     queueState(next.state, next.message);
+   }
+ 
++  function reconcileSubagents(snapshot = readSubagentSnapshot(currentAgentSessionId)): void {
++    activeSubagents.clear();
++    for (const subagent of snapshot) activeSubagents.set(subagent.id, subagent);
++  }
++
++  function rememberSubagent(data: unknown, status: "queued" | "running"): void {
++    if (!rootSession || !currentAgentSessionId || !data || typeof data !== "object") return;
++    const record = data as Record<string, unknown>;
++    if (record.sessionId !== currentAgentSessionId || typeof record.id !== "string" || !record.id) return;
++    activeSubagents.set(record.id, {
++      id: record.id,
++      ...(typeof record.type === "string" ? { type: record.type } : {}),
++      ...(typeof record.description === "string" ? { description: record.description } : {}),
++      status,
++    });
++    publishState();
++  }
++
++  function forgetSubagent(data: unknown): void {
++    if (!rootSession || !currentAgentSessionId || !data || typeof data !== "object") return;
++    const record = data as Record<string, unknown>;
++    if (record.sessionId !== currentAgentSessionId || typeof record.id !== "string") return;
++    const id = record.id;
++    activeSubagents.delete(id);
++    publishState();
++  }
++
+   pi.events.on("herdr:blocked", (data) => {
+-    if (!rootSession) {
++    if (!rootSession || !data || typeof data !== "object") {
+       return;
+     }
+-    if (!data?.active) {
+-      blockedCount = Math.max(0, blockedCount - 1);
+-      if (blockedCount === 0) {
+-        blockedMessage = undefined;
+-      }
++    const event = data as { id?: unknown; active?: unknown; label?: unknown };
++    const id = typeof event.id === "string" && event.id.length > 0 ? event.id : undefined;
++    if (event.active) {
++      const blockerId = id ?? `legacy:${++legacyBlockerSequence}`;
++      // Delete then set keeps the current blocker message deterministic when an
++      // existing ID is refreshed.
++      blockers.delete(blockerId);
++      blockers.set(blockerId, typeof event.label === "string" ? event.label : undefined);
+       publishState();
+       return;
+     }
+ 
+-    blockedCount += 1;
+-    blockedMessage = data.label;
++    if (id) {
++      blockers.delete(id);
++    } else {
++      // Backwards compatibility for older { active, label } producers: close
++      // only the most recent legacy blocker, never an identified concurrent one.
++      const legacyId = [...blockers.keys()].reverse().find((key) => key.startsWith("legacy:"));
++      if (legacyId) blockers.delete(legacyId);
++    }
+     publishState();
+   });
+ 
++  pi.events.on("subagents:ready", (data) => {
++    if (!rootSession || !currentAgentSessionId || !data || typeof data !== "object") return;
++    const event = data as Record<string, unknown>;
++    if (event.sessionId !== currentAgentSessionId) return;
++    reconcileSubagents(normalizeSubagentActivity(event.activeSubagents));
++    publishState();
++  });
++  pi.events.on("subagents:created", (data) => rememberSubagent(data, "queued"));
++  pi.events.on("subagents:started", (data) => rememberSubagent(data, "running"));
++  pi.events.on("subagents:completed", forgetSubagent);
++  pi.events.on("subagents:failed", forgetSubagent);
++
+   pi.on("session_start", async (event, ctx) => {
+     // TUI only: RPC/JSON/print modes are headless (no PTY herdr can display),
+     // and RPC still reports hasUI=true, so mode is the reliable gate.
+@@ -230,6 +325,8 @@
+     }
+     rootSession = true;
+     updateSessionRef(ctx);
++    // A reload can replace this extension after subagents already started.
++    reconcileSubagents();
+     await reportSession(event?.reason);
+     // A reload can replace this extension mid-run without emitting another agent_start.
+     agentActive = ctx?.isIdle?.() === false;

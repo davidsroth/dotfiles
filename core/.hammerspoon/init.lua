@@ -76,6 +76,36 @@ for key, app in pairs(alts) do
     end)
 end
 
+-- Hammerspoon receives Option+S before WezTerm on this Mac. Route it directly
+-- to Herdr only when the focused WezTerm window is the Herdr client; otherwise
+-- replay the original chord so applications keep their normal Option+S behavior.
+local altSHotkey
+altSHotkey = hs.hotkey.bind({ "alt" }, "s", function()
+	local window = hs.window.focusedWindow()
+	local app = window and window:application()
+	local isHerdr = app
+		and app:bundleID() == "com.github.wez.wezterm"
+		and window:title():lower() == "herdr"
+
+	if isHerdr then
+		-- hs.task resolves a bare command through PATH; the dotfiles place
+		-- ~/.local/bin first, while HERDR_BIN_PATH supports explicit overrides.
+		local herdr = os.getenv("HERDR_BIN_PATH") or "herdr"
+		hs.task.new(herdr, function(exitCode, _, stderr)
+			if exitCode ~= 0 then
+				hs.notify.show("Herdr", "Agent switch failed", stderr or "unknown error")
+			end
+		end, { "plugin", "action", "invoke", "swap", "--plugin", "local.non-idle-agent" }):start()
+		return
+	end
+
+	altSHotkey:disable()
+	hs.eventtap.keyStroke({ "alt" }, "s", 0)
+	hs.timer.doAfter(0.05, function()
+		altSHotkey:enable()
+	end)
+end)
+
 -- Amethyst only accepts one shortcut per action. Preserve its Option+,/.
 -- bindings while adding Vim-style Option+j/k aliases.
 hs.hotkey.bind({ "alt" }, "j", function()

@@ -921,3 +921,18 @@ bgrun() {
     printf "bgrun: started PID %s; logging to %s\n" "$pid" "$logfile"
     printf "%s\n" "$pid" >"${logfile}.pid"
 }
+
+# --- herdr: auto-rename tab to the foreground program -----------------------
+# Ported from https://madflex.de/trying-herdr-instead-of-tmux/ — herdr has no
+# automatic-rename, so do it from zsh hooks: tab takes the running program's
+# name on preexec and returns to the shell name at the prompt (precmd).
+# No-op outside herdr panes and outside zsh.
+# Caveat: this overwrites manual tab renames at the next prompt — herdr can't
+# distinguish a hook-set name from a hand-set one.
+if [ -n "${ZSH_VERSION:-}" ] && [ -n "${HERDR_TAB_ID:-}" ]; then
+    autoload -Uz add-zsh-hook
+    _herdr_tab_preexec() { herdr tab rename "$HERDR_TAB_ID" "${${1%% *}:t}" >/dev/null 2>&1; }
+    _herdr_tab_precmd()  { herdr tab rename "$HERDR_TAB_ID" "${SHELL:t}" >/dev/null 2>&1; }
+    add-zsh-hook preexec _herdr_tab_preexec
+    add-zsh-hook precmd  _herdr_tab_precmd
+fi
