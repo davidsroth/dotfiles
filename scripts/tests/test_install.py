@@ -215,7 +215,7 @@ node() { echo v22.99.0; }
 npm() {
   { printf 'npm'; printf ' <%s>' \"$@\"; printf '\\n'; } >> \"$CALL_LOG\"
   if [[ \"${1:-}\" == \"--version\" ]]; then echo 10.9.0; return; fi
-  printf '%s' \"$PI_VERSION\" > \"$PI_STATE\"
+  printf '%s' \"$FAKE_PI_VERSION\" > \"$PI_STATE\"
 }
 pi() { [[ -f \"$PI_STATE\" ]] || return 127; cat \"$PI_STATE\"; }
 """,
@@ -227,7 +227,8 @@ pi() { [[ -f \"$PI_STATE\" ]] || return 127; cat \"$PI_STATE\"; }
                     "HOME": root,
                     "NVM_DIR": nvm_dir,
                     "NODE_VERSION": "22",
-                    "PI_VERSION": "0.80.6",
+                    "PI_VERSION": "",
+                    "FAKE_PI_VERSION": "0.84.2",
                     "CALL_LOG": call_log,
                     "PI_STATE": pi_state,
                 },
@@ -240,10 +241,10 @@ pi() { [[ -f \"$PI_STATE\" ]] || return 127; cat \"$PI_STATE\"; }
             self.assertIn("nvm <use> <22>", calls)
             self.assertIn(
                 "npm <install> <-g> <--no-audit> <--no-fund> "
-                "<@earendil-works/pi-coding-agent@0.80.6>",
+                "<@earendil-works/pi-coding-agent@0.84.2>",
                 calls,
             )
-            self.assertIn("Validated Pi 0.80.6", result.stdout)
+            self.assertIn("Validated Pi 0.84.2", result.stdout)
 
     def test_node_and_pi_setup_fails_without_nvm_runtime(self):
         with tempfile.TemporaryDirectory() as tempdir:

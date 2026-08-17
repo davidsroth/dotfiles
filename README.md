@@ -49,7 +49,7 @@ Environment variables:
 - `DOTFILES_DIR`: Installation directory (default: ~/dotfiles)
 - `DEFAULT_BRANCH`: Git branch to use (default: main)
 - `NODE_VERSION`: Node.js release installed through NVM (default: 22)
-- `PI_VERSION`: Pi coding agent version (default: 0.80.6)
+- `PI_VERSION`: Pi coding agent version (default: 0.84.2)
 - `NVIM_VERSION_TAG`: exact Linux Neovim release (default: v0.12.4)
 - `NVIM_SHA256`: required checksum override when selecting a different Neovim release
 

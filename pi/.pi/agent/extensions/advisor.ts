@@ -280,7 +280,6 @@ export default function (pi: ExtensionAPI) {
         agentDir: getAgentDir(),
         model,
         thinkingLevel,
-        modelRegistry: ctx.modelRegistry,
         sessionManager: SessionManager.inMemory(ctx.cwd),
         settingsManager: SettingsManager.create(ctx.cwd, getAgentDir()),
         resourceLoader: loader,

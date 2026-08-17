@@ -79,7 +79,7 @@ readonly TLINK_INSTALL_COMMIT="9b80997fee802491bd86f1d3b0a85ed5e1b3f4d9"
 readonly NERD_FONT_VERSION="v3.4.0"
 readonly FIRA_CODE_SHA256="7cc4ffd8f7a1fc914cdab7b149808298165ff7a7f40e40d82dea9ebe41e8ca0b"
 readonly NODE_VERSION="${NODE_VERSION:-22}"
-readonly PI_VERSION="${PI_VERSION:-0.80.6}"
+readonly PI_VERSION="${PI_VERSION:-0.84.2}"
 
 # Script options
 DRY_RUN=false
@@ -117,7 +117,7 @@ Environment Variables:
     DOTFILES_DIR    Installation directory (default: ~/dotfiles)
     DEFAULT_BRANCH  Git branch to use (default: main)
     NODE_VERSION    Node.js release installed through NVM (default: 22)
-    PI_VERSION      Pi coding agent version (default: 0.80.6)
+    PI_VERSION      Pi coding agent version (default: 0.84.2)
     NVIM_METHOD     Neovim method: auto|appimage|tarball|backports (default: auto→appimage on x86_64)
     NVIM_MIN_VERSION     Ensure Neovim >= this version (default: 0.9.0)
     NVIM_FORCE_UPDATE    true to force reinstall (default: false)
