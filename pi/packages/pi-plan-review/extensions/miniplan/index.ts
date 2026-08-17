@@ -14,6 +14,7 @@ import { createRequire } from "node:module";
 import { extname, resolve } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { escapeHtml, scriptJson } from "../_review/html";
+import { waitWithHerdrBlocked } from "../_review/herdr";
 import { createReviewServer } from "../_review/server";
 import { buildPalette, loadTheme, type Palette, rootVarsBlock } from "../_review/theme";
 import { toolText } from "../_review/tool";
@@ -941,16 +942,18 @@ export default function plan(pi: ExtensionAPI): void {
 
 			let result: ReviewResult;
 			try {
-				result = await createReviewServer<ReviewResult>({
-					renderPage: (nonce) => buildPage(content, { ...PLAN_REVIEW_OPTIONS, sourceLabel: inputPath }, palette, nonce),
-					staticAssets: REVIEW_STATIC_ASSETS,
-					parseDecision: parseReviewDecision,
-					// Timeout = no decision → route to the feedback path (NOT approve).
-					onTimeout: () => ({ action: "send-feedback", approved: false, feedback: PLAN_REVIEW_OPTIONS.timeoutFeedback }),
-					onUrl: (url) => {
-						try { ctx.ui.notify(`Plan: opening review in browser: ${url}`, "info"); } catch {}
-					},
-				});
+				result = await waitWithHerdrBlocked(pi, "Waiting for plan review", () =>
+					createReviewServer<ReviewResult>({
+						renderPage: (nonce) => buildPage(content, { ...PLAN_REVIEW_OPTIONS, sourceLabel: inputPath }, palette, nonce),
+						staticAssets: REVIEW_STATIC_ASSETS,
+						parseDecision: parseReviewDecision,
+						// Timeout = no decision → route to the feedback path (NOT approve).
+						onTimeout: () => ({ action: "send-feedback", approved: false, feedback: PLAN_REVIEW_OPTIONS.timeoutFeedback }),
+						onUrl: (url) => {
+							try { ctx.ui.notify(`Plan: opening review in browser: ${url}`, "info"); } catch {}
+						},
+					}),
+				);
 			} catch (err) {
 				// Fail safe: if review can't happen, do NOT approve. The agent
 				// should treat this as "review unavailable" and not proceed.

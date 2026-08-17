@@ -29,6 +29,7 @@
  */
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { waitWithHerdrBlocked } from "../_review/herdr";
 import { escapeHtml, scriptJson } from "../_review/html";
 import { pbcopy } from "../_review/os";
 import { createReviewServer } from "../_review/server";
@@ -375,14 +376,16 @@ export default function draft(pi: ExtensionAPI): void {
 
 			let result: DraftResult;
 			try {
-				result = await createReviewServer<DraftResult>({
-					renderPage: (nonce) => buildPage(text, palette, nonce),
-					parseDecision: parseDraftDecision,
-					onTimeout: () => ({ action: "cancel" }),
-					onUrl: (url) => {
-						try { ctx.ui.notify(`Draft: opening review in browser: ${url}`, "info"); } catch { /* best-effort */ }
-					},
-				});
+				result = await waitWithHerdrBlocked(pi, "Waiting for draft approval", () =>
+					createReviewServer<DraftResult>({
+						renderPage: (nonce) => buildPage(text, palette, nonce),
+						parseDecision: parseDraftDecision,
+						onTimeout: () => ({ action: "cancel" }),
+						onUrl: (url) => {
+							try { ctx.ui.notify(`Draft: opening review in browser: ${url}`, "info"); } catch { /* best-effort */ }
+						},
+					}),
+				);
 			} catch (err) {
 				const msg = err instanceof Error ? err.message : String(err);
 				return toolText(`Draft review failed (${msg}).`);

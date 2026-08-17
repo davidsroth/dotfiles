@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildNotificationCopy } from "../pi-notification";
+import { buildNotificationCopy, shouldSendDesktopNotification } from "../pi-notification";
 
 const values = {
   project: "secret-project",
@@ -10,6 +10,12 @@ const values = {
 };
 
 describe("pi notification privacy", () => {
+  it("defers completion notifications to Herdr inside a Herdr pane", () => {
+    expect(shouldSendDesktopNotification({ HERDR_ENV: "1" })).toBe(false);
+    expect(shouldSendDesktopNotification({ HERDR_ENV: "" })).toBe(true);
+    expect(shouldSendDesktopNotification({})).toBe(true);
+  });
+
   it("hides response and project context by default", () => {
     expect(buildNotificationCopy(values, {})).toEqual({
       title: "Pi",

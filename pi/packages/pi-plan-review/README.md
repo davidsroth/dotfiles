@@ -123,6 +123,7 @@ npm run typecheck
 
 - `submit_plan` can auto-approve in non-interactive mode.
 - `submit_draft` auto-approves (without writing the clipboard) in non-interactive mode.
+- In a Herdr Pi pane, interactive root-session `submit_plan` and `submit_draft` reviews report the pane as blocked until their browser decision resolves. Headless auto-approval and detached `/markup` do not report a blocked turn. A browser wait inside a background subagent remains parent-pane working rather than blocked, because its decision surface is not in the parent pane.
 - `/markup` requires interactive mode.
 - All review pages inherit colors from the active pi theme when available.
 - Browser-side JS errors in `submit_draft` surface as a red banner across the top of the page (rather than silently locking the UI while pi blocks on the tool call). Press `esc` to cancel and resubmit.

@@ -50,16 +50,83 @@ import {
 	buildQAFromAnswers,
 	buildFrame,
 	findLastAssistantText,
+	HERDR_BLOCKED_EVENT,
+	HERDR_BLOCKED_LABEL,
 	firstUnansweredIndex,
 	loadStash,
 	parseExtractorResponse,
 	readStashFromDisk,
 	resolveStartIndex,
+	runQnaCardUI,
 	saveStash,
+	setHerdrBlocked,
 	wrapText,
 	writeStashToDisk,
 	type QnaStash,
 } from "../extensions/qna.js";
+
+// ---------------------------------------------------------------------------
+// Herdr blocked-state integration
+// ---------------------------------------------------------------------------
+
+describe("setHerdrBlocked", () => {
+	it("emits the event consumed by Herdr's Pi integration", () => {
+		const emit = vi.fn();
+		const pi = { events: { emit } } as any;
+
+		setHerdrBlocked(pi, true);
+		setHerdrBlocked(pi, false);
+
+		expect(emit).toHaveBeenNthCalledWith(1, HERDR_BLOCKED_EVENT, {
+			active: true,
+			label: HERDR_BLOCKED_LABEL,
+		});
+		expect(emit).toHaveBeenNthCalledWith(2, HERDR_BLOCKED_EVENT, {
+			active: false,
+			label: HERDR_BLOCKED_LABEL,
+		});
+	});
+
+	it("does not let an integration listener failure break Q&A", () => {
+		const pi = {
+			events: {
+				emit: () => {
+					throw new Error("listener failed");
+				},
+			},
+		} as any;
+
+		expect(() => setHerdrBlocked(pi, true)).not.toThrow();
+	});
+
+	it("balances blocked state around a successful Q&A dialog", async () => {
+		const emit = vi.fn();
+		const result = { kind: "cancel", stashed: false, typedCount: 0 } as const;
+		const pi = { events: { emit } } as any;
+		const ctx = { ui: { custom: vi.fn().mockResolvedValue(result) } } as any;
+
+		await expect(
+			runQnaCardUI(pi, ctx, { questions: ["Continue?"] }),
+		).resolves.toEqual(result);
+		expect(emit.mock.calls.map(([, payload]) => payload.active)).toEqual([true, false]);
+		expect(emit.mock.calls[0]![1].id).toMatch(/^qna:/);
+		expect(emit.mock.calls[1]![1].id).toBe(emit.mock.calls[0]![1].id);
+	});
+
+	it("clears blocked state when the Q&A dialog rejects", async () => {
+		const emit = vi.fn();
+		const pi = { events: { emit } } as any;
+		const ctx = {
+			ui: { custom: vi.fn().mockRejectedValue(new Error("UI failed")) },
+		} as any;
+
+		await expect(
+			runQnaCardUI(pi, ctx, { questions: ["Continue?"] }),
+		).rejects.toThrow("UI failed");
+		expect(emit.mock.calls.map(([, payload]) => payload.active)).toEqual([true, false]);
+		expect(emit.mock.calls[1]![1].id).toBe(emit.mock.calls[0]![1].id);
+	});
+});
 
 // ---------------------------------------------------------------------------
 // parseExtractorResponse

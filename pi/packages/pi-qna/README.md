@@ -40,6 +40,16 @@ Then restart pi or run:
 
 The assistant can also call `launch_qna` with an explicit list of questions. In that mode, answers are returned to the assistant as the tool result rather than inserted into the editor.
 
+## Herdr integration
+
+When Pi runs inside [Herdr](https://herdr.dev) with its reviewed Pi integration installed, a root-session `pi-qna` card reports the pane as `blocked` while it waits for answers. The previous `working` or `idle` state is restored when the card closes, including after cancellation or an error. A Q&A card inside a background subagent remains parent-pane `working`, not `blocked`, because the parent pane cannot answer that child card directly.
+
+```bash
+herdr integration install pi
+```
+
+`pi-qna` communicates through the `herdr:blocked` Pi extension event consumed by Herdr's integration. It remains a no-op when Herdr or its Pi integration is not installed.
+
 ## Notes
 
 - Interactive mode is required.

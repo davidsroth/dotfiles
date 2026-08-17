@@ -30,6 +30,36 @@ import {
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 
+export const HERDR_BLOCKED_EVENT = "herdr:blocked";
+export const HERDR_INSTALL_BLOCKED_LABEL = "Waiting to confirm agent-browser installation";
+let herdrBlockerSequence = 0;
+
+function createHerdrBlockerId(): string {
+	herdrBlockerSequence += 1;
+	return `agent-browser-install:${Date.now()}:${herdrBlockerSequence}`;
+}
+
+function setHerdrBlocked(pi: Pick<ExtensionAPI, "events">, active: boolean, id: string): void {
+	try {
+		pi.events.emit(HERDR_BLOCKED_EVENT, { id, active, label: HERDR_INSTALL_BLOCKED_LABEL });
+	} catch {
+		// Herdr reporting is optional and must not prevent the install prompt.
+	}
+}
+
+export async function confirmAgentBrowserInstall(pi: Pick<ExtensionAPI, "events">, ctx: any): Promise<boolean> {
+	const herdrBlockerId = createHerdrBlockerId();
+	setHerdrBlocked(pi, true, herdrBlockerId);
+	try {
+		return await ctx.ui.confirm(
+			"agent-browser not found",
+			"Install agent-browser globally with npm? (npm install -g agent-browser)",
+		);
+	} finally {
+		setHerdrBlocked(pi, false, herdrBlockerId);
+	}
+}
+
 const TOOL_DESCRIPTION = `Browser automation via agent-browser CLI.
 Workflow: open URL → snapshot -i (get @refs like @e1) → interact → re-snapshot after page changes.
 Commands:
@@ -54,7 +84,7 @@ function writeTempFile(content: string, prefix: string): string {
 	return file;
 }
 
-async function ensureInstalled(pi: ExtensionAPI, ctx: any): Promise<boolean> {
+export async function ensureAgentBrowserInstalled(pi: ExtensionAPI, ctx: any): Promise<boolean> {
 	const check = await pi.exec("which", ["agent-browser"], { timeout: 5000 });
 	if (check.code === 0 && check.stdout.trim()) {
 		return true;
@@ -65,10 +95,7 @@ async function ensureInstalled(pi: ExtensionAPI, ctx: any): Promise<boolean> {
 		return false;
 	}
 
-	const ok = await ctx.ui.confirm(
-		"agent-browser not found",
-		"Install agent-browser globally with npm? (npm install -g agent-browser)",
-	);
+	const ok = await confirmAgentBrowserInstall(pi, ctx);
 	if (!ok) {
 		return false;
 	}
@@ -167,7 +194,7 @@ export default function agentBrowserExtension(pi: ExtensionAPI) {
 		},
 
 		async execute(toolCallId, params, signal, onUpdate, ctx) {
-			const installed = await ensureInstalled(pi, ctx);
+			const installed = await ensureAgentBrowserInstalled(pi, ctx);
 			if (!installed) {
 				return {
 					content: [

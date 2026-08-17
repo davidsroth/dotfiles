@@ -76,6 +76,35 @@ async function loadModalEditor(): Promise<ModalEditorCtor | undefined> {
 // indicator overwrites (rather than stacks alongside) the one already on screen.
 const QNA_STATUS_KEY = "pi-vim";
 
+// Herdr's official Pi integration listens for this cross-extension event and
+// reports the pane as blocked while an interactive prompt needs user input.
+// With no Herdr integration installed, emitting the event is a harmless no-op.
+export const HERDR_BLOCKED_EVENT = "herdr:blocked";
+export const HERDR_BLOCKED_LABEL = "Waiting for Q&A answers";
+let herdrBlockerSequence = 0;
+
+/** Return a process-unique ID that lets Herdr close overlapping waits safely. */
+export function createHerdrBlockerId(): string {
+	herdrBlockerSequence += 1;
+	return `qna:${Date.now()}:${herdrBlockerSequence}`;
+}
+
+export function setHerdrBlocked(
+	pi: Pick<ExtensionAPI, "events">,
+	active: boolean,
+	id?: string,
+): void {
+	try {
+		pi.events.emit(HERDR_BLOCKED_EVENT, {
+			active,
+			label: HERDR_BLOCKED_LABEL,
+			...(id ? { id } : {}),
+		});
+	} catch {
+		// Status reporting must never prevent the Q&A dialog from opening/closing.
+	}
+}
+
 // Stash for `/qna --resume`. Held both in module-scope (fast path, survives
 // within the process) and on disk (survives `/reload`). Disk file is wiped on
 // successful submit. Stash older than STASH_TTL_MS is treated as stale.
@@ -327,7 +356,8 @@ interface RunQnaCardUIOptions {
  * tool execution without going through `sendUserMessage` (which doesn't
  * dispatch slash commands).
  */
-async function runQnaCardUI(
+export async function runQnaCardUI(
+	pi: Pick<ExtensionAPI, "events">,
 	ctx: ExtensionContext,
 	opts: RunQnaCardUIOptions,
 ): Promise<CardResult> {
@@ -337,6 +367,8 @@ async function runQnaCardUI(
 	const preloadedStartIndex = opts.preloadedStartIndex;
 	const ModalEditor = await loadModalEditor();
 
+	const herdrBlockerId = createHerdrBlockerId();
+	setHerdrBlocked(pi, true, herdrBlockerId);
 	return await ctx.ui.custom<CardResult>((tui, theme, kb, done) => {
 		const total = questions.length;
 		const answers: string[] = preAnswers.slice(0, total);
@@ -535,7 +567,7 @@ async function runQnaCardUI(
 			},
 			handleInput,
 		};
-	});
+	}).finally(() => setHerdrBlocked(pi, false, herdrBlockerId));
 }
 
 // ---------- Extension entrypoint ----------
@@ -683,7 +715,7 @@ export default function qna(pi: ExtensionAPI) {
 			const questions: string[] = extracted;
 			const preAnswers = preloadedAnswers ?? new Array(questions.length).fill("");
 
-			const result = await runQnaCardUI(ctx, {
+			const result = await runQnaCardUI(pi, ctx, {
 				questions,
 				preAnswers,
 				preloadedStartIndex,
@@ -758,7 +790,7 @@ export default function qna(pi: ExtensionAPI) {
 				// Open the card UI directly (synchronously, during tool execution).
 				// This is the whole point of the tool: avoid sendUserMessage, which
 				// doesn't dispatch slash commands when called from extensions.
-				const result = await runQnaCardUI(ctx, {
+				const result = await runQnaCardUI(pi, ctx, {
 					questions: qs,
 					preAnswers: new Array(qs.length).fill(""),
 					sourceText: "",

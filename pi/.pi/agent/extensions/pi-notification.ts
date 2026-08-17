@@ -119,6 +119,11 @@ function percentEncode(s: string): string {
 
 const envEnabled = (value: string | undefined): boolean => value === "1" || value === "true";
 
+/** Herdr owns completion notifications for agents running in one of its panes. */
+export function shouldSendDesktopNotification(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.HERDR_ENV !== "1";
+}
+
 export function buildNotificationCopy(
   values: { project: string; branch: string; location: string; duration: string; assistantText: string },
   env: NodeJS.ProcessEnv = process.env,
@@ -188,6 +193,11 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.on("agent_end", async (event, ctx) => {
+    if (!shouldSendDesktopNotification()) {
+      turnStartedAt = 0;
+      return;
+    }
+
     try {
       const tmux = tmuxContext();
 
