@@ -212,6 +212,11 @@ rows = [
 [ui.toast]
 delivery = "off"
 
+[ui.sound]
+enabled = true
+done_path = "sounds/ready.mp3"
+request_path = "sounds/blocked.mp3"
+
 [advanced]
 # tmux uses 50,000 lines; Herdr configures scrollback by retained bytes.
 scrollback_limit_bytes = 10000000
