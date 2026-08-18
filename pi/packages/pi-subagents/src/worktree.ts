@@ -46,8 +46,10 @@ export function createWorktree(cwd: string, agentId: string): WorktreeInfo | und
   const worktreePath = join(tmpdir(), `pi-agent-${agentId}-${suffix}`);
 
   try {
-    // Create detached worktree at HEAD
-    execFileSync("git", ["worktree", "add", "--detach", worktreePath, "HEAD"], {
+    // Create a detached worktree at HEAD without running repository hooks.
+    // Worktree checkout hooks may mutate state outside the repository (for
+    // example, regenerating ~/.pi/agent/settings.json with ephemeral paths).
+    execFileSync("git", ["-c", "core.hooksPath=/dev/null", "worktree", "add", "--detach", worktreePath, "HEAD"], {
       cwd,
       stdio: "pipe",
       timeout: 30000,

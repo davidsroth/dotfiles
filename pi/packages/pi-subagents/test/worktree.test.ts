@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -77,6 +77,22 @@ describe("worktree", () => {
       // Cleanup
       try { execFileSync("git", ["worktree", "remove", "--force", wt1!.path], { cwd: repoDir, stdio: "pipe" }); } catch { /* ignore */ }
       try { execFileSync("git", ["worktree", "remove", "--force", wt2!.path], { cwd: repoDir, stdio: "pipe" }); } catch { /* ignore */ }
+    });
+
+    it("does not run repository hooks while creating a worktree", () => {
+      const hooksDir = join(repoDir, ".githooks");
+      const marker = join(repoDir, "post-checkout-ran");
+      mkdirSync(hooksDir);
+      const hook = join(hooksDir, "post-checkout");
+      writeFileSync(hook, `#!/bin/sh\ntouch ${JSON.stringify(marker)}\n`);
+      chmodSync(hook, 0o755);
+      execFileSync("git", ["config", "core.hooksPath", hooksDir], { cwd: repoDir, stdio: "pipe" });
+
+      const wt = createWorktree(repoDir, "hooks-disabled");
+
+      expect(wt).toBeDefined();
+      expect(existsSync(marker)).toBe(false);
+      try { execFileSync("git", ["worktree", "remove", "--force", wt!.path], { cwd: repoDir, stdio: "pipe" }); } catch { /* ignore */ }
     });
   });
 
