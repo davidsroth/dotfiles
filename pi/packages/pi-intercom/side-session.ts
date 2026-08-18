@@ -8,6 +8,7 @@ import {
   type ResourceLoader,
 } from "@earendil-works/pi-coding-agent";
 import type { AssistantMessage, Message as AiMessage } from "@earendil-works/pi-ai";
+import { getAsideTimeoutMs } from "./config.ts";
 
 /**
  * Answers an intercom "aside" question out of band, without disturbing the
@@ -22,9 +23,6 @@ import type { AssistantMessage, Message as AiMessage } from "@earendil-works/pi-
 
 /** Read-only built-in tools the aside sub-session may use to inspect the repo. */
 export const ASIDE_TOOLS = ["read", "ls", "find", "grep"] as const;
-
-/** Default wall-clock budget for a single aside answer. */
-export const ASIDE_TIMEOUT_MS = 120_000;
 
 const ASIDE_SYSTEM_PROMPT = [
   "You are answering a one-off side question from another pi session (an aside), separate from your main working session.",
@@ -126,7 +124,7 @@ export async function answerAside(
     sessionOptions as Parameters<typeof createAgentSession>[0],
   );
 
-  const timeoutMs = options.timeoutMs ?? ASIDE_TIMEOUT_MS;
+  const timeoutMs = options.timeoutMs ?? getAsideTimeoutMs();
   let timer: ReturnType<typeof setTimeout> | undefined;
   let rejectAbort: ((error: Error) => void) | undefined;
   const aborted = new Promise<never>((_resolve, reject) => {

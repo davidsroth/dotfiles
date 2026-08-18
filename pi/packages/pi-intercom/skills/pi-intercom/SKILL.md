@@ -303,7 +303,7 @@ If neither `cmux` nor `tmux` is available, skip this path and use normal `interc
 ### `ask` and `aside` Limitations
 
 - **Connected targets only**: Blocking asks and asides fail immediately when the target is not in the live intercom roster. Use `send` for non-blocking mailbox delivery.
-- **Configurable timeout**: If no reply arrives before the shared ask timeout, the ask fails. The default is 10 minutes; set `PI_INTERCOM_ASK_TIMEOUT_MS` to a positive millisecond value to change it.
+- **Configurable timeouts**: Ordinary asks wait 10 minutes by default; set `PI_INTERCOM_ASK_TIMEOUT_MS` to a positive integer number of milliseconds to change that ceiling. Each recipient-side aside fork gets 5 minutes by default; configure it with `PI_INTERCOM_ASIDE_TIMEOUT_MS`. Keep the ask timeout greater than the aside timeout so the caller remains waiting long enough to receive the answer.
 - **Concurrency**: A session can have one pending ordinary `ask`; multiple `aside` requests may wait concurrently and are matched by message ID.
 - **Cannot self-target**: A session cannot ask itself, including through disconnected-mailbox remapping
 - **Aside is read-only**: The recipient answers from a temporary context fork with only read/ls/find/grep tools; it cannot make changes or continue its main task

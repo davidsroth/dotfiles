@@ -14,6 +14,7 @@ All notable changes to the `pi-intercom` extension will be documented in this fi
 - Busy interactive sessions now hand inbound messages to Pi's native steering queue at the next safe model boundary instead of polling until the whole session is idle; the fork's bounded handoff queue, receipts, cancellation, supersede, and dedupe remain in place.
 - `send` now infers the sole pending inbound ask as its reply; blocking `ask`/`aside` calls require a live target, while non-blocking `send` retains mailbox delivery.
 - Session lists show shortest unique ID prefixes, and stale-ID guidance now tells agents to re-list and skip self-targets.
+- Aside forks now have a five-minute default wall-clock budget, configurable with `PI_INTERCOM_ASIDE_TIMEOUT_MS`; caller-side waiting remains bounded by `PI_INTERCOM_ASK_TIMEOUT_MS`.
 
 ### Fixed
 - Ported post-`v0.9.2` upstream fixes for unique short-ID replies, half-open broker socket detection, disconnected mailbox routing, reply attachments, and flat/hoisted plugin-store `tsx` resolution.
