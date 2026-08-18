@@ -189,7 +189,7 @@ pane_gaps = false
 sidebar_width = 28
 sidebar_min_width = 22
 sidebar_max_width = 34
-agent_panel_sort = "priority"
+agent_panel_sort = "spaces"
 # Create tabs immediately with Herdr's generated names; rename manually when useful.
 prompt_new_tab_name = false
 
