@@ -13,13 +13,16 @@ export interface LastCharMotion {
 }
 
 /**
- * Optional cross-extension hook for the literal Left Arrow in NORMAL mode.
+ * Optional cross-extension hook for the literal Left Arrow while the prompt
+ * is empty, in either INSERT or NORMAL mode.
  *
  * Extensions must not import pi-vim to use this contract. Instead, replicate
  * this structural shape and use Symbol.for() with this documented key. A
  * handler returns true only when it consumed the key synchronously; any async
  * work it starts is its responsibility to catch. register() returns an
  * ownership-safe cleanup function, so reloads cannot remove a newer handler.
+ * The key and method names retain their original NORMAL-mode wording for
+ * compatibility with integrations written against the initial contract.
  */
 export const PI_VIM_NORMAL_LEFT_ARROW_REGISTRY_KEY = Symbol.for(
   "pi-vim:normal-left-arrow-registry",
@@ -32,7 +35,7 @@ export interface PiVimNormalLeftArrowRegistry {
   handleNormalLeftArrow(): boolean;
 }
 
-/** Return the process-global NORMAL-mode Left Arrow callback registry. */
+/** Return the process-global empty-prompt Left Arrow callback registry. */
 export function getPiVimNormalLeftArrowRegistry(): PiVimNormalLeftArrowRegistry {
   const globals = globalThis as Record<PropertyKey, unknown>;
   const current = globals[PI_VIM_NORMAL_LEFT_ARROW_REGISTRY_KEY];

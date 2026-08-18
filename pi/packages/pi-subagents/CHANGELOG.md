@@ -15,7 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The conversation monitor moves directly between active runs with `←`/`→` or `h`/`l` and sends steering messages from an inline input with `s`. PgUp/PgDn scroll the transcript, End resumes auto-follow, and Escape returns to the custom picker.
 - The focused picker and conversation monitor share a rounded window frame. The monitor shows finalized thinking blocks and the active streaming thinking event before the assistant message completes.
 - `/agent-manage` preserves the broader agent-type, schedule, creation, and settings menu for compatibility.
-- When pi-vim is loaded, its NORMAL-mode literal `Left Arrow` at column 0 opens the existing focused active-agent picker (the same action as `/agents`). The optional hook is registered only by the current root TUI session, safely ignores child/non-TUI sessions, and is removed on switch or shutdown.
+- When pi-vim is loaded, its literal `Left Arrow` on an empty prompt opens the existing focused active-agent picker (the same action as `/agents`) in either INSERT or NORMAL mode. The optional hook is registered only by the current root TUI session, safely ignores child/non-TUI sessions, and is removed on switch or shutdown.
 
 ### Changed
 - Removed turn limits from the vendored variant. Agents now run until completion, failure, or an explicit stop. The Agent tool and RPC spawn reject legacy turn-limit options (RPC protocol v3), while legacy frontmatter/settings/scheduled-job fields are ignored or scrubbed.

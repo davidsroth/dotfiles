@@ -451,6 +451,17 @@ export class ModalEditor extends CustomEditor {
         return this.handleEscape();
       }
 
+      // An optional integration may synchronously consume the literal Left
+      // Arrow whenever the prompt is empty. This is intentionally independent
+      // of the current vim mode.
+      if (
+        matchesKey(data, "left")
+        && this.getText().length === 0
+        && getPiVimNormalLeftArrowRegistry().handleNormalLeftArrow()
+      ) {
+        return;
+      }
+
       if (this.mode === "insert") {
         // Shift+Alt+A: go to end of line (like Esc -> A but stay in insert)
         if (matchesKey(data, Key.shiftAlt("a")) || data === "\x1bA") {
@@ -472,17 +483,6 @@ export class ModalEditor extends CustomEditor {
           return;
         }
         super.handleInput(data);
-        return;
-      }
-
-      // At the start of a line, an optional integration may synchronously
-      // consume the NORMAL-mode Left Arrow. Everywhere else, retain the
-      // underlying editor's existing Left Arrow behavior below.
-      if (
-        matchesKey(data, "left")
-        && this.getCursor().col === 0
-        && getPiVimNormalLeftArrowRegistry().handleNormalLeftArrow()
-      ) {
         return;
       }
 

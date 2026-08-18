@@ -1,7 +1,9 @@
 /**
  * Optional structural contract with pi-vim. Do not import pi-vim: packages can
  * load independently. Keep the documented key and shape in sync with
- * pi-vim/types.ts.
+ * pi-vim/types.ts. pi-vim invokes the hook for Left Arrow on an empty prompt,
+ * regardless of vim mode; the legacy registry/method names are retained for
+ * compatibility.
  *
  * A handler returns true only when it synchronously claims the key. Handlers
  * that start async UI work must catch their own promise rejections.
