@@ -4,7 +4,8 @@
  * Tools:
  *   Agent             — LLM-callable: spawn a sub-agent
  *   get_subagent_result  — LLM-callable: check background agent status/result
- *   steer_subagent       — LLM-callable: send a steering message to a running agent
+ *   aside_subagent       — LLM-callable: ask without interrupting or mutating a running agent
+ *   steer_subagent       — LLM-callable: inject a message into a running agent's work
  *
  * Commands:
  *   /agents                 — Focused active-agent picker and monitor
@@ -16,13 +17,19 @@ import { join } from "node:path";
 import { defineTool, type ExtensionAPI, type ExtensionCommandContext, type ExtensionContext, getAgentDir } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "@sinclair/typebox";
-import { AgentManager } from "./agent-manager.js";
 import {
-  registerSubagentActivityProvider,
   type ActiveSubagentSnapshot,
+  registerSubagentActivityProvider,
 } from "./activity.js";
+import { AgentManager } from "./agent-manager.js";
 import { getAgentConversation, steerAgent } from "./agent-runner.js";
 
+export type {
+  ActiveSubagentSnapshot,
+  ActiveSubagentStatus,
+  SubagentActivityProvider,
+  SubagentActivityRegistry,
+} from "./activity.js";
 export {
   getSubagentActivityProvider,
   getSubagentActivityRegistry,
@@ -30,12 +37,7 @@ export {
   SUBAGENT_ACTIVITY_PROVIDER_KEY,
   SUBAGENT_ACTIVITY_REGISTRY_KEY,
 } from "./activity.js";
-export type {
-  ActiveSubagentSnapshot,
-  ActiveSubagentStatus,
-  SubagentActivityProvider,
-  SubagentActivityRegistry,
-} from "./activity.js";
+
 import { BUILTIN_TOOL_NAMES, getAgentConfig, getAllTypes, getAvailableTypes, getDefaultAgentNames, getUserAgentNames, registerAgents, resolveType } from "./agent-types.js";
 import { registerRpcHandlers } from "./cross-extension-rpc.js";
 import { loadCustomAgents } from "./custom-agents.js";
@@ -47,6 +49,7 @@ import { registerPiVimNormalLeftArrowHandler } from "./pi-vim-left-arrow.js";
 import { SubagentScheduler } from "./schedule.js";
 import { resolveStorePath, ScheduleStore } from "./schedule-store.js";
 import { applyAndEmitLoaded, type SubagentsSettings, saveAndEmitChanged } from "./settings.js";
+import { type AsideAnswer, answerSubagentAside } from "./side-session.js";
 import { type AgentConfig, type AgentInvocation, type AgentRecord, type JoinMode, type NotificationDetails, type SubagentType } from "./types.js";
 import { AgentRunPicker, isActiveAgentRecord } from "./ui/agent-run-picker.js";
 import {
@@ -280,6 +283,34 @@ export function buildPersistedRecordData(record: AgentRecord) {
   };
 }
 
+/** Return a user-facing validation error, or undefined for an aside-ready record. */
+export function getAsideTargetError(record: AgentRecord | undefined, agentId: string): string | undefined {
+  if (!record) return `Agent not found: "${agentId}". It may have been cleaned up.`;
+  if (record.status !== "running") {
+    return `Agent "${agentId}" is not running (status: ${record.status}). Asides only work on running agents.`;
+  }
+  if (!record.session) {
+    return `Agent "${agentId}" is running but its session is not initialized yet. Try again shortly.`;
+  }
+  return undefined;
+}
+
+/** Privacy-safe lifecycle payload: never include the aside question or answer. */
+export function buildAsideLifecycleEventData(
+  id: string,
+  durationMs: number,
+  usage: AsideAnswer["usage"],
+) {
+  return {
+    id,
+    durationMs,
+    usage: {
+      ...usage,
+      cost: { ...usage.cost },
+    },
+  };
+}
+
 /** Build notification details for the custom message renderer. */
 function buildNotificationDetails(record: AgentRecord, resultMaxLen: number, activity?: AgentActivity): NotificationDetails {
   const totalTokens = getLifetimeTotal(record.lifetimeUsage);
@@ -380,6 +411,9 @@ export default function (pi: ExtensionAPI) {
   // Result waits are intentionally different: end them now, while allowing the
   // background subagent itself to continue independently.
   const resultWaitControllers = new Set<AbortController>();
+  // Each target may have at most one throwaway aside session. These controllers
+  // belong to side sessions only and are never wired to child abort controllers.
+  const activeAsides = new Map<string, AbortController>();
   const USER_MESSAGE_INTERRUPT = "user-message";
   pi.on("input", (event) => {
     if (event.source === "extension" || event.streamingBehavior !== "steer") return;
@@ -720,6 +754,7 @@ export default function (pi: ExtensionAPI) {
     delete (globalThis as any)[MANAGER_KEY];
     scheduler.stop();
     widget.dispose();
+    for (const controller of activeAsides.values()) controller.abort("session shutdown");
     manager.abortAll();
     for (const timer of pendingNudges.values()) clearTimeout(timer);
     pendingNudges.clear();
@@ -883,7 +918,8 @@ Guidelines:
 - Agent results are returned as text — summarize them for the user.
 - Use run_in_background for work you don't need immediately. You will be notified when it completes.
 - Use resume with an agent ID to continue a previous agent's work.
-- Use steer_subagent to send mid-run messages to a running background agent.
+- Use aside_subagent to ask a running background agent a one-off question without interrupting or changing its work.
+- Use steer_subagent only when you intend to interrupt the agent and inject a message into its conversation.
 - Use model to specify a different model (as "provider/modelId", or fuzzy e.g. "haiku", "sonnet").
 - Use thinking to control extended thinking level.
 - Use inherit_context if the agent needs the parent conversation history.
@@ -1224,7 +1260,7 @@ Guidelines:
           (record?.outputFile ? `Output file: ${record.outputFile}\n` : "") +
           (isQueued ? `Position: queued (max ${manager.getMaxConcurrent()} concurrent)\n` : "") +
           `\nYou will be notified when this agent completes.\n` +
-          `Use get_subagent_result to retrieve full results, or steer_subagent to send it messages.\n` +
+          `Use get_subagent_result to retrieve full results, aside_subagent to ask without interruption, or steer_subagent to redirect its work.\n` +
           `Do not duplicate this agent's work.`,
           { ...detailBase, toolUses: 0, tokens: "", durationMs: 0, status: "background" as const, agentId: id },
         );
@@ -1427,6 +1463,66 @@ Guidelines:
       }
 
       return textResult(output);
+    },
+  }));
+
+  // ---- aside_subagent tool ----
+
+  pi.registerTool(defineTool({
+    name: "aside_subagent",
+    label: "Ask Agent Aside",
+    description:
+      "Ask a running agent a one-off status or clarification question without interrupting it or changing its conversation. " +
+      "The answer comes from an ephemeral read-only snapshot of finalized context, so it can be slightly stale while the live agent is executing a tool. " +
+      "Use steer_subagent instead when you intend to inject a message and alter the agent's work.",
+    parameters: Type.Object({
+      agent_id: Type.String({
+        description: "The running agent ID to ask.",
+      }),
+      message: Type.String({
+        description: "A one-off question answered from a read-only snapshot; it is not added to the agent's conversation.",
+      }),
+    }),
+    execute: async (_toolCallId, params, signal, _onUpdate, ctx) => {
+      const record = manager.getRecord(params.agent_id);
+      const targetError = getAsideTargetError(record, params.agent_id);
+      if (targetError) return textResult(targetError);
+      if (activeAsides.has(params.agent_id)) {
+        return textResult(`An aside for agent "${params.agent_id}" is already in progress. Wait for it to finish before asking another.`);
+      }
+
+      const controller = new AbortController();
+      const forwardParentAbort = () => controller.abort(signal?.reason);
+      if (signal?.aborted) forwardParentAbort();
+      else signal?.addEventListener("abort", forwardParentAbort, { once: true });
+      activeAsides.set(params.agent_id, controller);
+      const startedAt = Date.now();
+
+      try {
+        // Validation above proves both values exist. Keep the record lookup and
+        // selected cwd fixed for the lifetime of this throwaway request.
+        const answer = await answerSubagentAside(record!.session!, params.message, {
+          cwd: record!.worktree?.path ?? ctx.cwd,
+          signal: controller.signal,
+        });
+        const durationMs = Date.now() - startedAt;
+        pi.events.emit(
+          "subagents:aside",
+          buildAsideLifecycleEventData(params.agent_id, durationMs, answer.usage),
+        );
+        // Current Pi accounts nested model usage returned by a tool. Keep the
+        // cast for compatibility with this package's older peer type floor.
+        return {
+          content: [{ type: "text" as const, text: answer.answer }],
+          details: undefined,
+          usage: answer.usage,
+        } as any;
+      } catch (err) {
+        return textResult(`Aside failed for agent ${params.agent_id}: ${err instanceof Error ? err.message : String(err)}`);
+      } finally {
+        signal?.removeEventListener("abort", forwardParentAbort);
+        activeAsides.delete(params.agent_id);
+      }
     },
   }));
 

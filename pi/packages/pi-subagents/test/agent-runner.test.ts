@@ -71,7 +71,7 @@ vi.mock("../src/skill-loader.js", () => ({
   preloadSkills: vi.fn(() => []),
 }));
 
-import { resumeAgent, runAgent } from "../src/agent-runner.js";
+import { EXCLUDED_TOOL_NAMES, resumeAgent, runAgent } from "../src/agent-runner.js";
 
 function createSession(finalText: string) {
   const listeners: Array<(event: any) => void> = [];
@@ -176,6 +176,23 @@ describe("agent-runner final output capture", () => {
       cwd: "/tmp/worktree",
       agentDir: "/mock/agent-dir",
     }));
+  });
+
+  it("excludes parent subagent-control tools, including asides, from child sessions", async () => {
+    const { session } = createSession("FILTERED");
+    session.getAllTools.mockReturnValue([
+      { name: "read" },
+      { name: "Agent" },
+      { name: "get_subagent_result" },
+      { name: "aside_subagent" },
+      { name: "steer_subagent" },
+    ]);
+    createAgentSession.mockResolvedValue({ session });
+
+    await runAgent(ctx, "Explore", "Say FILTERED", { pi });
+
+    expect(EXCLUDED_TOOL_NAMES).toContain("aside_subagent");
+    expect(session.setActiveToolsByName).toHaveBeenCalledWith(["read"]);
   });
 
   it("suppresses AGENTS.md/CLAUDE.md/APPEND_SYSTEM.md for subagents", async () => {

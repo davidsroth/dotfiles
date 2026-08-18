@@ -25,7 +25,12 @@ import { preloadSkills } from "./skill-loader.js";
 import type { SubagentType, ThinkingLevel } from "./types.js";
 
 /** Names of tools registered by this extension that subagents must NOT inherit. */
-const EXCLUDED_TOOL_NAMES = ["Agent", "get_subagent_result", "steer_subagent"];
+export const EXCLUDED_TOOL_NAMES = [
+  "Agent",
+  "get_subagent_result",
+  "aside_subagent",
+  "steer_subagent",
+];
 
 /**
  * Try to find the right model for an agent type.
@@ -299,7 +304,7 @@ export async function runAgent(
 
   // Compute active tools from the now-populated registry. We filter by:
   //   - excluding tools we register (Agent / get_subagent_result /
-  //     steer_subagent) to prevent infinite subagent nesting
+  //     aside_subagent / steer_subagent) to prevent subagent nesting
   //   - applying the agent's disallowedTools denylist
   //   - keeping built-ins that are in the agent's `toolNames` whitelist
   //   - keeping extension tools per the agent's `extensions` config
