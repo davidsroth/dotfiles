@@ -141,6 +141,37 @@ class GenPiSettingsTest(unittest.TestCase):
         self.assert_merged_output()
         self.assertEqual(json.loads(self.base_path.read_text(encoding="utf-8")), base)
 
+    def test_worktree_invocation_uses_checkout_owning_live_stowed_base(self):
+        canonical_root = Path(self.tempdir.name) / "canonical checkout"
+        canonical_base = canonical_root / "pi" / ".pi" / "agent" / "settings.base.json"
+        canonical_base.parent.mkdir(parents=True)
+        self.write_json(
+            canonical_base,
+            {
+                "theme": "canonical",
+                "packages": ["../../dotfiles/pi/packages/pi-subagents"],
+            },
+        )
+        self.write_json(
+            self.base_path,
+            {
+                "theme": "ephemeral-worktree",
+                "packages": ["../../dotfiles/pi/packages/pi-vim"],
+            },
+        )
+        live_base = self.home / ".pi" / "agent" / "settings.base.json"
+        live_base.symlink_to(canonical_base)
+
+        result = self.run_generator()
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        generated = json.loads(self.destination.read_text(encoding="utf-8"))
+        self.assertEqual(generated["theme"], "canonical")
+        self.assertEqual(
+            generated["packages"],
+            [str(canonical_root.resolve() / "pi" / "packages" / "pi-subagents")],
+        )
+
     def test_python_fallback_preserves_live_and_local_settings(self):
         self.prepare_merge_inputs()
         tool_bin = Path(self.tempdir.name) / "tools-without-jq"

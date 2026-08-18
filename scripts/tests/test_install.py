@@ -401,6 +401,26 @@ done
             self.assertEqual(stat.S_IMODE(daily.stat().st_mode), 0o600)
             self.assertTrue((private_dir / "MEMORY.md").is_symlink())
 
+    def test_git_hooks_use_canonical_absolute_path(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            repo = Path(tempdir) / "repo"
+            hooks = repo / ".githooks"
+            hooks.mkdir(parents=True)
+            self.write_executable(hooks / "post-checkout", "exit 0\n")
+            subprocess.run(["git", "init"], cwd=repo, check=True, capture_output=True)
+
+            result = self.run_bash("setup_git_hooks", env={"DOTFILES_DIR": repo})
+
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            configured = subprocess.run(
+                ["git", "config", "--get", "core.hooksPath"],
+                cwd=repo,
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+            self.assertEqual(configured, str(hooks))
+
     def test_required_pi_failures_are_not_suppressed(self):
         with tempfile.TemporaryDirectory() as tempdir:
             repo = Path(tempdir) / "repo"

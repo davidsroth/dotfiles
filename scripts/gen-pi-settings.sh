@@ -21,9 +21,26 @@ while [[ $# -gt 0 ]]; do
 done
 log() { [[ "$QUIET" == 1 ]] || printf '%s\n' "$*"; }
 
-# Resolve repo root from this script's location (scripts/ is at repo root).
+# Resolve the checkout that owns the live stowed settings. A subagent may run
+# this script from an ephemeral git worktree; using that worktree for package
+# paths would leave settings.json pointing at deleted files after cleanup.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+LIVE_BASE="$HOME/.pi/agent/settings.base.json"
+if [[ -L "$LIVE_BASE" ]]; then
+  live_base_target="$(readlink "$LIVE_BASE")"
+  if [[ "$live_base_target" == /* ]]; then
+    live_base_candidate="$live_base_target"
+  else
+    live_base_candidate="$(dirname "$LIVE_BASE")/$live_base_target"
+  fi
+  live_base_resolved="$(cd "$(dirname "$live_base_candidate")" && pwd -P)/$(basename "$live_base_candidate")"
+  case "$live_base_resolved" in
+    */pi/.pi/agent/settings.base.json)
+      REPO_ROOT="${live_base_resolved%/pi/.pi/agent/settings.base.json}"
+      ;;
+  esac
+fi
 
 BASE="$REPO_ROOT/pi/.pi/agent/settings.base.json"
 LOCAL="$HOME/.pi/agent/settings.local.json"

@@ -1,8 +1,7 @@
 #!/bin/sh
-# Tracked hook (via core.hooksPath=.githooks).
+# Tracked hook (installed through an absolute core.hooksPath).
 # 1. Keep git-lfs working (core.hooksPath replaces .git/hooks).
 command -v git-lfs >/dev/null 2>&1 && git lfs post-merge "$@"
-# 2. Regenerate ~/.pi/agent/settings.json so base/local edits take effect after a pull.
-repo="$(git rev-parse --show-toplevel 2>/dev/null)"
-[ -n "$repo" ] && [ -x "$repo/scripts/gen-pi-settings.sh" ] && \
-  "$repo/scripts/gen-pi-settings.sh" --quiet || true
+# 2. Refresh global Pi settings only when this is the canonical checkout.
+hook_dir=$(unset CDPATH; cd "$(dirname "$0")" && pwd -P)
+"$hook_dir/refresh-pi-settings" || true

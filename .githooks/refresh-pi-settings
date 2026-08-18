@@ -1,0 +1,16 @@
+#!/bin/sh
+# Regenerate live Pi settings only for operations in the canonical dotfiles
+# checkout. Linked/ephemeral worktrees share the repository's hooks config but
+# must never rewrite global configuration using their checkout paths.
+set -eu
+
+hook_dir=$(unset CDPATH; cd "$(dirname "$0")" && pwd -P)
+canonical_repo=$(unset CDPATH; cd "$hook_dir/.." && pwd -P)
+active_repo=$(git rev-parse --show-toplevel 2>/dev/null || true)
+[ -n "$active_repo" ] || exit 0
+active_repo=$(unset CDPATH; cd "$active_repo" && pwd -P)
+
+[ "$active_repo" = "$canonical_repo" ] || exit 0
+[ -x "$canonical_repo/scripts/gen-pi-settings.sh" ] || exit 0
+
+exec "$canonical_repo/scripts/gen-pi-settings.sh" --quiet

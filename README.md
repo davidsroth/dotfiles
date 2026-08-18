@@ -178,9 +178,9 @@ The final `~/.pi/agent/settings.json` is produced by `scripts/gen-pi-settings.sh
 just pi-settings
 ```
 
-Git hooks (`post-merge` and `post-checkout`) call the same script automatically after a `git pull`, so settings stay current without manual intervention.
+Git hooks (`post-merge` and `post-checkout`) call the same script automatically after a `git pull`, so settings stay current without manual intervention. `core.hooksPath` is pinned to the canonical checkout's absolute `.githooks` path; linked and ephemeral worktrees skip global settings regeneration, and Pi subagent worktree creation disables repository hooks entirely.
 
-The relative local package specs in `settings.base.json` (for example `../../dotfiles/pi/packages/pi-vim`) are portable source values. The generator rewrites them in the live file; do not hand-edit generated paths in `~/.pi/agent/settings.json`.
+The relative local package specs in `settings.base.json` (for example `../../dotfiles/pi/packages/pi-vim`) are portable source values. The generator rewrites them in the live file; do not hand-edit generated paths in `~/.pi/agent/settings.json`. As defense in depth, invoking the current generator from another worktree resolves package paths from the checkout that owns the live stowed `settings.base.json`.
 
 ### Fresh-machine steps `install.sh` does NOT do
 

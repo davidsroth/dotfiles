@@ -1394,8 +1394,10 @@ setup_pi_memory() {
   success "Global memory linked: $dest → tracked MEMORY.md"
 }
 
-# Point git at the tracked .githooks dir so post-merge/post-checkout regenerate
-# pi settings automatically after pulls. Hooks also keep git-lfs working.
+# Point git at the canonical checkout's tracked .githooks dir so linked or
+# ephemeral worktrees cannot execute stale hooks that rewrite global settings.
+# Hooks still keep git-lfs working in every worktree, while Pi settings refresh
+# is restricted to operations in the canonical checkout.
 setup_git_hooks() {
   local hooks_dir="${DOTFILES_DIR}/.githooks"
   if [[ ! -d "$hooks_dir" ]]; then
@@ -1406,15 +1408,15 @@ setup_git_hooks() {
     error "Could not make tracked git hooks executable"
     return 1
   fi
-  if ! git -C "$DOTFILES_DIR" config core.hooksPath ".githooks"; then
+  if ! git -C "$DOTFILES_DIR" config core.hooksPath "$hooks_dir"; then
     error "Could not set core.hooksPath"
     return 1
   fi
-  if [[ "$(git -C "$DOTFILES_DIR" config --get core.hooksPath)" != ".githooks" ]]; then
+  if [[ "$(git -C "$DOTFILES_DIR" config --get core.hooksPath)" != "$hooks_dir" ]]; then
     error "core.hooksPath validation failed"
     return 1
   fi
-  success "git core.hooksPath → .githooks"
+  success "git core.hooksPath → $hooks_dir"
 }
 
 # Perform post-installation tasks (directories, Git LFS, TPM, shell)

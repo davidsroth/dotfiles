@@ -152,14 +152,14 @@ PY
 # ---------------------------------------------------------------------------
 check_hooks() {
   local hooks_path
+  local hooks_dir="$REPO_ROOT/.githooks"
   hooks_path="$(git -C "$REPO_ROOT" config core.hooksPath 2>/dev/null || echo '')"
 
-  if [[ "$hooks_path" != ".githooks" ]]; then
-    FAIL "HOOKS: git core.hooksPath is '${hooks_path:-<unset>}', expected '.githooks' — run: bash install.sh"
+  if [[ "$hooks_path" != "$hooks_dir" ]]; then
+    FAIL "HOOKS: git core.hooksPath is '${hooks_path:-<unset>}', expected '$hooks_dir' — run: bash install.sh"
     return
   fi
 
-  local hooks_dir="$REPO_ROOT/.githooks"
   if [[ ! -d "$hooks_dir" ]]; then
     FAIL "HOOKS: .githooks directory not found at $hooks_dir"
     return
@@ -175,7 +175,7 @@ check_hooks() {
   done < <(find "$hooks_dir" -maxdepth 1 -type f)
 
   if [[ "$ok" == 1 ]]; then
-    PASS "HOOKS: core.hooksPath=.githooks and all hook files are executable"
+    PASS "HOOKS: core.hooksPath uses canonical .githooks and all hook files are executable"
   fi
 }
 
