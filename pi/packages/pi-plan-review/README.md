@@ -4,7 +4,7 @@ A [pi](https://pi.dev) package for lightweight human review flows:
 
 - `submit_plan` tool: agents submit a Markdown plan for browser review.
 - `submit_draft` tool: agents submit a short message draft (Slack reply, PR comment, email, DM, …) for the user to copy or approve.
-- `/markup` command: opens the last assistant message in the same browser markup UI.
+- `/markup` command: opens the last assistant message or compaction summary in the same browser markup UI.
 - `/plan-status` command: shows the active plan path.
 
 The plan/markup UI supports highlighting text, adding inline comments, writing general feedback, approving, sending replies back to pi, and rendering Mermaid fenced diagrams. The draft UI is a focused editor with three distinct outcomes (reject with feedback, copy to clipboard, or approve for the agent to post).
@@ -85,10 +85,10 @@ Return shape:
 ### `/markup`
 
 ```text
-/markup
+/markup [compaction|assistant]
 ```
 
-Opens the last completed assistant message in the browser markup UI. Inline comments (ordered first) followed by any freeform reply are sent back to pi as a fresh user message (queued as a follow-up if the agent is mid-turn). Closing the window without deciding dismisses the review with no message sent.
+Opens the latest reviewable entry in the browser markup UI. By default that's whichever is newer: the last completed assistant message or the last compaction summary (so right after a `/compact`, you annotate the summary the agent is now working from — previously it was skipped in favor of the older assistant message). Pass `compaction` (alias `summary`) or `assistant` (alias `message`) to force a target. Inline comments (ordered first) followed by any freeform reply are sent back to pi as a fresh user message (queued as a follow-up if the agent is mid-turn); replies on a compaction summary are prefixed with `Comments on the compaction summary:` so the agent knows what the notes attach to. Closing the window without deciding dismisses the review with no message sent.
 
 ### `/plan-status`
 

@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import { formatDraftRejection, parseDraftDecision } from "../extensions/draft/index";
 import {
 	findLastAssistantText,
+	findLastCompactionSummary,
+	findMarkupTarget,
 	formatLastReply,
 	formatPlanFeedback,
 	parseReviewDecision,
@@ -166,5 +168,81 @@ describe("findLastAssistantText", () => {
 	it("returns null when there is no assistant message", () => {
 		const branch = [{ type: "message", message: { role: "user", content: [] } }];
 		expect(findLastAssistantText(branch)).toBeNull();
+	});
+
+	it("skips compaction entries (they are not message entries)", () => {
+		const branch = [assistant("the answer"), compaction("summary text")];
+		expect(findLastAssistantText(branch)?.text).toBe("the answer");
+	});
+});
+
+const compaction = (summary: string) => ({
+	type: "compaction",
+	id: "cmp",
+	timestamp: "2025-01-01T00:00:00Z",
+	summary,
+	firstKeptEntryId: "x",
+});
+
+describe("findLastCompactionSummary", () => {
+	it("returns the last compaction summary on the branch", () => {
+		const branch = [compaction("old summary"), compaction("new summary")];
+		expect(findLastCompactionSummary(branch)?.text).toBe("new summary");
+	});
+
+	it("returns null when there is no compaction entry", () => {
+		const branch = [{ type: "message", message: { role: "assistant", stopReason: "stop", content: [] } }];
+		expect(findLastCompactionSummary(branch)).toBeNull();
+	});
+
+	it("skips compaction entries with empty summaries", () => {
+		const branch = [compaction("good"), compaction("  ")];
+		expect(findLastCompactionSummary(branch)?.text).toBe("good");
+	});
+});
+
+describe("findMarkupTarget", () => {
+	const assistant = (text: string, stopReason = "stop") => ({
+		type: "message",
+		message: { role: "assistant", stopReason, content: [{ type: "text", text }] },
+	});
+
+	it("prefers the compaction summary when it is the latest reviewable entry", () => {
+		const branch = [assistant("the answer"), compaction("summary text")];
+		expect(findMarkupTarget(branch)).toEqual(
+			expect.objectContaining({ kind: "compaction", text: "summary text" }),
+		);
+	});
+
+	it("prefers the assistant reply when it is newer than the compaction", () => {
+		const branch = [compaction("summary text"), assistant("the answer")];
+		expect(findMarkupTarget(branch)).toEqual(
+			expect.objectContaining({ kind: "assistant", text: "the answer" }),
+		);
+	});
+
+	it("forces the compaction summary with kind=\"compaction\" even when an assistant reply is newer", () => {
+		const branch = [compaction("summary text"), assistant("the answer")];
+		expect(findMarkupTarget(branch, "compaction")).toEqual(
+			expect.objectContaining({ kind: "compaction", text: "summary text" }),
+		);
+	});
+
+	it("forces the assistant reply with kind=\"assistant\" even when a compaction is newer", () => {
+		const branch = [assistant("the answer"), compaction("summary text")];
+		expect(findMarkupTarget(branch, "assistant")).toEqual(
+			expect.objectContaining({ kind: "assistant", text: "the answer" }),
+		);
+	});
+
+	it("falls back to the assistant reply when the latest compaction summary is empty", () => {
+		const branch = [assistant("the answer"), compaction("")];
+		expect(findMarkupTarget(branch)).toEqual(
+			expect.objectContaining({ kind: "assistant", text: "the answer" }),
+		);
+	});
+
+	it("returns null when there is nothing reviewable", () => {
+		expect(findMarkupTarget([])).toBeNull();
 	});
 });

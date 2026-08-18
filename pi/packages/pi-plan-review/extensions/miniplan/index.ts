@@ -2,7 +2,7 @@
  * Plan — Lightweight plan review for pi.
  *
  * Agent calls submit_plan with a markdown file path.
- * User can run /markup to review the agent's last message.
+ * User can run /markup to review the agent's last message (or the compaction summary).
  * Browser opens a clean review page: select text to annotate, reply, approve, or send feedback.
  * Inherits the active pi theme for colors.
  *
@@ -115,6 +115,87 @@ export function findLastAssistantText(branchEntries: readonly unknown[]): Assist
 			return { text: "", entryId: entry.id, timestamp: entry.timestamp, incompleteReason: "no text" };
 		}
 		return { text: textParts.join("\n"), entryId: entry.id, timestamp: entry.timestamp };
+	}
+	return null;
+}
+
+/**
+ * Find the last compaction summary on the branch.
+ *
+ * Compaction entries (`type: "compaction"`) carry the generated context
+ * summary the agent now works from. They aren't `message` entries, so
+ * findLastAssistantText skips right past them — this walks the branch
+ * backwards and returns the most recent one with non-empty summary text.
+ */
+export function findLastCompactionSummary(branchEntries: readonly unknown[]): AssistantTextResult | null {
+	for (let i = branchEntries.length - 1; i >= 0; i--) {
+		const entry = branchEntries[i] as { type?: string; id?: string; timestamp?: string; summary?: unknown } | null | undefined;
+		if (!entry || entry.type !== "compaction") continue;
+		const summary = typeof entry.summary === "string" ? entry.summary : "";
+		if (!summary.trim()) continue;
+		return { text: summary, entryId: entry.id, timestamp: entry.timestamp };
+	}
+	return null;
+}
+
+export interface MarkupTarget extends AssistantTextResult {
+	kind: "assistant" | "compaction";
+}
+
+/**
+ * Resolve what `/markup` should open.
+ *
+ * With an explicit `kind`, behaves like the corresponding find* helper.
+ * Without one, walks the branch backwards once and returns whichever
+ * reviewable entry comes first — a compaction entry that is newer than the
+ * last assistant reply wins, so right after a `/compact` the summary (the
+ * context the agent is actually working from) is what gets marked up
+ * instead of the older assistant message.
+ */
+export function findMarkupTarget(
+	branchEntries: readonly unknown[],
+	kind?: "assistant" | "compaction",
+): MarkupTarget | null {
+	if (kind === "assistant") {
+		const found = findLastAssistantText(branchEntries);
+		return found ? { ...found, kind: "assistant" } : null;
+	}
+	if (kind === "compaction") {
+		const found = findLastCompactionSummary(branchEntries);
+		return found ? { ...found, kind: "compaction" } : null;
+	}
+
+	for (let i = branchEntries.length - 1; i >= 0; i--) {
+		const entry = branchEntries[i] as
+			| { type?: string; id?: string; timestamp?: string; summary?: unknown; message?: unknown }
+			| null
+			| undefined;
+		if (!entry) continue;
+
+		if (entry.type === "compaction") {
+			const summary = typeof entry.summary === "string" ? entry.summary : "";
+			if (!summary.trim()) continue;
+			return { kind: "compaction", text: summary, entryId: entry.id, timestamp: entry.timestamp };
+		}
+
+		if (entry.type !== "message") continue;
+		const msg = entry.message as
+			| {
+					role?: string;
+					stopReason?: string;
+					content?: Array<{ type?: string; text?: string }>;
+				}
+			| undefined;
+		if (!msg || msg.role !== "assistant") continue;
+		if (msg.stopReason !== "stop") continue;
+
+		const textParts = (msg.content ?? [])
+			.filter((c): c is { type: "text"; text: string } => c?.type === "text" && typeof c.text === "string")
+			.map((c) => c.text);
+		if (textParts.length === 0) {
+			return { kind: "assistant", text: "", entryId: entry.id, timestamp: entry.timestamp, incompleteReason: "no text" };
+		}
+		return { kind: "assistant", text: textParts.join("\n"), entryId: entry.id, timestamp: entry.timestamp };
 	}
 	return null;
 }
@@ -266,6 +347,13 @@ const LAST_REPLY_OPTIONS: ReviewPageOptions = {
 	defaultAction: "reply",
 	textareaShortcutAction: "reply",
 	timeoutFeedback: "",
+};
+
+const COMPACTION_REPLY_OPTIONS: ReviewPageOptions = {
+	...LAST_REPLY_OPTIONS,
+	title: "Reply to Compaction Summary",
+	sourceLabel: "Compaction summary",
+	emptyText: "No notes yet. Select text in the summary to add one, or type a reply below.",
 };
 
 // ── Decision parsing ─────────────────────────────────────────────────────
@@ -823,15 +911,35 @@ export default function plan(pi: ExtensionAPI): void {
 		},
 	});
 
-	function reviewLastAssistantMessage(ctx: ExtensionContext): void {
+	function parseMarkupArgs(args: string): { kind?: "assistant" | "compaction" } | { error: string } {
+		const trimmed = args.trim().toLowerCase();
+		if (!trimmed) return {};
+		if (trimmed === "compaction" || trimmed === "summary") return { kind: "compaction" };
+		if (trimmed === "assistant" || trimmed === "message") return { kind: "assistant" };
+		return { error: `Unknown /markup target "${args.trim()}". Usage: /markup [compaction|assistant]` };
+	}
+
+	function reviewMarkupTarget(ctx: ExtensionContext, args: string): void {
 		if (!ctx.hasUI) {
 			ctx.ui.notify("/markup requires interactive mode", "error");
 			return;
 		}
 
-		const found = findLastAssistantText(ctx.sessionManager.getBranch() as readonly unknown[]);
+		const parsed = parseMarkupArgs(args);
+		if ("error" in parsed) {
+			ctx.ui.notify(parsed.error, "error");
+			return;
+		}
+
+		const found = findMarkupTarget(ctx.sessionManager.getBranch() as readonly unknown[], parsed.kind);
 		if (!found) {
-			ctx.ui.notify("No assistant messages found on this branch", "error");
+			const nothing =
+				parsed.kind === "compaction"
+					? "No compaction summary found on this branch"
+					: parsed.kind === "assistant"
+						? "No assistant messages found on this branch"
+						: "Nothing to review on this branch";
+			ctx.ui.notify(nothing, "error");
 			return;
 		}
 		if (found.incompleteReason) {
@@ -839,20 +947,27 @@ export default function plan(pi: ExtensionAPI): void {
 			return;
 		}
 		if (!found.text.trim()) {
-			ctx.ui.notify("Last assistant message has no text to review", "error");
+			ctx.ui.notify(
+				found.kind === "compaction"
+					? "Last compaction summary has no text to review"
+					: "Last assistant message has no text to review",
+				"error",
+			);
 			return;
 		}
 
 		const { colors, isLight } = loadTheme(ctx);
 		const palette = buildPalette(colors, isLight);
+		const pageOptions = found.kind === "compaction" ? COMPACTION_REPLY_OPTIONS : LAST_REPLY_OPTIONS;
+		const targetLabel = found.kind === "compaction" ? "compaction summary" : "last assistant message";
 
 		void createReviewServer<ReviewResult>({
-			renderPage: (nonce) => buildPage(found.text, LAST_REPLY_OPTIONS, palette, nonce),
+			renderPage: (nonce) => buildPage(found.text, pageOptions, palette, nonce),
 			staticAssets: REVIEW_STATIC_ASSETS,
 			parseDecision: parseReviewDecision,
-			onTimeout: () => ({ action: LAST_REPLY_OPTIONS.defaultAction, approved: false, feedback: LAST_REPLY_OPTIONS.timeoutFeedback }),
+			onTimeout: () => ({ action: pageOptions.defaultAction, approved: false, feedback: pageOptions.timeoutFeedback }),
 			onUrl: (url) => {
-				try { ctx.ui.notify(`Markup: opening last assistant message in browser: ${url}`, "info"); } catch {}
+				try { ctx.ui.notify(`Markup: opening ${targetLabel} in browser: ${url}`, "info"); } catch {}
 			},
 		})
 			.then((result) => {
@@ -860,7 +975,13 @@ export default function plan(pi: ExtensionAPI): void {
 					ctx.ui.notify("Markup review dismissed.", "info");
 					return;
 				}
-				const reply = formatLastReply(result).trim();
+				let reply = formatLastReply(result).trim();
+				if (reply && found.kind === "compaction") {
+					// The model has the summary in context, but unlike an
+					// assistant reply it isn't the immediately preceding turn —
+					// say what the notes are attached to.
+					reply = `Comments on the compaction summary:\n\n${reply}`;
+				}
 				if (!reply) {
 					ctx.ui.notify("No reply captured.", "info");
 					return;
@@ -889,8 +1010,8 @@ export default function plan(pi: ExtensionAPI): void {
 	}
 
 	pi.registerCommand("markup", {
-		description: "Open the last assistant message in the browser markup UI",
-		handler: async (_args, ctx) => { reviewLastAssistantMessage(ctx); },
+		description: "Open the last assistant message or compaction summary in the browser markup UI",
+		handler: async (args, ctx) => { reviewMarkupTarget(ctx, args); },
 	});
 
 	pi.registerTool({
