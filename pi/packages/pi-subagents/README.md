@@ -1,6 +1,6 @@
 # @tintinweb/pi-subagents
 
-A [pi](https://pi.dev) extension that brings **Claude Code-style autonomous sub-agents** to pi. Spawn specialized agents that run in isolated sessions — each with its own tools, system prompt, model, and thinking level. Run them in foreground or background, steer them mid-run, resume completed sessions, and define your own custom agent types.
+A [pi](https://pi.dev) extension that brings **Claude Code-style autonomous sub-agents** to pi. Spawn specialized agents that run in isolated sessions — each with its own tools, system prompt, model, and thinking level. Run them in foreground or background, ask them non-interrupting asides, steer them mid-run, resume completed sessions, and define your own custom agent types.
 
 > **Status:** Early release.
 
@@ -12,12 +12,13 @@ https://github.com/user-attachments/assets/8685261b-9338-4fea-8dfe-1c590d5df543
 
 ## Features
 
-- **Claude Code look & feel** — same tool names, calling conventions, and UI patterns (`Agent`, `get_subagent_result`, `steer_subagent`) — feels native
+- **Claude Code look & feel** — familiar tool names, calling conventions, and UI patterns (`Agent`, `get_subagent_result`, `aside_subagent`, `steer_subagent`) — feels native
 - **Parallel background agents** — spawn multiple agents that run concurrently with automatic queuing (configurable concurrency limit, default 4) and smart group join (consolidated notifications)
 - **Live widget UI** — persistent above-editor widget with animated spinners, live tool activity, token counts, and colored status icons
 - **Focusable agents widget** — `/agents` (or pi-vim NORMAL-mode `Left Arrow` at column 0, when installed) promotes the existing passive agents widget into its focused picker/monitor state; watch active conversations, move between running/queued agents, and steer inline without rendering a second panel
 - **Custom agent types** — define agents in `.pi/agents/<name>.md` with YAML frontmatter: custom system prompts, model selection, thinking levels, tool restrictions
-- **Mid-run steering** — inject messages into running agents to redirect their work without restarting
+- **Non-interrupting asides** — ask a running agent a one-off status or clarification question through an ephemeral read-only snapshot without changing its live conversation, tools, queues, or task
+- **Mid-run steering** — intentionally inject messages into running agents to interrupt and redirect their work without restarting
 - **Session resume** — pick up where an agent left off, preserving full conversation context
 - **Unlimited agent runs** — agents run until they finish, fail, or are explicitly stopped; this vendored variant has no turn-limit controls
 - **Case-insensitive agent types** — `"explore"`, `"Explore"`, `"EXPLORE"` all work. Unknown types fall back to general-purpose with a note
@@ -28,7 +29,7 @@ https://github.com/user-attachments/assets/8685261b-9338-4fea-8dfe-1c590d5df543
 - **Skill preloading** — inject named skills into agent system prompts, discovered from `.pi/skills/`, `.agents/skills/`, and global locations (Pi-standard `<name>/SKILL.md` directory layout supported)
 - **Tool denylist** — block specific tools via `disallowed_tools` frontmatter
 - **Styled completion notifications** — background agent results render as themed, compact notification boxes (icon, stats, result preview) instead of raw XML. Expandable to show full output. Group completions render each agent individually
-- **Event bus** — lifecycle events (`subagents:created`, `started`, `completed`, `failed`, `steered`, `compacted`) emitted via `pi.events`, enabling other extensions to react to sub-agent activity
+- **Event bus** — lifecycle events (`subagents:created`, `started`, `usage`, `completed`, `failed`, `aside`, `steered`, `compacted`) emitted via `pi.events`, enabling other extensions to react to sub-agent activity
 - **Cross-extension RPC** — other pi extensions can spawn and stop subagents via the `pi.events` event bus (`subagents:rpc:ping`, `subagents:rpc:spawn`, `subagents:rpc:stop`). Standardized reply envelopes with protocol versioning. Emits `subagents:ready` on load
 - **Schedule subagents** — pass `schedule` to the `Agent` tool to fire on cron / interval / one-shot. Session-scoped jobs with PID-locked persistence; results land via the same `subagent-notification` followUp path as manual background completions; manage via `/agent-manage → Scheduled jobs`
 
@@ -237,9 +238,20 @@ Check status and retrieve results from a background agent.
 | `wait` | boolean | no | Wait for completion; a user message interrupts the wait but leaves the subagent running |
 | `verbose` | boolean | no | Include full conversation log |
 
+### `aside_subagent`
+
+Ask a running agent a one-off question **without interrupting it or adding anything to its conversation**. The answer comes from a throwaway in-memory session seeded with a cloned snapshot of the live child's finalized context and effective system prompt. The side session uses the child's model/model runtime and cwd (including its isolated worktree), has only `read`, `ls`, `find`, and `grep`, and is disposed after the answer.
+
+Because only finalized context is copied, an aside can be slightly stale while the live child is executing a tool. Only one aside per target may run at a time. Use `steer_subagent` instead when the message should alter the child's work.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `agent_id` | string | yes | Running agent ID to ask |
+| `message` | string | yes | One-off question; never added to the target conversation |
+
 ### `steer_subagent`
 
-Send a steering message to a running agent. The message interrupts after the current tool execution.
+Intentionally inject a steering message into a running agent's conversation. Unlike `aside_subagent`, this changes the child's work and interrupts it after the current tool execution.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
@@ -336,6 +348,7 @@ Agent lifecycle events are emitted via `pi.events.emit()` so other extensions ca
 | `subagents:usage` | An assistant response reports usage | `id`, `type`, `description`, cumulative `usage` (`input`, `output`, `cacheWrite`, `cost`), `cost` |
 | `subagents:completed` | Agent finished successfully | `id`, `type`, `durationMs`, `tokens` (lifetime `{ input, output, total }`), `cost`, `toolUses`, `result` |
 | `subagents:failed` | Agent errored or was stopped | same as completed + `error`, `status` |
+| `subagents:aside` | A throwaway aside session answered successfully | `id`, `durationMs`, nested `usage`; question and answer are deliberately omitted |
 | `subagents:steered` | Steering message sent | `id`, `message` |
 | `subagents:compacted` | Agent's session successfully compacted | `id`, `type`, `description`, `reason` (`"manual"` / `"threshold"` / `"overflow"`), `tokensBefore`, `compactionCount` |
 | `subagents:scheduled` | Schedule lifecycle change | `{ type: "added" \| "removed" \| "updated" \| "fired" \| "error", … }` (job/agentId/error fields per type) |
@@ -506,6 +519,7 @@ src/
   default-agents.ts   # Embedded default agent configs (general-purpose, Explore, Plan)
   agent-types.ts      # Unified agent registry (defaults + user), tool name resolution
   agent-runner.ts     # Session creation, execution, turn tracking, steer/resume
+  side-session.ts     # Ephemeral read-only context snapshots for non-interrupting asides
   agent-manager.ts    # Agent lifecycle, concurrency queue, completion notifications
   cross-extension-rpc.ts # RPC handlers for cross-extension spawn/ping via pi.events
   group-join.ts       # Group join manager: batched completion notifications with timeout
