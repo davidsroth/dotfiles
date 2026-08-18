@@ -1,12 +1,12 @@
 id = "local.non-idle-agent"
 name = "Non-idle Agent Switcher"
-version = "0.2.0"
+version = "0.3.0"
 min_herdr_version = "0.8.0"
-description = "Cycle non-idle agents and return from a sole active agent"
+description = "Prefer done agents before cycling other non-idle agents; return from a sole active agent"
 platforms = ["macos", "linux"]
 
 [[actions]]
 id = "swap"
-title = "Switch to next non-idle agent"
+title = "Prefer done, then switch non-idle agent"
 contexts = ["global", "workspace"]
 command = ["python3", "switch.py"]

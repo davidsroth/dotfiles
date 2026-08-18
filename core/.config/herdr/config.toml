@@ -97,13 +97,13 @@ type = "plugin_action"
 command = "vim-herdr-navigation.right"
 description = "navigate right (vim/herdr)"
 
-# Alt+s cycles only agents that are not idle (working, blocked, done, or
-# unknown), in Herdr's panel order. The plugin skips idle agents entirely.
+# Alt+s prefers green done agents, then cycles other non-idle agents (working,
+# blocked, or unknown) in Herdr's panel order. Idle agents are skipped.
 [[keys.command]]
 key = "alt+s"
 type = "plugin_action"
 command = "local.non-idle-agent.swap"
-description = "switch to next non-idle agent"
+description = "prefer done, then switch non-idle agent"
 
 # tmux prefix+s: workspace/directory picker. Herdr's own new_workspace always
 # starts at $HOME with no prompt, so this covers the missing flow — open a

@@ -46,11 +46,29 @@ class NonIdleAgentTest(unittest.TestCase):
 
         self.assertEqual(switch.select_next(agents)["pane_id"], "w0:p2")
 
-    def test_select_next_cycles_after_focused_active_agent(self):
+    def test_select_next_prefers_green_done_agent_before_panel_order(self):
+        agents = [
+            agent("done", "w0:p2"),
+            agent("working", "w0:p3", focused=True),
+            agent("blocked", "w0:p4"),
+        ]
+
+        self.assertEqual(switch.select_next(agents)["pane_id"], "w0:p2")
+
+    def test_select_next_prefers_another_done_agent_when_done_is_focused(self):
+        agents = [
+            agent("done", "w0:p2", focused=True),
+            agent("working", "w0:p3"),
+            agent("done", "w0:p4"),
+        ]
+
+        self.assertEqual(switch.select_next(agents)["pane_id"], "w0:p4")
+
+    def test_select_next_uses_panel_order_when_no_unfocused_done_agent_exists(self):
         agents = [
             agent("working", "w0:p2"),
             agent("blocked", "w0:p3", focused=True),
-            agent("done", "w0:p4"),
+            agent("unknown", "w0:p4"),
         ]
 
         self.assertEqual(switch.select_next(agents)["pane_id"], "w0:p4")

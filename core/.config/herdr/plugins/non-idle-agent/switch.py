@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Cycle non-idle Herdr agents, with a return target for a sole active agent."""
+"""Prefer done Herdr agents, then cycle other non-idle agents."""
 
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 NON_IDLE_STATES = frozenset({"working", "blocked", "done", "unknown"})
+PRIORITY_STATE = "done"
 
 
 def run(herdr: str, *args: str) -> subprocess.CompletedProcess[str]:
@@ -47,7 +48,18 @@ def active_agents(payload: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def select_next(agents: list[dict[str, Any]]) -> dict[str, Any] | None:
-    """Return the next non-idle agent in Herdr's panel order."""
+    """Prefer an unfocused done agent, then cycle in Herdr's panel order."""
+    priority = next(
+        (
+            agent
+            for agent in agents
+            if agent.get("agent_status") == PRIORITY_STATE
+            and not agent.get("focused")
+        ),
+        None,
+    )
+    if priority is not None:
+        return priority
     if not agents:
         return None
     for index, agent in enumerate(agents):
