@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Session-keyed subagent activity registry for Herdr and other integrations. Root and child Pi sessions now retain independent queued/running snapshots, and a running agent publishes one prompt terminal/stopped lifecycle event when aborted.
 - `/agents` now promotes the existing passive agents widget into a focused active-agent picker/monitor. It updates live, only shows running/queued agents, and restores the passive widget when closed—no duplicate panel or overlay.
 - The conversation monitor moves directly between active runs with `←`/`→` or `h`/`l` and sends steering messages from an inline input with `s`. PgUp/PgDn scroll the transcript, End resumes auto-follow, and Escape returns to the custom picker.
+- The focused picker and conversation monitor share a rounded window frame. The monitor shows finalized thinking blocks and the active streaming thinking event before the assistant message completes.
 - `/agent-manage` preserves the broader agent-type, schedule, creation, and settings menu for compatibility.
 - When pi-vim is loaded, its NORMAL-mode literal `Left Arrow` at column 0 opens the existing focused active-agent picker (the same action as `/agents`). The optional hook is registered only by the current root TUI session, safely ignores child/non-TUI sessions, and is removed on switch or shutdown.
 

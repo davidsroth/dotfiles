@@ -5,7 +5,13 @@
  * between running/queued agents, and provides inline steering for running agents.
  */
 
-import type { AgentSession } from "@earendil-works/pi-coding-agent";
+import {
+  type AgentSession,
+  AssistantMessageComponent,
+  getMarkdownTheme,
+  ToolExecutionComponent,
+  UserMessageComponent,
+} from "@earendil-works/pi-coding-agent";
 import {
   type Component,
   type Focusable,
@@ -14,7 +20,6 @@ import {
   type TUI,
   truncateToWidth,
   visibleWidth,
-  wrapTextWithAnsi,
 } from "@earendil-works/pi-tui";
 import { extractText } from "../context.js";
 import type { AgentRecord } from "../types.js";
@@ -30,7 +35,7 @@ import {
   getPromptModeLabel,
 } from "./agent-widget.js";
 
-/** Base lines consumed by chrome: top border + header + header sep + footer sep + footer + bottom border. */
+/** Base lines consumed by the framed monitor metadata and controls. */
 const CHROME_LINES_BASE = 6;
 const MIN_VIEWPORT = 3;
 /** Height ceiling for the focused widget's conversation viewport. */
@@ -163,29 +168,26 @@ export class ConversationViewer implements Component, Focusable {
     this.syncRecord();
 
     const th = this.theme;
-    const innerW = width - 4;
-    this.lastInnerW = innerW;
+    const innerWidth = width - 4;
+    this.lastInnerW = innerWidth;
     const lines: string[] = [];
-
-    const pad = (text: string, len: number) => {
-      const clipped = truncateToWidth(text, len, "");
-      return clipped + " ".repeat(Math.max(0, len - visibleWidth(clipped)));
+    const pad = (text: string) => {
+      const clipped = truncateToWidth(text, innerWidth, "");
+      return clipped + " ".repeat(Math.max(0, innerWidth - visibleWidth(clipped)));
     };
     const row = (content: string) =>
-      th.fg("borderMuted", "│") + " " + pad(content, innerW) + " " + th.fg("borderMuted", "│");
+      th.fg("borderMuted", "│") + " " + pad(content) + " " + th.fg("borderMuted", "│");
+    const divider = () => row(th.fg("borderMuted", "─".repeat(innerWidth)));
 
     const agents = this.getAgents();
     const selectedIndex = Math.max(0, agents.findIndex((agent) => agent.id === this.record.id));
-    const rawTitle = `─agents · ${getDisplayName(this.record.type)} · ${selectedIndex + 1}/${Math.max(1, agents.length)} `;
-    const title = truncateToWidth(rawTitle, Math.max(1, width - 2), "");
-    const titleWidth = visibleWidth(title);
-    const hrTop = th.fg("borderMuted", "╭") + th.fg("accent", title) +
-      th.fg("borderMuted", `${"─".repeat(Math.max(0, width - titleWidth - 2))}╮`);
-    const hrBot = th.fg("borderMuted", `╰${"─".repeat(width - 2)}╯`);
-    const hrMid = row(th.fg("borderMuted", "─".repeat(innerW)));
-
-    lines.push(hrTop);
     const name = getDisplayName(this.record.type);
+    const rawTitle = `─agents · ${name} · ${selectedIndex + 1}/${Math.max(1, agents.length)} `;
+    const title = truncateToWidth(rawTitle, Math.max(1, width - 2), "");
+    const top = th.fg("borderMuted", "╭") + th.fg("accent", title) +
+      th.fg("borderMuted", `${"─".repeat(Math.max(0, width - visibleWidth(title) - 2))}╮`);
+    const bottom = th.fg("borderMuted", `╰${"─".repeat(Math.max(0, width - 2))}╯`);
+    lines.push(top);
     const modeLabel = getPromptModeLabel(this.record.type);
     const modeTag = modeLabel ? ` ${th.fg("dim", `(${modeLabel})`)}` : "";
     const statusIcon = this.record.status === "running"
@@ -235,9 +237,9 @@ export class ConversationViewer implements Component, Focusable {
     ));
     const invocationLine = this.invocationLine();
     if (invocationLine) lines.push(row(invocationLine));
-    lines.push(hrMid);
+    lines.push(divider());
 
-    const contentLines = this.buildContentLines(innerW);
+    const contentLines = this.buildContentLines(innerWidth);
     const viewportHeight = this.viewportHeight();
     const maxScroll = Math.max(0, contentLines.length - viewportHeight);
 
@@ -247,14 +249,14 @@ export class ConversationViewer implements Component, Focusable {
     const visible = contentLines.slice(visibleStart, visibleStart + viewportHeight);
     for (let i = 0; i < viewportHeight; i++) lines.push(row(visible[i] ?? ""));
 
-    lines.push(hrMid);
+    lines.push(divider());
     if (this.composingSteer) {
       this.steerInput.focused = this.focused;
       const errorPrefix = this.steerStatusIsError && this.steerStatus
         ? th.fg("error", `${this.steerStatus} · `)
         : "";
       const prompt = errorPrefix + th.fg("accent", "steer ");
-      const inputWidth = Math.max(1, innerW - visibleWidth(prompt));
+      const inputWidth = Math.max(1, innerWidth - visibleWidth(prompt));
       const inputLine = this.steerInput.render(inputWidth)[0] ?? "";
       lines.push(row(prompt + inputLine));
     } else {
@@ -268,10 +270,10 @@ export class ConversationViewer implements Component, Focusable {
         ? "←→/hl agent · PgUp/PgDn scroll · s steer · Esc picker"
         : "←→/hl agent · PgUp/PgDn scroll · Esc picker";
       const footerRight = th.fg("dim", hint);
-      const footerGap = Math.max(1, innerW - visibleWidth(status) - visibleWidth(footerRight));
+      const footerGap = Math.max(1, innerWidth - visibleWidth(status) - visibleWidth(footerRight));
       lines.push(row(status + " ".repeat(footerGap) + footerRight));
     }
-    lines.push(hrBot);
+    lines.push(bottom);
 
     return lines.map((line) => truncateToWidth(line, width, ""));
   }
@@ -411,72 +413,94 @@ export class ConversationViewer implements Component, Focusable {
   private buildContentLines(width: number): string[] {
     if (width <= 0) return [];
 
-    const th = this.theme;
-    const messages = this.session?.messages ?? [];
-    const lines: string[] = [];
-
+    const messages = [...(this.session?.messages ?? [])];
+    const streamingMessage = this.session?.agent.state.streamingMessage;
+    if (streamingMessage && !messages.includes(streamingMessage)) {
+      messages.push(streamingMessage);
+    }
     if (messages.length === 0) {
       const empty = this.record.status === "queued"
         ? "Waiting for an execution slot…"
         : this.record.status === "running"
           ? "Waiting for the first message…"
           : "No retained conversation for this agent."
-      lines.push(th.fg("dim", empty));
-      return lines;
+      return [this.theme.fg("dim", empty)];
     }
 
-    let needsSeparator = false;
-    for (const msg of messages) {
-      if (msg.role === "user") {
-        const text = typeof msg.content === "string" ? msg.content : extractText(msg.content);
-        if (!text.trim()) continue;
-        if (needsSeparator) lines.push(th.fg("dim", "───"));
-        lines.push(th.fg("accent", "[User]"));
-        for (const line of wrapTextWithAnsi(text.trim(), width)) lines.push(line);
-      } else if (msg.role === "assistant") {
-        const textParts: string[] = [];
-        const toolCalls: string[] = [];
-        for (const content of msg.content) {
-          if (content.type === "text" && content.text) textParts.push(content.text);
-          else if (content.type === "toolCall") {
-            toolCalls.push((content as any).name ?? (content as any).toolName ?? "unknown");
-          }
-        }
-        if (needsSeparator) lines.push(th.fg("dim", "───"));
-        lines.push(th.bold("[Assistant]"));
-        if (textParts.length > 0) {
-          for (const line of wrapTextWithAnsi(textParts.join("\n").trim(), width)) lines.push(line);
-        }
-        for (const name of toolCalls) {
-          lines.push(truncateToWidth(th.fg("muted", `  [Tool: ${name}]`), width));
-        }
-      } else if (msg.role === "toolResult") {
-        const text = extractText(msg.content);
-        const truncated = text.length > 500 ? text.slice(0, 500) + "... (truncated)" : text;
-        if (!truncated.trim()) continue;
-        if (needsSeparator) lines.push(th.fg("dim", "───"));
-        lines.push(th.fg("dim", "[Result]"));
-        for (const line of wrapTextWithAnsi(truncated.trim(), width)) lines.push(th.fg("dim", line));
-      } else if ((msg as any).role === "bashExecution") {
-        const bash = msg as any;
-        if (needsSeparator) lines.push(th.fg("dim", "───"));
-        lines.push(truncateToWidth(th.fg("muted", `  $ ${bash.command}`), width));
-        if (bash.output?.trim()) {
-          const output = bash.output.length > 500 ? bash.output.slice(0, 500) + "... (truncated)" : bash.output;
-          for (const line of wrapTextWithAnsi(output.trim(), width)) lines.push(th.fg("dim", line));
-        }
-      } else {
+    // Use Pi's own transcript components instead of a hand-rolled approximation:
+    // user bubbles, Markdown, syntax highlighting, and built-in tool cards all
+    // stay visually aligned with the parent conversation.
+    const components: Component[] = [];
+    const toolCalls = new Map<string, ToolExecutionComponent>();
+    for (const message of messages) {
+      if (message.role === "user") {
+        const text = typeof message.content === "string" ? message.content : extractText(message.content);
+        if (text.trim()) components.push(new UserMessageComponent(text, getMarkdownTheme(), 1));
         continue;
       }
-      needsSeparator = true;
+
+      if (message.role === "assistant") {
+        components.push(new AssistantMessageComponent(message, false, getMarkdownTheme(), "Thinking…", 1));
+        for (const content of message.content) {
+          if (content.type !== "toolCall") continue;
+          const tool = new ToolExecutionComponent(
+            content.name,
+            content.id,
+            content.arguments,
+            {},
+            undefined,
+            this.tui,
+            process.cwd(),
+          );
+          tool.markExecutionStarted();
+          tool.setArgsComplete();
+          toolCalls.set(content.id, tool);
+          components.push(tool);
+        }
+        continue;
+      }
+
+      if (message.role === "toolResult") {
+        let tool = toolCalls.get(message.toolCallId);
+        if (!tool) {
+          tool = new ToolExecutionComponent(
+            message.toolName,
+            message.toolCallId,
+            {},
+            {},
+            undefined,
+            this.tui,
+            process.cwd(),
+          );
+          tool.markExecutionStarted();
+          tool.setArgsComplete();
+          components.push(tool);
+        }
+        tool.updateResult({ content: message.content, details: message.details, isError: message.isError });
+        continue;
+      }
+
+      // Retain support for historical session messages used by older Pi releases.
+      if ((message as any).role === "bashExecution") {
+        const bash = message as any;
+        const tool = new ToolExecutionComponent("bash", `bash-${bash.timestamp}`, { command: bash.command }, {}, undefined, this.tui, process.cwd());
+        tool.markExecutionStarted();
+        tool.setArgsComplete();
+        tool.updateResult({
+          content: bash.output ? [{ type: "text", text: bash.output }] : [],
+          details: { exitCode: bash.exitCode },
+          isError: bash.exitCode !== 0 && !bash.cancelled,
+        });
+        components.push(tool);
+      }
     }
 
+    const lines = components.flatMap((component) => component.render(width));
     if (this.record.status === "running" && this.activity) {
       const currentActivity = describeActivity(this.activity.activeTools, this.activity.responseText);
       lines.push("");
-      lines.push(truncateToWidth(th.fg("accent", "▍ ") + th.fg("dim", currentActivity), width));
+      lines.push(truncateToWidth(this.theme.fg("accent", "▍ ") + this.theme.fg("dim", currentActivity), width));
     }
-
     return lines.map((line) => truncateToWidth(line, width));
   }
 }

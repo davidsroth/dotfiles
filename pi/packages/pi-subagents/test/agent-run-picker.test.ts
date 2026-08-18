@@ -41,6 +41,21 @@ describe("isActiveAgentRecord", () => {
 });
 
 describe("AgentRunPicker", () => {
+  it("frames the selector like a window", () => {
+    const picker = new AgentRunPicker(
+      tui(),
+      { getAgents: () => [record("a")], getActivity: () => undefined },
+      theme(),
+      vi.fn(),
+    );
+    const lines = picker.render(60);
+
+    expect(lines[0]).toMatch(/^╭.*╮$/);
+    expect(lines.at(-1)).toMatch(/^╰.*╯$/);
+    for (const line of lines.slice(1, -1)) expect(line).toMatch(/^│.*│$/);
+    picker.dispose();
+  });
+
   it("moves selection and returns the selected agent", () => {
     const agents = [record("a"), record("b"), record("c", "completed")];
     const done = vi.fn();

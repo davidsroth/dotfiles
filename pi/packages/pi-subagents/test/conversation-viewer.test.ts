@@ -1,28 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AgentRecord } from "../src/types.js";
 
-// ── Mock wrapTextWithAnsi ──────────────────────────────────────────────
-// We need to control what wrapTextWithAnsi returns to simulate the
-// upstream bug (returning lines wider than requested width).
-// vi.mock is hoisted and intercepts before conversation-viewer.ts binds
-// its import.
-
-let wrapOverride: ((text: string, width: number) => string[]) | null = null;
-
-vi.mock("@earendil-works/pi-tui", async (importOriginal) => {
-  const original = await importOriginal<typeof import("@earendil-works/pi-tui")>();
-  return {
-    ...original,
-    wrapTextWithAnsi: (...args: [string, number]) => {
-      if (wrapOverride) return wrapOverride(...args);
-      return original.wrapTextWithAnsi(...args);
-    },
-  };
-});
-
-// Must import AFTER vi.mock declaration (vitest hoists vi.mock but the
-// dynamic import of the test subject must happen after)
 const { visibleWidth } = await import("@earendil-works/pi-tui");
+const { initTheme } = await import("@earendil-works/pi-coding-agent");
 const { ConversationViewer } = await import("../src/ui/conversation-viewer.js");
 
 // ── Helpers ────────────────────────────────────────────────────────────
@@ -34,9 +14,10 @@ function mockTui(rows = 40, columns = 80) {
   } as any;
 }
 
-function mockSession(messages: any[] = []) {
+function mockSession(messages: any[] = [], streamingMessage?: any) {
   return {
     messages,
+    agent: { state: { streamingMessage } },
     subscribe: vi.fn(() => vi.fn()),
     dispose: vi.fn(),
     getSessionStats: () => ({ tokens: { input: 0, output: 0, cacheWrite: 0 } }),
@@ -72,12 +53,26 @@ function assertAllLinesFit(lines: string[], width: number) {
 // ── Tests ──────────────────────────────────────────────────────────────
 
 beforeEach(() => {
-  wrapOverride = null;
+  // ConversationViewer now delegates transcript rendering to Pi's native
+  // components, which rely on Pi's process-wide theme singleton.
+  initTheme("dark");
 });
 
 describe("ConversationViewer", () => {
   describe("render width safety", () => {
     const widths = [40, 80, 120, 216];
+
+    it("frames the monitor like a window", () => {
+      const viewer = new ConversationViewer(
+        mockTui(), mockSession(), mockRecord(), undefined, ansiTheme(), vi.fn(),
+      );
+      const lines = viewer.render(80).map((line) => line.replace(/\x1b\[[0-9;]*m/g, ""));
+
+      expect(lines[0]).toMatch(/^╭.*╮$/);
+      expect(lines.at(-1)).toMatch(/^╰.*╯$/);
+      for (const line of lines.slice(1, -1)) expect(line).toMatch(/^│.*│$/);
+      viewer.dispose();
+    });
 
     it("no line exceeds width with empty messages", () => {
       for (const w of widths) {
@@ -236,27 +231,44 @@ describe("ConversationViewer", () => {
     });
   });
 
-  describe("safety net against upstream wrapTextWithAnsi bugs", () => {
-    // These tests call buildContentLines() directly (via the private method)
-    // because render() has its own truncation via row(). The safety net in
-    // buildContentLines is what prevents the TUI crash — it must clamp
-    // independently of render().
-
+  describe("native transcript rendering", () => {
     /** Call the private buildContentLines method directly. */
     function callBuildContentLines(viewer: InstanceType<typeof ConversationViewer>, width: number): string[] {
       return (viewer as any).buildContentLines(width);
     }
 
-    it("mock is intercepting wrapTextWithAnsi", async () => {
-      const { wrapTextWithAnsi } = await import("@earendil-works/pi-tui");
-      wrapOverride = () => ["MOCK_SENTINEL"];
-      expect(wrapTextWithAnsi("anything", 10)).toEqual(["MOCK_SENTINEL"]);
-      wrapOverride = null;
+    it("uses Pi's user-message presentation instead of role labels", () => {
+      const viewer = new ConversationViewer(
+        mockTui(), mockSession([{ role: "user", content: "Use **Markdown** here." }]), mockRecord(), undefined, ansiTheme(), vi.fn(),
+      );
+      const rendered = callBuildContentLines(viewer, 80).join("\n");
+
+      expect(rendered).toContain("Markdown");
+      expect(rendered).not.toContain("[User]");
+      viewer.dispose();
     });
 
-    it("clamps overwidth lines from toolResult content", () => {
+    it("renders finalized and in-flight thinking events", () => {
+      const finalized = {
+        role: "assistant",
+        content: [{ type: "thinking", thinking: "Finalized reasoning event" }],
+      };
+      const streaming = {
+        role: "assistant",
+        content: [{ type: "thinking", thinking: "Live reasoning event" }],
+      };
+      const viewer = new ConversationViewer(
+        mockTui(), mockSession([finalized], streaming), mockRecord(), undefined, ansiTheme(), vi.fn(),
+      );
+      const rendered = callBuildContentLines(viewer, 80).join("\n");
+
+      expect(rendered).toContain("Finalized reasoning event");
+      expect(rendered).toContain("Live reasoning event");
+      viewer.dispose();
+    });
+
+    it("keeps tool-result output within the viewport", () => {
       const w = 80;
-      wrapOverride = () => ["X".repeat(w + 50)];
 
       const messages = [
         { role: "toolResult", toolUseId: "t1", content: [{ type: "text", text: "output" }] },
@@ -267,9 +279,8 @@ describe("ConversationViewer", () => {
       assertAllLinesFit(callBuildContentLines(viewer, w), w);
     });
 
-    it("clamps overwidth lines from user message content", () => {
+    it("keeps user-message output within the viewport", () => {
       const w = 80;
-      wrapOverride = () => ["Y".repeat(w + 100)];
 
       const messages = [{ role: "user", content: "hello" }];
       const viewer = new ConversationViewer(
@@ -278,9 +289,8 @@ describe("ConversationViewer", () => {
       assertAllLinesFit(callBuildContentLines(viewer, w), w);
     });
 
-    it("clamps overwidth lines from assistant message content", () => {
+    it("keeps assistant-message output within the viewport", () => {
       const w = 80;
-      wrapOverride = () => ["Z".repeat(w + 100)];
 
       const messages = [
         { role: "assistant", content: [{ type: "text", text: "response" }] },
@@ -291,9 +301,8 @@ describe("ConversationViewer", () => {
       assertAllLinesFit(callBuildContentLines(viewer, w), w);
     });
 
-    it("clamps overwidth lines from bashExecution output", () => {
+    it("keeps legacy bash output within the viewport", () => {
       const w = 80;
-      wrapOverride = () => ["B".repeat(w + 100)];
 
       const messages = [
         {
@@ -307,9 +316,8 @@ describe("ConversationViewer", () => {
       assertAllLinesFit(callBuildContentLines(viewer, w), w);
     });
 
-    it("clamps overwidth lines that also contain ANSI codes", () => {
+    it("keeps ANSI tool output within the viewport", () => {
       const w = 80;
-      wrapOverride = () => [`\x1b[1m\x1b[31m${"W".repeat(w + 30)}\x1b[0m`];
 
       const messages = [
         { role: "toolResult", toolUseId: "t1", content: [{ type: "text", text: "output" }] },
