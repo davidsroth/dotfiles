@@ -975,10 +975,19 @@ Guidelines:
 
     // ---- Custom rendering: Claude Code style ----
 
-    renderCall(args, theme) {
+    renderCall(args, theme, context) {
       const displayName = args.subagent_type ? getDisplayName(args.subagent_type) : "Agent";
       const desc = args.description ?? "";
-      return new Text("▸ " + theme.fg("toolTitle", theme.bold(displayName)) + (desc ? "  " + theme.fg("muted", desc) : ""), 0, 0);
+      let line = "▸ " + theme.fg("toolTitle", theme.bold(displayName)) + (desc ? "  " + theme.fg("muted", desc) : "");
+
+      // Keep the normal view compact, but show the complete prompt in expanded
+      // mode. `args` is updated as the provider streams tool-call arguments, so
+      // this also reveals the prompt incrementally while it is being written.
+      if (context.expanded && typeof args.prompt === "string") {
+        line += "\n\n" + theme.fg("muted", "Prompt:") + "\n" + args.prompt;
+      }
+
+      return new Text(line, 0, 0);
     },
 
     renderResult(result, { expanded, isPartial }, theme) {

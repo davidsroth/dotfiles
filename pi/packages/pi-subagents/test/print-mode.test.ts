@@ -333,6 +333,39 @@ describe("print mode subagents", () => {
     expect(runAgent).not.toHaveBeenCalled();
   });
 
+  it("shows the full Agent prompt only when expanded and follows streamed arguments", () => {
+    const { pi, tools } = makePi();
+    subagentsExtension(pi);
+    const agentTool = tools.get("Agent");
+    const theme = { fg: (_color: string, text: string) => text, bold: (text: string) => text };
+    const context = { expanded: false } as any;
+
+    const collapsed = agentTool.renderCall(
+      { subagent_type: "Explore", description: "Trace rendering", prompt: "partial prompt" },
+      theme,
+      context,
+    );
+    expect(collapsed.render(200).join("\n")).not.toContain("partial prompt");
+
+    context.expanded = true;
+    const partial = agentTool.renderCall(
+      { subagent_type: "Explore", description: "Trace rendering", prompt: "partial prompt" },
+      theme,
+      context,
+    );
+    expect(partial.render(200).join("\n")).toContain("partial prompt");
+
+    const completePrompt = "Inspect the tool renderer\nwithout truncating this prompt.";
+    const complete = agentTool.renderCall(
+      { subagent_type: "Explore", description: "Trace rendering", prompt: completePrompt },
+      theme,
+      context,
+    );
+    const completeOutput = complete.render(200).join("\n");
+    expect(completeOutput).toContain("Inspect the tool renderer");
+    expect(completeOutput).toContain("without truncating this prompt.");
+  });
+
   it.each([
     ["steered", "Wrapped up (legacy turn limit)"],
     ["aborted", "Aborted (legacy turn limit)"],
