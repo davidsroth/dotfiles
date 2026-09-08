@@ -29,8 +29,8 @@ open_worktree = "prefix+shift+g"
 remove_worktree = "prefix+shift+x"
 rename_workspace = "prefix+shift+r"
 close_workspace = "prefix+shift+d"
-previous_workspace = ["ctrl+shift+s", "prefix+(", "cmd+shift+["]
-next_workspace = ["ctrl+s", "prefix+)", "cmd+shift+]"]
+previous_workspace = ["prefix+(", "cmd+shift+[", "alt+{"]
+next_workspace = ["prefix+)", "cmd+shift+]", "alt+}"]
 
 # Cycle the sidebar's agent rows without opening the picker, or jump directly
 # to agents 1-9 with Alt+number. The alt+[ / alt+] bindings only work because
@@ -97,13 +97,20 @@ type = "plugin_action"
 command = "vim-herdr-navigation.right"
 description = "navigate right (vim/herdr)"
 
-# Alt+s prefers green done agents, then cycles other non-idle agents (working,
+# Ctrl+s prefers green done agents, then cycles other non-idle agents (working,
 # blocked, or unknown) in Herdr's panel order. Idle agents are skipped.
 [[keys.command]]
-key = "alt+s"
+key = "ctrl+s"
 type = "plugin_action"
 command = "local.non-idle-agent.swap"
 description = "prefer done, then switch non-idle agent"
+
+# Ctrl+Shift+s applies the same priority rules while cycling in reverse.
+[[keys.command]]
+key = "ctrl+shift+s"
+type = "plugin_action"
+command = "local.non-idle-agent.swap-reverse"
+description = "prefer done, then switch non-idle agent in reverse"
 
 # tmux prefix+s: workspace/directory picker. Herdr's own new_workspace always
 # starts at $HOME with no prompt, so this covers the missing flow — open a

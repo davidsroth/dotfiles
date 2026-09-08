@@ -85,6 +85,38 @@ class NonIdleAgentTest(unittest.TestCase):
         self.assertIsNone(switch.select_next([]))
         self.assertIsNone(switch.select_next([agent("working", "w0:p2", focused=True)]))
 
+    def test_select_next_reverse_uses_reverse_panel_order(self):
+        agents = [
+            agent("working", "w0:p2"),
+            agent("blocked", "w0:p3", focused=True),
+            agent("unknown", "w0:p4"),
+        ]
+
+        self.assertEqual(
+            switch.select_next(agents, reverse=True)["pane_id"], "w0:p2"
+        )
+
+    def test_select_next_reverse_wraps_to_last_active_agent(self):
+        agents = [
+            agent("working", "w0:p2", focused=True),
+            agent("blocked", "w0:p3"),
+        ]
+
+        self.assertEqual(
+            switch.select_next(agents, reverse=True)["pane_id"], "w0:p3"
+        )
+
+    def test_select_next_reverse_prefers_last_unfocused_done_agent(self):
+        agents = [
+            agent("done", "w0:p2"),
+            agent("working", "w0:p3", focused=True),
+            agent("done", "w0:p4"),
+        ]
+
+        self.assertEqual(
+            switch.select_next(agents, reverse=True)["pane_id"], "w0:p4"
+        )
+
     def test_sole_active_agent_returns_to_previous_idle_agent(self):
         previous = agent("idle", "w0:p1")
         active = agent("working", "w0:p2", focused=True)

@@ -47,12 +47,15 @@ def active_agents(payload: dict[str, Any]) -> list[dict[str, Any]]:
     ]
 
 
-def select_next(agents: list[dict[str, Any]]) -> dict[str, Any] | None:
+def select_next(
+    agents: list[dict[str, Any]], *, reverse: bool = False
+) -> dict[str, Any] | None:
     """Prefer an unfocused done agent, then cycle in Herdr's panel order."""
+    ordered = list(reversed(agents)) if reverse else agents
     priority = next(
         (
             agent
-            for agent in agents
+            for agent in ordered
             if agent.get("agent_status") == PRIORITY_STATE
             and not agent.get("focused")
         ),
@@ -62,20 +65,23 @@ def select_next(agents: list[dict[str, Any]]) -> dict[str, Any] | None:
         return priority
     if not agents:
         return None
+    step = -1 if reverse else 1
     for index, agent in enumerate(agents):
         if agent.get("focused"):
-            return agents[(index + 1) % len(agents)] if len(agents) > 1 else None
-    return agents[0]
+            return agents[(index + step) % len(agents)] if len(agents) > 1 else None
+    return ordered[0]
 
 
 def select_target(
     agents: list[dict[str, Any]],
     active: list[dict[str, Any]],
     return_pane_id: str | None,
+    *,
+    reverse: bool = False,
 ) -> dict[str, Any] | None:
     """Choose the normal cycle target or the return side of a one-agent toggle."""
     if len(active) != 1 or not active[0].get("focused"):
-        return select_next(active)
+        return select_next(active, reverse=reverse)
     return next(
         (
             agent
@@ -124,6 +130,10 @@ def notify(herdr: str, title: str) -> None:
 
 
 def main() -> int:
+    reverse = sys.argv[1:] == ["--reverse"]
+    if sys.argv[1:] not in ([], ["--reverse"]):
+        print("usage: switch.py [--reverse]", file=sys.stderr)
+        return 2
     herdr = os.environ.get("HERDR_BIN_PATH", "herdr")
     directory = state_dir()
     directory.mkdir(parents=True, exist_ok=True)
@@ -150,7 +160,12 @@ def main() -> int:
             agent for agent in agents if agent.get("agent_status") in NON_IDLE_STATES
         ]
         history_path = directory / "focus-history.json"
-        target = select_target(agents, active, load_return_pane(history_path))
+        target = select_target(
+            agents,
+            active,
+            load_return_pane(history_path),
+            reverse=reverse,
+        )
         if target is None:
             if not active:
                 notify(herdr, "No non-idle agents")
