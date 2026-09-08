@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - When pi-vim is loaded, its literal `Left Arrow` on an empty prompt opens the existing focused active-agent picker (the same action as `/agents`) in either INSERT or NORMAL mode. The optional hook is registered only by the current root TUI session, safely ignores child/non-TUI sessions, and is removed on switch or shutdown.
 
 ### Changed
+- `aside_subagent` now also accepts completed agents while their sessions are retained. It answers from finalized context without resuming the child or changing its result/status; cleanup and retention remain unchanged.
 - Removed turn limits from the vendored variant. Agents now run until completion, failure, or an explicit stop. The Agent tool and RPC spawn reject legacy turn-limit options (RPC protocol v3), while legacy frontmatter/settings/scheduled-job fields are ignored or scrubbed.
 - Replaced the nested `/agents` management-menu flow and separate picker presentation with an in-place focus transition on the existing agents widget; terminal and historical runs are excluded.
 

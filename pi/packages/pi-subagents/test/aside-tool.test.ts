@@ -158,6 +158,69 @@ describe("aside_subagent tool", () => {
     await shutdown(handlers, ctx);
   });
 
+  it.each([false, true])("answers a completed agent (background=%s) without resuming or changing its result", async (isBackground) => {
+    const { tools, handlers } = makePi();
+    const ctx = makeCtx();
+    const child = childSession();
+    runAgent.mockImplementation(async (_ctx: any, _type: string, _prompt: string, options: any) => {
+      options.onSessionCreated?.(child);
+      return { responseText: "original result", session: child };
+    });
+    const started = await tools.get("Agent").execute(
+      "spawn-completed",
+      {
+        prompt: "finish the task",
+        description: "completed target",
+        subagent_type: "general-purpose",
+        run_in_background: isBackground,
+      },
+      undefined,
+      undefined,
+      ctx,
+    );
+    const manager = (globalThis as any)[MANAGER_KEY];
+    const record = manager.getRecord(started.details.agentId);
+    await record.promise;
+    expect(record.status).toBe("completed");
+    const before = { ...record, lifetimeUsage: { ...record.lifetimeUsage } };
+    answerSubagentAside.mockResolvedValue({ answer: "clarification", usage: nestedUsage() });
+
+    const result = await tools.get("aside_subagent").execute(
+      "aside-completed",
+      { agent_id: record.id, message: "Why this approach?" },
+      undefined,
+      undefined,
+      ctx,
+    );
+
+    expect(result.content[0].text).toBe("clarification");
+    expect(result.usage).toEqual(nestedUsage());
+    expect(answerSubagentAside).toHaveBeenCalledWith(
+      child, "Why this approach?", expect.objectContaining({ cwd: ctx.cwd }),
+    );
+    expect(record).toEqual(before);
+    expect(child.prompt).not.toHaveBeenCalled();
+    expect(child.steer).not.toHaveBeenCalled();
+    expect(child.followUp).not.toHaveBeenCalled();
+    expect(child.abort).not.toHaveBeenCalled();
+    expect(child.dispose).not.toHaveBeenCalled();
+    expect(runAgent).toHaveBeenCalledOnce();
+
+    // Asides do not extend retention or resurrect a cleaned-up conversation.
+    await handlers.get("session_before_switch")?.({ reason: "new" }, ctx);
+    answerSubagentAside.mockClear();
+    const expired = await tools.get("aside_subagent").execute(
+      "aside-cleaned-up",
+      { agent_id: record.id, message: "Still there?" },
+      undefined,
+      undefined,
+      ctx,
+    );
+    expect(expired.content[0].text).toContain("cleaned up");
+    expect(answerSubagentAside).not.toHaveBeenCalled();
+    await shutdown(handlers, ctx);
+  });
+
   it("rejects overlapping asides for the same target", async () => {
     const { tools, handlers } = makePi();
     const ctx = makeCtx();
@@ -323,19 +386,24 @@ describe("aside_subagent tool", () => {
 });
 
 describe("aside validation and telemetry helpers", () => {
-  it.each(["queued", "completed", "stopped", "error"])(
-    "rejects %s records as non-running",
+  it.each(["queued", "stopped", "error"])(
+    "rejects %s records as unsupported aside targets",
     (status) => {
-      const message = getAsideTargetError({ status } as any, "agent-1");
+      const message = getAsideTargetError({ status, session: {} } as any, "agent-1");
       expect(message).toContain(`status: ${status}`);
     },
   );
 
-  it("accepts only initialized running records", () => {
+  it.each(["running", "completed"])("accepts initialized %s records", (status) => {
+    expect(getAsideTargetError({ status, session: {} } as any, "agent-1"))
+      .toBeUndefined();
+  });
+
+  it("distinguishes uninitialized running sessions from unavailable completed conversations", () => {
     expect(getAsideTargetError({ status: "running" } as any, "agent-1"))
       .toContain("session is not initialized");
-    expect(getAsideTargetError({ status: "running", session: {} } as any, "agent-1"))
-      .toBeUndefined();
+    expect(getAsideTargetError({ status: "completed" } as any, "agent-1"))
+      .toContain("conversation is no longer available");
   });
 
   it("builds telemetry without accepting question or answer fields", () => {

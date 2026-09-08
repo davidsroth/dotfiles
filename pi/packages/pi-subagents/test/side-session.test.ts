@@ -111,8 +111,18 @@ beforeEach(() => {
 });
 
 describe("answerSubagentAside", () => {
-  it("copies finalized context into a distinct read-only session without touching the child", async () => {
+  it.each([true, false])("copies finalized context without touching the child (streaming=%s)", async (isStreaming) => {
     const { child, entries, finalizedMessages } = makeChild();
+    child.isStreaming = isStreaming;
+    if (!isStreaming) {
+      // A completed child's final answer must be part of the aside's context.
+      (finalizedMessages as any[]).push({
+        role: "assistant",
+        content: [{ type: "text", text: "original completed answer" }],
+        stopReason: "stop",
+        usage: usage(),
+      });
+    }
     const childMessagesBefore = structuredClone(child.state.messages);
     const streamingBefore = structuredClone(child.state.streamingMessage);
     const pendingBefore = [...child.state.pendingToolCalls];
@@ -160,7 +170,10 @@ describe("answerSubagentAside", () => {
     expect(options.tools).not.toEqual(expect.arrayContaining(["bash", "edit", "write"]));
     expect(options.resourceLoader.getExtensions().extensions).toEqual([]);
     expect(options.resourceLoader.getSystemPrompt()).toBe("child system prompt");
-    expect(options.resourceLoader.getAppendSystemPrompt().join(" ")).toContain("one-off side question");
+    const asidePrompt = options.resourceLoader.getAppendSystemPrompt().join(" ");
+    expect(asidePrompt).toContain("one-off side question");
+    expect(asidePrompt).toContain("running or completed subagent");
+    expect(asidePrompt).toContain("does not resume or change its work");
     expect(result.answer).toBe("snapshot answer");
     expect(result.usage).toEqual(usage({ cacheWrite1h: 1, reasoning: 3 }));
 
@@ -170,7 +183,7 @@ describe("answerSubagentAside", () => {
     expect(child.steeringQueue).toEqual(steeringQueueBefore);
     expect(child.followUpQueue).toEqual(followUpQueueBefore);
     expect(child.activeTools).toEqual(activeToolsBefore);
-    expect(child.isStreaming).toBe(true);
+    expect(child.isStreaming).toBe(isStreaming);
     expect(child.prompt).not.toHaveBeenCalled();
     expect(child.steer).not.toHaveBeenCalled();
     expect(child.followUp).not.toHaveBeenCalled();

@@ -16,8 +16,8 @@ export const ASIDE_TOOLS = ["read", "ls", "find", "grep"] as const;
 export const ASIDE_TIMEOUT_MS = 120_000;
 
 const ASIDE_SYSTEM_PROMPT = [
-  "You are answering a one-off side question about a running subagent.",
-  "The preceding messages are a read-only snapshot of that subagent's finalized context; its live work continues elsewhere.",
+  "You are answering a one-off side question about a running or completed subagent.",
+  "The preceding messages are a read-only snapshot of that subagent's finalized context; this aside does not resume or change its work.",
   "Answer the question directly and concisely, but do not continue, steer, interrupt, or modify the main task.",
   "You have only read-only tools (read, ls, find, grep) for inspecting the working directory.",
 ].join(" ");
@@ -118,8 +118,8 @@ export interface AnswerSubagentAsideOptions {
 
 /**
  * Ask a one-off question through a throwaway in-memory session seeded from a
- * running child's finalized SessionManager branch. The live child is read but
- * never prompted, steered, aborted, disposed, or otherwise mutated.
+ * running or completed child's finalized SessionManager branch. The child is
+ * read but never prompted, steered, aborted, disposed, or otherwise mutated.
  */
 export async function answerSubagentAside(
   child: AgentSession,

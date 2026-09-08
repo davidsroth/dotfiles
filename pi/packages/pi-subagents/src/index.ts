@@ -4,7 +4,7 @@
  * Tools:
  *   Agent             — LLM-callable: spawn a sub-agent
  *   get_subagent_result  — LLM-callable: check background agent status/result
- *   aside_subagent       — LLM-callable: ask without interrupting or mutating a running agent
+ *   aside_subagent       — LLM-callable: ask a running or completed agent without mutating it
  *   steer_subagent       — LLM-callable: inject a message into a running agent's work
  *
  * Commands:
@@ -286,11 +286,13 @@ export function buildPersistedRecordData(record: AgentRecord) {
 /** Return a user-facing validation error, or undefined for an aside-ready record. */
 export function getAsideTargetError(record: AgentRecord | undefined, agentId: string): string | undefined {
   if (!record) return `Agent not found: "${agentId}". It may have been cleaned up.`;
-  if (record.status !== "running") {
-    return `Agent "${agentId}" is not running (status: ${record.status}). Asides only work on running agents.`;
+  if (record.status !== "running" && record.status !== "completed") {
+    return `Agent "${agentId}" cannot answer an aside (status: ${record.status}). Asides only work on running or completed agents.`;
   }
   if (!record.session) {
-    return `Agent "${agentId}" is running but its session is not initialized yet. Try again shortly.`;
+    return record.status === "running"
+      ? `Agent "${agentId}" is running but its session is not initialized yet. Try again shortly.`
+      : `Agent "${agentId}" has completed but its conversation is no longer available for asides.`;
   }
   return undefined;
 }
@@ -961,7 +963,7 @@ Guidelines:
 - Agent results are returned as text — summarize them for the user.
 - Use run_in_background for work you don't need immediately. You will be notified when it completes.
 - Use resume with an agent ID to continue a previous agent's work.
-- Use aside_subagent to ask a running background agent a one-off question without interrupting or changing its work.
+- Use aside_subagent to ask a running or completed agent a one-off question without interrupting, resuming, or changing its work.
 - Use steer_subagent only when you intend to interrupt the agent and inject a message into its conversation.
 - Use model to specify a different model (as "provider/modelId", or fuzzy e.g. "haiku", "sonnet").
 - Use thinking to control extended thinking level.
@@ -1581,12 +1583,12 @@ Guidelines:
     name: "aside_subagent",
     label: "Ask Agent Aside",
     description:
-      "Ask a running agent a one-off status or clarification question without interrupting it or changing its conversation. " +
+      "Ask a running or completed agent a one-off status or clarification question without interrupting, resuming, or changing its conversation. " +
       "The answer comes from an ephemeral read-only snapshot of finalized context, so it can be slightly stale while the live agent is executing a tool. " +
       "Use steer_subagent instead when you intend to inject a message and alter the agent's work.",
     parameters: Type.Object({
       agent_id: Type.String({
-        description: "The running agent ID to ask.",
+        description: "The running or completed agent ID to ask (its session must still be retained).",
       }),
       message: Type.String({
         description: "A one-off question answered from a read-only snapshot; it is not added to the agent's conversation.",

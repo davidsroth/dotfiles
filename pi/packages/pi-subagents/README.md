@@ -17,7 +17,7 @@ https://github.com/user-attachments/assets/8685261b-9338-4fea-8dfe-1c590d5df543
 - **Live widget UI** — persistent above-editor widget with animated spinners, live tool activity, token counts, and colored status icons
 - **Focusable agents widget** — `/agents` (or pi-vim `Left Arrow` on an empty prompt, when installed) promotes the existing passive agents widget into its focused picker/monitor state; watch active conversations, move between running/queued agents, and steer inline without rendering a second panel
 - **Custom agent types** — define agents in `.pi/agents/<name>.md` with YAML frontmatter: custom system prompts, model selection, thinking levels, tool restrictions
-- **Non-interrupting asides** — ask a running agent a one-off status or clarification question through an ephemeral read-only snapshot without changing its live conversation, tools, queues, or task
+- **Non-interrupting asides** — ask a running or completed agent a one-off status or clarification question through an ephemeral read-only snapshot without resuming it or changing its conversation, tools, queues, or task
 - **Mid-run steering** — intentionally inject messages into running agents to interrupt and redirect their work without restarting
 - **Session resume** — pick up where an agent left off, preserving full conversation context
 - **Unlimited agent runs** — agents run until they finish, fail, or are explicitly stopped; this vendored variant has no turn-limit controls
