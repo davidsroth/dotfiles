@@ -1,6 +1,14 @@
 --- herdr-agent-state.ts
 +++ herdr-agent-state.ts
-@@ -172,23 +172,70 @@
+@@ -6,6 +6,7 @@
+ // @ts-nocheck
+ 
+ import net from "node:net";
++import path from "node:path";
+ 
+ const HERDR_ENV = process.env.HERDR_ENV;
+ const socketPath = process.env.HERDR_SOCKET_PATH;
+@@ -172,23 +173,72 @@
    }
  }
  
@@ -54,6 +62,8 @@
    let agentActive = false;
 -  let blockedCount = 0;
 -  let blockedMessage: string | undefined;
++  let compactionActive = false;
++  let suppressIdleAfterInboundAsk = false;
 +  const blockers = new Map<string, string | undefined>();
 +  let legacyBlockerSequence = 0;
 +  const activeSubagents = new Map<string, SubagentActivity>();
@@ -72,11 +82,11 @@
 +      return { state: "blocked" as const, message: blockedMessage() };
      }
 -    if (agentActive) {
-+    if (agentActive || activeSubagents.size > 0) {
++    if (agentActive || compactionActive || activeSubagents.size > 0) {
        return { state: "working" as const, message: undefined };
      }
      return { state: "idle" as const, message: undefined };
-@@ -204,24 +251,72 @@
+@@ -204,24 +254,72 @@
      queueState(next.state, next.message);
    }
  
@@ -157,12 +167,84 @@
    pi.on("session_start", async (event, ctx) => {
      // TUI only: RPC/JSON/print modes are headless (no PTY herdr can display),
      // and RPC still reports hasUI=true, so mode is the reliable gate.
-@@ -230,6 +325,8 @@
+@@ -230,12 +328,69 @@
      }
      rootSession = true;
      updateSessionRef(ctx);
 +    // A reload can replace this extension after subagents already started.
 +    reconcileSubagents();
      await reportSession(event?.reason);
++    await reportSessionSummary(ctx);
      // A reload can replace this extension mid-run without emitting another agent_start.
      agentActive = ctx?.isIdle?.() === false;
+     publishState(true);
+   });
+ 
++  function reportSessionSummary(ctx: any): Promise<void> {
++    const sessionName = pi.getSessionName?.()?.trim();
++    const cwdName = typeof ctx?.cwd === "string" ? path.basename(ctx.cwd) : "";
++    const summary = sessionName || cwdName;
++    return sendRequest({
++      id: `${source}:metadata:${Date.now()}:${Math.random().toString(36).slice(2)}`,
++      method: "pane.report_metadata",
++      params: {
++        pane_id: paneId,
++        source,
++        agent: "pi",
++        applies_to_source: source,
++        tokens: { summary: summary || null },
++        seq: nextReportSeq(),
++      },
++    });
++  }
++
++  function isInboundIntercomAsk(ctx: any): boolean {
++    try {
++      const entry = ctx?.sessionManager?.getLeafEntry?.();
++      return entry?.type === "custom_message"
++        && entry?.customType === "intercom_message"
++        && entry?.details?.message?.expectsReply === true;
++    } catch {
++      return false;
++    }
++  }
++
++  pi.on("session_info_changed", (_event, ctx) => {
++    if (!rootSession) return;
++    void reportSessionSummary(ctx);
++  });
++
++  pi.on("before_agent_start", (_event, ctx) => {
++    if (!rootSession) return;
++    suppressIdleAfterInboundAsk = isInboundIntercomAsk(ctx);
++  });
++
++  pi.on("session_before_compact", () => {
++    if (!rootSession) return;
++    compactionActive = true;
++    publishState();
++  });
++
++  function finishCompaction() {
++    if (!rootSession) return;
++    compactionActive = false;
++    publishState();
++  }
++
++  pi.on("session_compact", finishCompaction);
++  pi.on("session_compact_failed", finishCompaction);
++
+   pi.on("agent_start", (_event, ctx) => {
+     if (!rootSession) {
+       return;
+@@ -252,6 +407,10 @@
+     }
+ 
+     agentActive = false;
++    if (suppressIdleAfterInboundAsk) {
++      suppressIdleAfterInboundAsk = false;
++      return;
++    }
+     publishState();
+   });
+ }

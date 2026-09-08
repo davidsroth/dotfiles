@@ -16,8 +16,13 @@ from datetime import UTC, datetime
 
 
 BASE_SHA256 = "9b1c41cd72520fc2abe5f2a2aec995c12a926cce844df472c7fd5fcae4f4dbfa"
-LEGACY_PATCHED_SHA256 = "74244056a82a5bc3b217c28940a1f6a43922e72922d0301065f4925d1cdeb8a0"
-PATCHED_SHA256 = "68c8d03b7498595c5b32e97ad8093fa41b786326fb3d703fcfe05c0a68618ac5"
+# Previous reviewed outputs remain migratable after a patch refresh.
+LEGACY_PATCHED_SHA256S = {
+    "74244056a82a5bc3b217c28940a1f6a43922e72922d0301065f4925d1cdeb8a0",
+    "68c8d03b7498595c5b32e97ad8093fa41b786326fb3d703fcfe05c0a68618ac5",
+    "ae57feb1322d8d5b6d6d08c9b7a476c952cd5db3b4a82b1d69039b0360ad2959",
+}
+PATCHED_SHA256 = "60ad43a34ead8fc01919d5bf4f021e92ce64667ba14c303d7ea3665bc7f7e583"
 PATCHES_DIR = Path(__file__).resolve().parents[1] / "patches"
 FIXTURE_PATH = PATCHES_DIR / "herdr-agent-state-v8.ts"
 REQUIRED_HEADER = (
@@ -61,7 +66,7 @@ def patch_status(target: Path) -> str:
         return "installed"
     if fingerprint == BASE_SHA256:
         return "stock"
-    if fingerprint == LEGACY_PATCHED_SHA256:
+    if fingerprint in LEGACY_PATCHED_SHA256S:
         return "legacy"
     raise ValueError(
         f"{target} does not match the reviewed Herdr Pi v8 patch ({fingerprint}). "

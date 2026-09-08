@@ -39,7 +39,7 @@ class HerdrPiStatePatcherTest(unittest.TestCase):
         self.assertIn("// HERDR_INTEGRATION_VERSION=8", fixture)
 
     def test_legacy_fixture_is_the_exact_migratable_source(self):
-        self.assertEqual(patcher.sha256(LEGACY_FIXTURE_PATH), patcher.LEGACY_PATCHED_SHA256)
+        self.assertIn(patcher.sha256(LEGACY_FIXTURE_PATH), patcher.LEGACY_PATCHED_SHA256S)
 
     def test_applies_once_then_is_idempotent(self):
         with tempfile.TemporaryDirectory() as tmp:

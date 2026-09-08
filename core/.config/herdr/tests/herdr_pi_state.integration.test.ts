@@ -59,6 +59,8 @@ test("patched Herdr Pi integration preserves its authority while aggregating roo
   const priorRegistry = globalThis[registryKey];
   const requests: any[] = [];
   let snapshot = [{ id: "reload-agent", type: "Explore", description: "Already running", status: "running" }];
+  let leafEntry: unknown;
+  let sessionName = "Root session";
   const server = net.createServer((socket) => {
     let body = "";
     socket.on("data", (chunk) => {
@@ -85,14 +87,17 @@ test("patched Herdr Pi integration preserves its authority while aggregating roo
     };
 
     const integration = await import(`${pathToFileURL(target).href}?test=${Date.now()}`);
-    const pi = new FakePi();
+    const pi = new FakePi() as FakePi & { getSessionName: () => string };
+    pi.getSessionName = () => sessionName;
     integration.default(pi);
     const ctx = {
       mode: "tui",
+      cwd: "/tmp/project",
       isIdle: () => true,
       sessionManager: {
         getSessionId: () => "root-session",
         getSessionFile: () => "/tmp/root-session.jsonl",
+        getLeafEntry: () => leafEntry,
       },
     };
     await pi.emitLifecycle("session_start", { reason: "resume" }, ctx);
@@ -104,6 +109,17 @@ test("patched Herdr Pi integration preserves its authority while aggregating roo
     const sessionReport = requests.find((request) => request.method === "pane.report_agent_session");
     assert.equal(sessionReport.params.source, "herdr:pi");
     assert.equal(sessionReport.params.agent_session_path, "/tmp/root-session.jsonl");
+    const metadataReport = requests.find((request) => request.method === "pane.report_metadata");
+    assert.equal(metadataReport.params.source, "herdr:pi");
+    assert.equal(metadataReport.params.applies_to_source, "herdr:pi");
+    assert.deepEqual(metadataReport.params.tokens, { summary: "Root session" });
+
+    sessionName = "Renamed session";
+    await pi.emitLifecycle("session_info_changed", { name: sessionName }, ctx);
+    await waitFor(
+      () => requests.some((request) => request.method === "pane.report_metadata" && request.params.tokens.summary === sessionName),
+      "metadata refresh after session rename",
+    );
     const firstWorking = requests.find((request) => request.method === "pane.report_agent" && request.params.state === "working");
     assert.equal(firstWorking.params.agent_session_path, "/tmp/root-session.jsonl");
     assert.equal(firstWorking.params.source, "herdr:pi");
@@ -218,6 +234,50 @@ test("patched Herdr Pi integration preserves its authority while aggregating roo
     pi.events.emit("subagents:failed", { id: "stopped-agent", sessionId: "root-session", status: "stopped" });
     await new Promise((resolve) => setTimeout(resolve, 20));
     assert.equal(requests.filter((request) => request.method === "pane.report_agent").length, stateCountAfterStop);
+
+    // An inbound ask is a complete injected turn: its reply often has a terse
+    // assistant final afterwards. Do not publish idle for that completion, or
+    // Herdr emits a misleading ready alert.
+    leafEntry = {
+      type: "custom_message",
+      customType: "intercom_message",
+      details: { message: { expectsReply: true } },
+    };
+    const idleBeforeInboundAsk = requests.filter((request) => request.method === "pane.report_agent" && request.params.state === "idle").length;
+    await pi.emitLifecycle("before_agent_start", {}, ctx);
+    await pi.emitLifecycle("agent_start", {}, ctx);
+    await pi.emitLifecycle("agent_settled", {}, ctx);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(
+      requests.filter((request) => request.method === "pane.report_agent" && request.params.state === "idle").length,
+      idleBeforeInboundAsk,
+      "an inbound intercom ask completion must not report idle",
+    );
+
+    // The next ordinary turn restores normal idle reporting.
+    leafEntry = { type: "message", message: { role: "user" } };
+    await pi.emitLifecycle("before_agent_start", {}, ctx);
+    await pi.emitLifecycle("agent_start", {}, ctx);
+    await pi.emitLifecycle("agent_settled", {}, ctx);
+    await waitFor(
+      () => requests.filter((request) => request.method === "pane.report_agent" && request.params.state === "idle").length === idleBeforeInboundAsk + 1,
+      "idle after the next ordinary turn",
+    );
+
+    // Manual compaction does not enter the agent loop, so it must explicitly
+    // hold the working state until it completes.
+    const workingBeforeCompaction = requests.filter((request) => request.method === "pane.report_agent" && request.params.state === "working").length;
+    const idleBeforeCompaction = requests.filter((request) => request.method === "pane.report_agent" && request.params.state === "idle").length;
+    await pi.emitLifecycle("session_before_compact", {}, ctx);
+    await waitFor(
+      () => requests.filter((request) => request.method === "pane.report_agent" && request.params.state === "working").length === workingBeforeCompaction + 1,
+      "working during compaction",
+    );
+    await pi.emitLifecycle("session_compact", {}, ctx);
+    await waitFor(
+      () => requests.filter((request) => request.method === "pane.report_agent" && request.params.state === "idle").length === idleBeforeCompaction + 1,
+      "idle after compaction",
+    );
 
     const sequences = requests.map((request) => request.params.seq).filter((seq) => typeof seq === "number");
     assert.ok(sequences.every((seq, index) => index === 0 || seq > sequences[index - 1]), "reports retain one increasing sequence");

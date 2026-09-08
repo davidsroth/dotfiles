@@ -177,10 +177,11 @@ key = "prefix+shift+i"
 type = "pane"
 command = "${SHELL:-/bin/sh} -ic 'opencode'"
 
-# Catppuccin Mocha's surface_dim (#1e1e2e) equals WezTerm's background, which
-# made the active agent/workspace row highlight invisible. Lift it to
-# surface0 (#313244). Also used for divider lines and the scrollbar track.
+# Catppuccin Mocha's active-row background matches WezTerm's background.
+# Herdr 0.8.2 split active rows from surface_dim, so override both: active rows
+# remain visible while divider lines and scrollbar tracks retain their contrast.
 [theme.custom]
+active_row_bg = "#313244"
 surface_dim = "#313244"
 
 [ui]
@@ -194,12 +195,13 @@ agent_panel_sort = "spaces"
 prompt_new_tab_name = false
 
 # Keep agent entries compact: native theme-aware workspace and state icon on
-# the first line; session-oriented title on the second.
+# the first line; the Pi integration reports a restart-safe session summary on
+# the second. Unlike terminal_title_stripped, this is republished after restore.
 [ui.sidebar.agents]
 row_gap = 0
 rows = [
   [{ token = "workspace", bold = true }, "state_icon"],
-  [{ token = "terminal_title_stripped", dim = true }],
+  [{ token = "$summary", dim = true }],
 ]
 
 # Collapse each workspace to one information-dense row.
