@@ -44,6 +44,11 @@ topology, and incident details belong in local memory instead.
   if [ -n "${VAR:-}" ]; then echo "set length=${#VAR}"; else echo unset; fi
   ```
 
+### Protocol-stream ownership
+
+Give each protocol stream one serialized writer. Mixing asynchronous `process.stdout.write()` with raw `writeSync()` can interleave JSON records; pipe writes can also be short under backpressure. Use a dedicated channel with a backpressure-aware writer for independent producers. Test real OS pipes with concurrent large frames and slow readers—not just parsers fed complete synthetic frames. Separate channels also require explicit completion ordering when one channel carries reports needed before another can announce completion.
+
+
 ## Delegation and subagents
 
 - Sweep and size the work surface before delegating. Parallel agents are useful
