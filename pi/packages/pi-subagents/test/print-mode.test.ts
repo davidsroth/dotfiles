@@ -35,10 +35,12 @@ function makePi() {
         handlers.set(event, handler);
       }),
       events: {
-        emit: vi.fn(),
+        emit: vi.fn((event: string, payload: unknown) => {
+          eventHandlers.get(event)?.(payload);
+        }),
         on: vi.fn((event: string, handler: any) => {
           eventHandlers.set(event, handler);
-          return vi.fn();
+          return vi.fn(() => eventHandlers.delete(event));
         }),
       },
       appendEntry: vi.fn(),
@@ -160,6 +162,66 @@ describe("print mode subagents", () => {
 
     const completed = await tools.get("get_subagent_result").execute(
       "retrieve-agent",
+      { agent_id: agentId },
+      undefined,
+      undefined,
+      ctx,
+    );
+    expect(completed.content[0].text).toContain("finished after interrupt");
+
+    await handlers.get("session_shutdown")?.({}, ctx);
+  });
+
+  it("lets an incoming intercom message interrupt a foreground wait without stopping the child", async () => {
+    let completeAgent!: (result: { responseText: string; session: { dispose: ReturnType<typeof vi.fn> } }) => void;
+    let childSignal!: AbortSignal;
+    vi.mocked(runAgent).mockClear();
+    vi.mocked(runAgent).mockImplementation((_ctx, _type, _prompt, options: any) => {
+      childSignal = options.signal;
+      return new Promise((resolve) => {
+        completeAgent = resolve;
+      }) as any;
+    });
+    const { pi, tools, handlers } = makePi();
+    subagentsExtension(pi);
+    const ctx = makeHeadlessCtx();
+    const parentController = new AbortController();
+
+    const waiting = tools.get("Agent").execute(
+      "foreground-agent",
+      {
+        prompt: "keep working",
+        description: "interruptible foreground",
+        subagent_type: "general-purpose",
+      },
+      parentController.signal,
+      undefined,
+      ctx,
+    );
+
+    await vi.waitFor(() => expect(runAgent).toHaveBeenCalledOnce());
+    pi.events.emit("intercom:inbound-wait-interrupt", {
+      messageId: "intercom-message-1",
+      delivery: "steer",
+    });
+
+    const interrupted = await waiting;
+    expect(interrupted.content[0].text).toContain("Waiting was interrupted by an incoming intercom message");
+    expect(interrupted.content[0].text).toContain("is still running");
+    expect(parentController.signal.aborted).toBe(false);
+    expect(childSignal.aborted).toBe(false);
+
+    const agentId = interrupted.content[0].text.match(/Agent ([^ ]+) is still running/)?.[1];
+    expect(agentId).toBeTruthy();
+
+    completeAgent({ responseText: "finished after interrupt", session: { dispose: vi.fn() } });
+    await vi.waitFor(() => expect(pi.events.emit).toHaveBeenCalledWith(
+      "subagents:completed",
+      expect.objectContaining({ id: agentId, status: "completed" }),
+    ));
+
+    const completed = await tools.get("get_subagent_result").execute(
+      "retrieve-foreground-agent",
       { agent_id: agentId },
       undefined,
       undefined,

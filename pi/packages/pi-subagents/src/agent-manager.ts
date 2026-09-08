@@ -74,6 +74,8 @@ interface SpawnOptions {
   onAssistantUsage?: (usage: { input: number; output: number; cacheWrite: number; cost?: number }) => void;
   /** Called when the session successfully compacts. */
   onCompaction?: (info: CompactionInfo) => void;
+  /** Called synchronously once the agent record has been created. */
+  onSpawned?: (record: AgentRecord) => void;
 }
 
 export class AgentManager {
@@ -356,6 +358,7 @@ export class AgentManager {
   ): Promise<AgentRecord> {
     const id = this.spawn(pi, ctx, type, prompt, { ...options, isBackground: false });
     const record = this.agents.get(id)!;
+    try { options.onSpawned?.(record); } catch { /* spawn observers must not interrupt waiting */ }
     await record.promise;
     return record;
   }

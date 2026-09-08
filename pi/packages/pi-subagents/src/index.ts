@@ -408,18 +408,29 @@ export default function (pi: ExtensionAPI) {
   const agentActivity = new Map<string, AgentActivity>();
 
   // A steering user message normally waits until the current tool batch ends.
-  // Result waits are intentionally different: end them now, while allowing the
-  // background subagent itself to continue independently.
+  // Interruptible subagent waits are intentionally different: end them now,
+  // while allowing the child agent itself to continue independently.
   const resultWaitControllers = new Set<AbortController>();
+  // pi-intercom emits this additive event before injecting a triggerable
+  // message. Keep the string local so pi-subagents remains independently loadable.
+  const INTERCOM_INBOUND_WAIT_INTERRUPT_EVENT = "intercom:inbound-wait-interrupt";
+  const INTERCOM_MESSAGE_INTERRUPT = "intercom-message";
+  const interruptWaits = (reason: string) => {
+    for (const controller of resultWaitControllers) {
+      controller.abort(reason);
+    }
+  };
+  const unsubscribeIntercomWaitInterrupt = pi.events.on(
+    INTERCOM_INBOUND_WAIT_INTERRUPT_EVENT,
+    () => interruptWaits(INTERCOM_MESSAGE_INTERRUPT),
+  );
   // Each target may have at most one throwaway aside session. These controllers
   // belong to side sessions only and are never wired to child abort controllers.
   const activeAsides = new Map<string, AbortController>();
   const USER_MESSAGE_INTERRUPT = "user-message";
   pi.on("input", (event) => {
     if (event.source === "extension" || event.streamingBehavior !== "steer") return;
-    for (const controller of resultWaitControllers) {
-      controller.abort(USER_MESSAGE_INTERRUPT);
-    }
+    interruptWaits(USER_MESSAGE_INTERRUPT);
   });
 
   // ---- Cancellable pending notifications ----
@@ -527,6 +538,11 @@ export default function (pi: ExtensionAPI) {
     });
   }
 
+  // Foreground agents normally clean up their widget after the tool returns. If
+  // a message interrupts the wait, the child continues independently and must
+  // be cleaned up when it eventually reaches a terminal state.
+  const detachedForegroundAgents = new Set<string>();
+
   // Background completion: route through group join or send individual nudge
   const manager = new AgentManager((record) => {
     // Skip notification if result was already consumed via get_subagent_result
@@ -570,7 +586,17 @@ export default function (pi: ExtensionAPI) {
       tokensBefore: info.tokensBefore,
       compactionCount: record.compactionCount,
     });
-  }, recordTerminalRun, recordUsage, (record, isBackground) => {
+  }, (record) => {
+    try {
+      recordTerminalRun(record);
+    } finally {
+      if (detachedForegroundAgents.delete(record.id)) {
+        agentActivity.delete(record.id);
+        widget.markFinished(record.id);
+        widget.update();
+      }
+    }
+  }, recordUsage, (record, isBackground) => {
     // Publish before a synchronous start so observers also see queued work.
     pi.events.emit("subagents:created", {
       id: record.id,
@@ -755,6 +781,7 @@ export default function (pi: ExtensionAPI) {
     scheduler.stop();
     widget.dispose();
     for (const controller of activeAsides.values()) controller.abort("session shutdown");
+    unsubscribeIntercomWaitInterrupt();
     manager.abortAll();
     for (const timer of pendingNudges.values()) clearTimeout(timer);
     pendingNudges.clear();
@@ -1279,8 +1306,10 @@ Guidelines:
       let spinnerFrame = 0;
       const startedAt = Date.now();
       let fgId: string | undefined;
+      let streamActive = true;
 
       const streamUpdate = () => {
+        if (!streamActive) return;
         const details: AgentDetails = {
           ...detailBase,
           toolUses: fgState.toolUses,
@@ -1321,9 +1350,19 @@ Guidelines:
 
       streamUpdate();
 
-      let record: AgentRecord;
+      let foregroundRecord: AgentRecord | undefined;
+      let waitInterrupted = false;
+      let waitInterruptedByUser = false;
+      let waitInterruptedByIntercom = false;
+      const waitController = new AbortController();
+      const forwardToolAbort = () => waitController.abort(signal?.reason);
+      if (signal?.aborted) forwardToolAbort();
+      else signal?.addEventListener("abort", forwardToolAbort, { once: true });
+      resultWaitControllers.add(waitController);
+
+      let completion: Promise<AgentRecord>;
       try {
-        record = await manager.spawnAndWait(pi, ctx, subagentType, params.prompt, {
+        completion = manager.spawnAndWait(pi, ctx, subagentType, params.prompt, {
           description: params.description,
           model,
           isolated,
@@ -1332,14 +1371,55 @@ Guidelines:
           isolation,
           invocation: agentInvocation,
           signal,
+          onSpawned: (record) => {
+            foregroundRecord = record;
+            fgId = record.id;
+            agentActivity.set(record.id, fgState);
+            widget.ensureTimer();
+          },
           ...fgCallbacks,
         });
+        const completed = await waitForCompletionOrAbort(completion, waitController.signal, () => {
+          waitInterrupted = true;
+          waitInterruptedByUser = waitController.signal.reason === USER_MESSAGE_INTERRUPT;
+          waitInterruptedByIntercom = waitController.signal.reason === INTERCOM_MESSAGE_INTERRUPT;
+        });
+        if (!completed && foregroundRecord?.status === "running") {
+          // Keep the child alive when only the wait was interrupted. The
+          // original tool signal remains wired to the child for real aborts.
+          streamActive = false;
+          detachedForegroundAgents.add(foregroundRecord.id);
+        }
       } catch (err) {
+        streamActive = false;
         clearInterval(spinnerInterval);
         return textResult(err instanceof Error ? err.message : String(err));
+      } finally {
+        resultWaitControllers.delete(waitController);
+        signal?.removeEventListener("abort", forwardToolAbort);
       }
 
+      streamActive = false;
       clearInterval(spinnerInterval);
+
+      const record = foregroundRecord;
+      if (!record) {
+        return textResult("Agent did not produce a result.");
+      }
+
+      // A message can interrupt the wait while the foreground child continues.
+      // Return control to the parent immediately and leave the agent available
+      // through get_subagent_result, just like an interrupted background wait.
+      if (waitInterrupted && record.status === "running") {
+        const reason = waitInterruptedByIntercom
+          ? "an incoming intercom message"
+          : waitInterruptedByUser
+            ? "a user message"
+            : "an interruption";
+        return textResult(
+          `Waiting was interrupted by ${reason}. Agent ${record.id} is still running; use get_subagent_result with wait: true or check back later.`,
+        );
+      }
 
       // Clean up foreground agent from widget
       if (fgId) {
@@ -1405,6 +1485,7 @@ Guidelines:
       // Setting the flag here prevents a redundant follow-up notification.
       let waitInterrupted = false;
       let waitInterruptedByUser = false;
+      let waitInterruptedByIntercom = false;
       if (params.wait && record.status === "running" && record.promise) {
         record.resultConsumed = true;
         cancelNudge(params.agent_id);
@@ -1422,6 +1503,7 @@ Guidelines:
             record.resultConsumed = false;
             waitInterrupted = true;
             waitInterruptedByUser = waitController.signal.reason === USER_MESSAGE_INTERRUPT;
+            waitInterruptedByIntercom = waitController.signal.reason === INTERCOM_MESSAGE_INTERRUPT;
           });
           if (!completed) waitInterrupted = true;
         } finally {
@@ -1447,9 +1529,11 @@ Guidelines:
 
       if (record.status === "running") {
         output += waitInterrupted
-          ? waitInterruptedByUser
-            ? "Waiting was interrupted by a user message. Agent is still running; use wait: true or check back later."
-            : "Waiting was interrupted. Agent is still running; use wait: true or check back later."
+          ? waitInterruptedByIntercom
+            ? "Waiting was interrupted by an incoming intercom message. Agent is still running; use wait: true or check back later."
+            : waitInterruptedByUser
+              ? "Waiting was interrupted by a user message. Agent is still running; use wait: true or check back later."
+              : "Waiting was interrupted. Agent is still running; use wait: true or check back later."
           : "Agent is still running. Use wait: true or check back later.";
       } else if (record.status === "error") {
         output += `Error: ${record.error}`;

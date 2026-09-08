@@ -14,6 +14,7 @@ import type { Attachment, BrokerMessage, Message, MessageControl, MessageReceipt
 import {
   INTERCOM_EXTENSION_REGISTER_EVENT,
   INTERCOM_EXTENSION_REGISTRY_READY_EVENT,
+  INTERCOM_INBOUND_WAIT_INTERRUPT_EVENT,
   type IntercomExtensionChannel,
   type IntercomExtensionEvent,
   type IntercomExtensionOwner,
@@ -68,6 +69,7 @@ interface InboundMessageEntry {
   replyCommand?: string;
   bodyText: string;
   receivedAt: number;
+  waitInterruptEmitted?: boolean;
 }
 
 type ContactSupervisorReason = "need_decision" | "progress_update" | "interview_request";
@@ -950,10 +952,21 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
     }
     return false;
   }
+  function emitInboundWaitInterrupt(entry: InboundMessageEntry, delivery: "trigger" | "steer", forceTrigger = false): void {
+    if (entry.waitInterruptEmitted || !shouldTriggerInboundMessage(entry, forceTrigger)) {
+      return;
+    }
+    entry.waitInterruptEmitted = true;
+    pi.events.emit(INTERCOM_INBOUND_WAIT_INTERRUPT_EVENT, {
+      messageId: entry.message.id,
+      delivery,
+    });
+  }
   function sendIncomingMessage(entry: InboundMessageEntry, delivery: "trigger" | "steer", generation = runtimeGeneration, forceTrigger = false): void {
     if (runtimeStarted && !getLiveContext(runtimeContext, generation)) {
       return;
     }
+    emitInboundWaitInterrupt(entry, delivery, forceTrigger);
     const triggerAllowed = shouldTriggerInboundMessage(entry, forceTrigger);
     const deliveryOptions = !triggerAllowed
       ? { deliverAs: "nextTurn" as const }
@@ -1004,6 +1017,9 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
   function queueIdleMessage(entry: InboundMessageEntry): void {
     pendingIdleMessages.push(entry);
     emitMessageReceipt(entry.message.id, "queued");
+    // Wake an interruptible parent wait immediately; the actual message is
+    // still delivered through Pi's steering queue below.
+    emitInboundWaitInterrupt(entry, "steer");
     if (pendingIdleMessages.length > MAX_PENDING_IDLE_MESSAGES) {
       const evicted = pendingIdleMessages.splice(0, pendingIdleMessages.length - MAX_PENDING_IDLE_MESSAGES);
       for (const staleEntry of evicted) {

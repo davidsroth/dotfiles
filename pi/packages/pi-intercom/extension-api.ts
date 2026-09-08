@@ -2,6 +2,13 @@ import type { SessionInfo } from "./types.ts";
 
 export const INTERCOM_EXTENSION_REGISTER_EVENT = "intercom:extension-register";
 export const INTERCOM_EXTENSION_REGISTRY_READY_EVENT = "intercom:extension-registry-ready";
+/** Emitted before an inbound triggerable message is injected into the parent agent. */
+export const INTERCOM_INBOUND_WAIT_INTERRUPT_EVENT = "intercom:inbound-wait-interrupt";
+
+export interface IntercomInboundWaitInterrupt {
+  messageId: string;
+  delivery: "trigger" | "steer";
+}
 
 export interface IntercomExtensionOwner {
   sessionId: string;

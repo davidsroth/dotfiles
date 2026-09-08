@@ -8,7 +8,11 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { ReplyTracker } from "./reply-tracker.ts";
 import { ASIDE_FEATURE } from "./types.ts";
 import type { BrokerMessage, Message, SessionInfo } from "./types.ts";
-import { INTERCOM_EXTENSION_REGISTER_EVENT, type IntercomExtensionChannel } from "./extension-api.ts";
+import {
+  INTERCOM_EXTENSION_REGISTER_EVENT,
+  INTERCOM_INBOUND_WAIT_INTERRUPT_EVENT,
+  type IntercomExtensionChannel,
+} from "./extension-api.ts";
 
 const repoDir = process.cwd();
 const childEnvKeys = [
@@ -1439,6 +1443,7 @@ test("busy interactive sessions steer top-level asks without aborting", { concur
   const { planner, cleanup } = await setupClients();
   let abortCount = 0;
   let idle = false;
+  const waitInterrupts: unknown[] = [];
   const harness = createExtensionHarness("interactive-worker", {
     abort: () => { abortCount += 1; },
     hasUI: true,
@@ -1447,6 +1452,10 @@ test("busy interactive sessions steer top-level asks without aborting", { concur
 
   try {
     piIntercomExtension(harness.pi as never);
+    harness.pi.events.on(
+      INTERCOM_INBOUND_WAIT_INTERRUPT_EVENT,
+      (payload) => waitInterrupts.push(payload),
+    );
     await harness.emitLifecycle("session_start");
 
     const target = await waitForSessionByName(planner, "interactive-worker");
@@ -1459,6 +1468,7 @@ test("busy interactive sessions steer top-level asks without aborting", { concur
     assert.equal(delivered.delivered, true);
     await new Promise((resolve) => setTimeout(resolve, 20));
     assert.equal(abortCount, 0);
+    assert.deepEqual(waitInterrupts, [{ messageId: "interactive-busy-ask", delivery: "steer" }]);
     assert.equal(harness.sentMessages.length, 1);
     assert.equal(harness.sentMessages[0]?.message.customType, "intercom_message");
     assert.equal(harness.sentMessages[0]?.options?.deliverAs, "steer");
