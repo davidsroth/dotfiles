@@ -1,14 +1,12 @@
 {
   "compilerOptions": {
-    "target": "ESNext",
+    "target": "ES2023",
     "module": "ESNext",
     "moduleResolution": "bundler",
     "strict": true,
-    "esModuleInterop": true,
     "skipLibCheck": true,
     "noEmit": true,
-    "resolveJsonModule": true,
     "types": ["node"]
   },
-  "include": ["extensions/**/*.ts"]
+  "include": ["src/**/*.ts", "tests/**/*.ts"]
 }

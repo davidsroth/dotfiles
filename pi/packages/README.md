@@ -1,12 +1,12 @@
-# Vendored Pi Packages
+# Local and Vendored Pi Packages
 
-This directory contains Pi packages that are intentionally vendored into the dotfiles repo.
+This directory contains homespun Pi packages and intentionally vendored third-party packages.
 
 Current packages (wired into Pi via `settings.base.json`):
 
 - `pi-vim`
 - `pi-subagents`
-- `pi-btw`
+- `pi-aside` (local one-shot side questions; replaces the vendored BTW package)
 - `@davidroth/pi-intercom` (directory: `pi-intercom`)
 - `pi-intercom-tailnet`
 - `pi-memory`
@@ -57,5 +57,6 @@ Recommended workflow:
 ## Notes
 
 - `pi-subagents` is the most active/complex vendored package and is the most likely to need compatibility updates as Pi evolves
+- `pi-aside` is a minimal local replacement for the former vendored BTW plugin
 - `pi-qna` and `pi-plan-review` are local packages extracted from this dotfiles config for easier sharing with coworkers
 - Relative package loading assumes the stowed Pi config layout used by this repo

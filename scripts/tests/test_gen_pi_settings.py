@@ -58,7 +58,7 @@ class GenPiSettingsTest(unittest.TestCase):
             "packages": [
                 "../../dotfiles/pi/packages/pi-vim",
                 {
-                    "source": "../../dotfiles/pi/packages/pi-btw",
+                    "source": "../../dotfiles/pi/packages/pi-aside",
                     "skills": [],
                 },
                 "npm:pi-web-access",
@@ -77,7 +77,7 @@ class GenPiSettingsTest(unittest.TestCase):
             [
                 str(self.root / "pi" / "packages" / "pi-vim"),
                 {
-                    "source": str(self.root / "pi" / "packages" / "pi-btw"),
+                    "source": str(self.root / "pi" / "packages" / "pi-aside"),
                     "skills": [],
                 },
                 "npm:pi-web-access",

@@ -8,10 +8,7 @@
   "packages": [
     "../../dotfiles/pi/packages/pi-vim",
     "../../dotfiles/pi/packages/pi-subagents",
-    {
-      "source": "../../dotfiles/pi/packages/pi-btw",
-      "skills": []
-    },
+    "../../dotfiles/pi/packages/pi-aside",
     "../../dotfiles/pi/packages/pi-intercom",
     "../../dotfiles/pi/packages/pi-intercom-tailnet",
     "../../dotfiles/pi/packages/pi-qna",

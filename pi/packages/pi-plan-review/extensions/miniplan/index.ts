@@ -990,7 +990,7 @@ export default function plan(pi: ExtensionAPI): void {
 				// Send the captured reply as a fresh user message instead of
 				// stuffing it into the editor. When the agent is mid-turn we
 				// queue as a follow-up; otherwise it kicks off a new turn
-				// immediately. Mirrors the pattern used in pi-btw.
+				// immediately.
 				try {
 					if (ctx.isIdle()) {
 						pi.sendUserMessage(reply);
