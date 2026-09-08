@@ -61,6 +61,11 @@ Give each protocol stream one serialized writer. Mixing asynchronous `process.st
 - Resolve relative deadlines from the source message's timestamp, not from the
   day the message is later processed.
 
+### Non-interrupting status checks
+
+When checking progress on a running subagent, use `aside_subagent` by default so the update does not interrupt or alter the agent’s work. Use `steer_subagent` only when intentionally redirecting the task.
+
+
 ## Git and GitHub mechanics
 
 - Resolve merges by preserving cross-file intent, not by choosing whichever
