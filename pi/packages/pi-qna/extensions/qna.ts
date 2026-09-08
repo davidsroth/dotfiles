@@ -195,8 +195,8 @@ export function loadStash(): QnaStash | undefined {
 	return lastStash ?? readStashFromDisk();
 }
 
-const EXTRACTOR_MODEL_PROVIDER = "anthropic";
-const EXTRACTOR_MODEL_ID = "claude-haiku-4-5";
+const EXTRACTOR_MODEL_PROVIDER = "openai-codex";
+const EXTRACTOR_MODEL_ID = "gpt-5.6-luna";
 
 const SYSTEM_PROMPT = `You extract questions from a single message written by an AI assistant.
 

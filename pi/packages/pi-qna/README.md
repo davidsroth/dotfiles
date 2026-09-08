@@ -53,5 +53,5 @@ herdr integration install pi
 ## Notes
 
 - Interactive mode is required.
-- `/qna` question extraction uses `anthropic/claude-haiku-4-5`; make sure that model is enabled and authenticated. The `launch_qna` tool does not need an extractor model because questions are passed explicitly.
+- `/qna` question extraction uses `openai-codex/gpt-5.6-luna`; make sure that model is enabled and authenticated. The `launch_qna` tool does not need an extractor model because questions are passed explicitly.
 - If `pi-vim` is available, the answer editor uses its modal editor. Otherwise it falls back to pi's standard editor.
