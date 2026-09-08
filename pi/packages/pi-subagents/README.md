@@ -232,6 +232,8 @@ Launch a sub-agent.
 
 Check status and retrieve results from a background agent.
 
+Awaiting or retrieving a completed result suppresses its pending completion message. Notifications stay cancellable while the parent is working and are delivered only after it settles, omitting results already retrieved. Interrupting a wait leaves notification delivery enabled for the unread result.
+
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `agent_id` | string | yes | Agent ID to check |

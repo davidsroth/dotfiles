@@ -434,23 +434,40 @@ export default function (pi: ExtensionAPI) {
   });
 
   // ---- Cancellable pending notifications ----
-  // Holds notifications briefly so get_subagent_result can cancel them
-  // before they reach pi.sendMessage (fire-and-forget).
-  const pendingNudges = new Map<string, ReturnType<typeof setTimeout>>();
+  // Keep notifications cancellable until the parent settles. Once handed to
+  // pi.sendMessage, a queued follow-up cannot be retracted by a later result read.
+  const pendingNudges = new Map<string, { timer?: ReturnType<typeof setTimeout>; send: () => void }>();
   const NUDGE_HOLD_MS = 200;
+  let parentRunning = false;
+
+  pi.on("agent_start", () => { parentRunning = true; });
+  pi.on("agent_settled", () => {
+    parentRunning = false;
+    for (const key of pendingNudges.keys()) flushNudge(key);
+  });
+
+  function flushNudge(key: string) {
+    const pending = pendingNudges.get(key);
+    if (!pending || pending.timer != null || parentRunning) return;
+    pendingNudges.delete(key);
+    // Individual/group send callbacks re-check resultConsumed at delivery time.
+    try { pending.send(); } catch { /* ignore stale completion side-effect errors */ }
+  }
 
   function scheduleNudge(key: string, send: () => void, delay = NUDGE_HOLD_MS) {
     cancelNudge(key);
-    pendingNudges.set(key, setTimeout(() => {
-      pendingNudges.delete(key);
-      try { send(); } catch { /* ignore stale completion side-effect errors */ }
-    }, delay));
+    const pending: { timer?: ReturnType<typeof setTimeout>; send: () => void } = { send };
+    pending.timer = setTimeout(() => {
+      pending.timer = undefined;
+      flushNudge(key);
+    }, delay);
+    pendingNudges.set(key, pending);
   }
 
   function cancelNudge(key: string) {
-    const timer = pendingNudges.get(key);
-    if (timer != null) {
-      clearTimeout(timer);
+    const pending = pendingNudges.get(key);
+    if (pending) {
+      if (pending.timer != null) clearTimeout(pending.timer);
       pendingNudges.delete(key);
     }
   }
@@ -783,8 +800,7 @@ export default function (pi: ExtensionAPI) {
     for (const controller of activeAsides.values()) controller.abort("session shutdown");
     unsubscribeIntercomWaitInterrupt();
     manager.abortAll();
-    for (const timer of pendingNudges.values()) clearTimeout(timer);
-    pendingNudges.clear();
+    for (const key of pendingNudges.keys()) cancelNudge(key);
     manager.dispose();
   });
 
