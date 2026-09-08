@@ -1,6 +1,7 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { BUILTIN_TOOL_NAMES } from "../src/agent-types.js";
 import { loadCustomAgents } from "../src/custom-agents.js";
@@ -60,6 +61,22 @@ You are a security auditor.`);
     expect(agent.runInBackground).toBe(true);
     expect(agent.isolated).toBe(true);
     expect(agent.systemPrompt).toBe("You are a security auditor.");
+  });
+
+  it("ships a constrained auditor example that inherits model and thinking", () => {
+    const packageRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
+    const agent = loadCustomAgents(packageRoot).get("auditor")!;
+
+    expect(agent.source).toBe("project");
+    expect(agent.builtinToolNames).toEqual(["read", "bash", "grep", "find", "ls"]);
+    expect(agent.extensions).toBe(false);
+    expect(agent.skills).toBe(false);
+    expect(agent.model).toBeUndefined();
+    expect(agent.thinking).toBeUndefined();
+    expect(agent.promptMode).toBe("replace");
+    expect(agent.systemPrompt).toContain("complete attack path");
+    expect(agent.systemPrompt).toContain("Actively try to disprove each candidate");
+    expect(agent.systemPrompt).toContain("Finding nothing is a legitimate result");
   });
 
   it("uses sensible defaults when frontmatter is empty", () => {

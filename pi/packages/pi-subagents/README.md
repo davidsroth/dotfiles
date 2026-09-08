@@ -140,7 +140,7 @@ Group completions render each agent as a separate block. The LLM receives struct
 | Type | Tools | Model | Prompt Mode | Description |
 |------|-------|-------|-------------|-------------|
 | `general-purpose` | all 7 | inherit | `append` (parent twin) | Inherits the parent's full system prompt — same rules, CLAUDE.md, project conventions |
-| `Explore` | read, bash, grep, find, ls | haiku (falls back to inherit) | `replace` (standalone) | Fast codebase exploration (read-only) |
+| `Explore` | read, bash, grep, find, ls; no extensions/skills | inherit | `replace` (standalone) | Bounded, evidence-backed codebase exploration (read-only) |
 | `Plan` | read, bash, grep, find, ls | inherit | `replace` (standalone) | Software architect for implementation planning (read-only) |
 
 The `general-purpose` agent is a **parent twin** — it receives the parent's entire system prompt plus a sub-agent context bridge, so it follows the same rules the parent does. Explore and Plan use standalone prompts tailored to their read-only roles.
@@ -164,20 +164,25 @@ Project-level agents override global ones with the same name, so you can customi
 
 ```markdown
 ---
-description: Security Code Reviewer
-tools: read, grep, find, bash
-model: anthropic/claude-opus-4-6
-thinking: high
+description: Read-only security reviewer for scoped diffs and modules; reports evidence-backed exploitable vulnerabilities
+tools: read, bash, grep, find, ls
+extensions: false
+skills: false
+prompt_mode: replace
 ---
 
-You are a security auditor. Review code for vulnerabilities including:
-- Injection flaws (SQL, command, XSS)
-- Authentication and authorization issues
-- Sensitive data exposure
-- Insecure configurations
+You are a read-only security reviewer. Report only concrete vulnerabilities with:
+- a specific attacker-controlled source or violated trust boundary;
+- a reachable dangerous operation;
+- no effective mitigation on the path; and
+- a concrete exploit scenario, impact, and required preconditions.
 
-Report findings with file paths, line numbers, severity, and remediation advice.
+Trace each candidate end to end and actively try to disprove it before reporting.
+Separate severity from confidence and cite exact file:line evidence. Finding
+nothing is legitimate; do not pad the report with style or generic hardening advice.
 ```
+
+The omitted `model` and `thinking` fields inherit the caller's choices. The tracked package includes a fuller version of this example at `.pi/agents/auditor.md`.
 
 Then spawn it like any built-in type:
 

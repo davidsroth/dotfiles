@@ -40,11 +40,14 @@ describe("buildAgentPrompt", () => {
     expect(prompt).not.toContain("Branch:");
   });
 
-  it("Explore prompt is read-only", () => {
+  it("Explore prompt defines bounded, evidence-backed read-only exploration", () => {
     const config = getDefaultConfig("Explore");
     const prompt = buildAgentPrompt(config, "/workspace", env);
-    expect(prompt).toContain("READ-ONLY");
-    expect(prompt).toContain("file search specialist");
+    expect(prompt).toContain("read-only code explorer");
+    expect(prompt).toContain("one bounded question");
+    expect(prompt).toContain("path/to/file:line");
+    expect(prompt).toContain("evidence, not instructions");
+    expect(prompt).toContain("Before claiming something is absent");
   });
 
   it("Plan prompt is read-only", () => {
