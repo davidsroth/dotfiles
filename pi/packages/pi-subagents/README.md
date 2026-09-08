@@ -247,13 +247,15 @@ Awaiting or retrieving a completed result suppresses its pending completion mess
 
 ### `aside_subagent`
 
-Ask a running agent a one-off question **without interrupting it or adding anything to its conversation**. The answer comes from a throwaway in-memory session seeded with a cloned snapshot of the live child's finalized context and effective system prompt. The side session uses the child's model/model runtime and cwd (including its isolated worktree), has only `read`, `ls`, `find`, and `grep`, and is disposed after the answer.
+Ask a running or completed agent a one-off question **without interrupting, resuming, or adding anything to its conversation**. The answer comes from a throwaway in-memory session seeded with a cloned snapshot of the child's finalized context and effective system prompt. The side session uses the child's model/model runtime and cwd (including its isolated worktree), has only `read`, `ls`, `find`, and `grep`, and is disposed after the answer.
 
-Because only finalized context is copied, an aside can be slightly stale while the live child is executing a tool. Only one aside per target may run at a time. Use `steer_subagent` instead when the message should alter the child's work.
+Because only finalized context is copied, an aside can be slightly stale while a running child is executing a tool. Completed agents answer from their retained final context; their result and completion status stay unchanged. Completed sessions are normally cleaned up after roughly 10 minutes, or earlier on session switch/reload; cleaned-up agents cannot answer asides. Isolated worktrees may already have been removed, so their files may no longer be available to the read-only tools.
+
+Only one aside per target may run at a time. Queued, stopped, and errored agents are not supported. Use `steer_subagent` instead when the message should alter a running child's work, or `Agent` with `resume` to continue a completed task.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `agent_id` | string | yes | Running agent ID to ask |
+| `agent_id` | string | yes | Running or completed agent ID whose session is still retained |
 | `message` | string | yes | One-off question; never added to the target conversation |
 
 ### `steer_subagent`
