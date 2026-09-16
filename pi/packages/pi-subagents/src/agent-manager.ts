@@ -22,6 +22,13 @@ export type OnAgentTerminal = (record: AgentRecord) => void;
 export type OnAgentUsage = (record: AgentRecord) => void;
 export type CompactionInfo = { reason: "manual" | "threshold" | "overflow"; tokensBefore: number };
 
+type TerminalWaiter = {
+  agentIds: Set<string>;
+  resolve: (record: AgentRecord | undefined) => void;
+  signal?: AbortSignal;
+  abortHandler?: () => void;
+};
+
 /** Default max concurrent background agents. */
 const DEFAULT_MAX_CONCURRENT = 4;
 
@@ -93,6 +100,8 @@ export class AgentManager {
   private queue: { id: string; args: SpawnArgs }[] = [];
   /** Number of currently running background agents. */
   private runningBackground = 0;
+  /** Waiters that resolve when any selected agent reaches a terminal state. */
+  private terminalWaiters = new Set<TerminalWaiter>();
 
   constructor(
     onComplete?: OnAgentComplete,
@@ -126,10 +135,22 @@ export class AgentManager {
     return this.maxConcurrent;
   }
 
+  /** Resolve and remove a waiter, including its abort listener. */
+  private settleTerminalWaiter(waiter: TerminalWaiter, record?: AgentRecord): void {
+    if (!this.terminalWaiters.delete(waiter)) return;
+    if (waiter.signal && waiter.abortHandler) {
+      waiter.signal.removeEventListener("abort", waiter.abortHandler);
+    }
+    waiter.resolve(record);
+  }
+
   /** Publish terminal activity once, including promptly after an explicit stop. */
   private publishTerminal(record: AgentRecord): void {
     if (record.terminalPublished) return;
     record.terminalPublished = true;
+    for (const waiter of [...this.terminalWaiters]) {
+      if (waiter.agentIds.has(record.id)) this.settleTerminalWaiter(waiter, record);
+    }
     try { this.onTerminal?.(record); } catch { /* terminal observers must not interrupt agents */ }
   }
 
@@ -414,6 +435,36 @@ export class AgentManager {
     return this.agents.get(id);
   }
 
+  /**
+   * Wait until any selected agent reaches a terminal state.
+   *
+   * Already-terminal records resolve immediately. Queued agents remain eligible
+   * after they start, and aborting the wait does not stop any selected agent.
+   */
+  waitForAny(agentIds: string[], signal?: AbortSignal): Promise<AgentRecord | undefined> {
+    const records = agentIds
+      .map((id) => this.agents.get(id))
+      .filter((record): record is AgentRecord => record !== undefined);
+    const terminal = records
+      .filter((record) => record.status !== "queued" && record.status !== "running")
+      .sort((a, b) => (a.completedAt ?? Number.MAX_SAFE_INTEGER) - (b.completedAt ?? Number.MAX_SAFE_INTEGER))[0];
+    if (terminal) return Promise.resolve(terminal);
+    if (signal?.aborted || records.length === 0) return Promise.resolve(undefined);
+
+    return new Promise((resolve) => {
+      const waiter: TerminalWaiter = {
+        agentIds: new Set(records.map((record) => record.id)),
+        resolve,
+        signal,
+      };
+      if (signal) {
+        waiter.abortHandler = () => this.settleTerminalWaiter(waiter);
+        signal.addEventListener("abort", waiter.abortHandler, { once: true });
+      }
+      this.terminalWaiters.add(waiter);
+    });
+  }
+
   /** List records, optionally scoped to the root session that created them. */
   listAgents(sessionId?: string): AgentRecord[] {
     return [...this.agents.values()]
@@ -544,6 +595,7 @@ export class AgentManager {
 
   dispose() {
     clearInterval(this.cleanupInterval);
+    for (const waiter of [...this.terminalWaiters]) this.settleTerminalWaiter(waiter);
     // Clear queue
     this.queue = [];
     for (const record of this.agents.values()) {

@@ -235,15 +235,16 @@ Launch a sub-agent.
 
 ### `get_subagent_result`
 
-Check status and retrieve results from a background agent.
+Check status and retrieve results from background agents. Pass `agent_id` to inspect or await one agent. Pass `agent_ids` with `wait: true` to race several selected agents and return whichever completes, fails, or stops first; the other agents keep running and retain their normal completion notifications.
 
-Awaiting or retrieving a completed result suppresses its pending completion message. Notifications stay cancellable while the parent is working and are delivered only after it settles, omitting results already retrieved. Interrupting a wait leaves notification delivery enabled for the unread result.
+Awaiting or retrieving a completed result suppresses its pending completion message. Notifications stay cancellable while the parent is working and are delivered only after it settles, omitting results already retrieved. Interrupting a wait leaves notification delivery enabled for every unread result.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `agent_id` | string | yes | Agent ID to check |
-| `wait` | boolean | no | Wait for completion; a user message interrupts the wait but leaves the subagent running |
-| `verbose` | boolean | no | Include full conversation log |
+| `agent_id` | string | one selector required | One agent ID to check; mutually exclusive with `agent_ids` |
+| `agent_ids` | string[] | one selector required | Agent IDs to race; mutually exclusive with `agent_id` |
+| `wait` | boolean | no | Wait for one selected agent to settle; with `agent_ids`, returns the first; a user message interrupts only the wait |
+| `verbose` | boolean | no | Include the returned agent's full conversation log |
 
 ### `aside_subagent`
 

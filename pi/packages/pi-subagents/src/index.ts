@@ -839,7 +839,13 @@ export default function (pi: ExtensionAPI) {
     const batchAgents = [...currentBatchAgents];
     currentBatchAgents = [];
 
-    const smartAgents = batchAgents.filter(a => a.joinMode === 'smart' || a.joinMode === 'group');
+    // Results explicitly retrieved during the debounce window no longer belong
+    // to the notification group. Counting them would leave the remaining group
+    // waiting for a member that intentionally never enters completedRecords.
+    const smartAgents = batchAgents.filter((agent) => {
+      if (agent.joinMode !== 'smart' && agent.joinMode !== 'group') return false;
+      return !manager.getRecord(agent.id)?.resultConsumed;
+    });
     if (smartAgents.length >= 2) {
       const groupId = `batch-${++batchCounter}`;
       const ids = smartAgents.map(a => a.id);
@@ -1475,59 +1481,106 @@ Guidelines:
     name: "get_subagent_result",
     label: "Get Agent Result",
     description:
-      "Check status and retrieve results from a background agent. Use the agent ID returned by Agent with run_in_background.",
+      "Check status and retrieve background agent results. Pass agent_id for one agent, or agent_ids with wait: true to return whichever selected agent settles first.",
     parameters: Type.Object({
-      agent_id: Type.String({
-        description: "The agent ID to check.",
-      }),
+      agent_id: Type.Optional(Type.String({
+        description: "One agent ID to check. Mutually exclusive with agent_ids.",
+      })),
+      agent_ids: Type.Optional(Type.Array(Type.String(), {
+        description: "Agent IDs to race. With wait: true, returns the first one to complete, fail, or stop. Mutually exclusive with agent_id.",
+        minItems: 1,
+        uniqueItems: true,
+      })),
       wait: Type.Optional(
         Type.Boolean({
-          description: "If true, wait for the agent to complete before returning. Default: false.",
+          description: "Wait for one selected agent to settle before returning. With agent_ids, waits for the first. Default: false.",
         }),
       ),
       verbose: Type.Optional(
         Type.Boolean({
-          description: "If true, include the agent's full conversation (messages + tool calls). Default: false.",
+          description: "If true, include the returned agent's full conversation (messages + tool calls). Default: false.",
         }),
       ),
     }),
     execute: async (_toolCallId, params, signal, _onUpdate, _ctx) => {
-      const record = manager.getRecord(params.agent_id);
-      if (!record) {
-        return textResult(`Agent not found: "${params.agent_id}". It may have been cleaned up.`);
+      const hasSingleId = typeof params.agent_id === "string" && params.agent_id.length > 0;
+      const hasManyIds = Array.isArray(params.agent_ids);
+      if (hasSingleId === hasManyIds) {
+        return textResult("Pass exactly one of agent_id or agent_ids.");
       }
 
-      // Wait for completion if requested.
-      // Pre-mark resultConsumed BEFORE awaiting: onComplete fires inside .then()
-      // (attached earlier at spawn time) and always runs before this await resumes.
-      // Setting the flag here prevents a redundant follow-up notification.
+      const agentIds = [...new Set(hasManyIds ? params.agent_ids : [params.agent_id!])];
+      if (agentIds.length === 0) return textResult("agent_ids must contain at least one agent ID.");
+
+      const records = agentIds.map((id) => manager.getRecord(id));
+      const missingIds = agentIds.filter((_id, index) => !records[index]);
+      if (missingIds.length > 0) {
+        return textResult(
+          `Agent${missingIds.length === 1 ? "" : "s"} not found: ${missingIds.map((id) => `"${id}"`).join(", ")}. ` +
+          "They may have been cleaned up.",
+        );
+      }
+
+      let record: AgentRecord | undefined;
       let waitInterrupted = false;
       let waitInterruptedByUser = false;
       let waitInterruptedByIntercom = false;
-      if (params.wait && record.status === "running" && record.promise) {
-        record.resultConsumed = true;
-        cancelNudge(params.agent_id);
+
+      if (params.wait) {
+        const singleRecord = hasSingleId ? records[0]! : undefined;
+        const singleWasActive = singleRecord?.status === "running" || singleRecord?.status === "queued";
+        if (singleWasActive) {
+          // A singular wait owns this result. Pre-mark it so the completion
+          // callback cannot enqueue a redundant notification before await resumes.
+          singleRecord.resultConsumed = true;
+          cancelNudge(singleRecord.id);
+        }
 
         const waitController = new AbortController();
-        const forwardToolAbort = () => waitController.abort();
+        const handleWaitAbort = () => {
+          // Restore synchronously with the abort, before a concurrently queued
+          // child completion can observe the singular pre-mark.
+          if (singleWasActive) singleRecord.resultConsumed = false;
+          waitInterrupted = true;
+          waitInterruptedByUser = waitController.signal.reason === USER_MESSAGE_INTERRUPT;
+          waitInterruptedByIntercom = waitController.signal.reason === INTERCOM_MESSAGE_INTERRUPT;
+        };
+        waitController.signal.addEventListener("abort", handleWaitAbort, { once: true });
+        const forwardToolAbort = () => waitController.abort(signal?.reason);
         if (signal?.aborted) forwardToolAbort();
         else signal?.addEventListener("abort", forwardToolAbort, { once: true });
         resultWaitControllers.add(waitController);
 
         try {
-          const completed = await waitForCompletionOrAbort(record.promise, waitController.signal, () => {
-            // The background agent still owns its result. Restore completion
-            // delivery immediately so an interrupted wait does not swallow its nudge.
-            record.resultConsumed = false;
-            waitInterrupted = true;
-            waitInterruptedByUser = waitController.signal.reason === USER_MESSAGE_INTERRUPT;
-            waitInterruptedByIntercom = waitController.signal.reason === INTERCOM_MESSAGE_INTERRUPT;
-          });
-          if (!completed) waitInterrupted = true;
+          record = await manager.waitForAny(agentIds, waitController.signal);
         } finally {
           resultWaitControllers.delete(waitController);
+          waitController.signal.removeEventListener("abort", handleWaitAbort);
           signal?.removeEventListener("abort", forwardToolAbort);
         }
+      } else if (hasSingleId) {
+        record = records[0];
+      } else {
+        record = records
+          .filter((candidate): candidate is AgentRecord =>
+            candidate !== undefined && candidate.status !== "running" && candidate.status !== "queued",
+          )
+          .sort((a, b) => (a.completedAt ?? Number.MAX_SAFE_INTEGER) - (b.completedAt ?? Number.MAX_SAFE_INTEGER))[0];
+      }
+
+      if (!record) {
+        const statusLines = records
+          .filter((candidate): candidate is AgentRecord => candidate !== undefined)
+          .map((candidate) => `- ${candidate.id}: ${candidate.status} — ${candidate.description}`)
+          .join("\n");
+        const message = waitInterrupted
+          ? waitInterruptedByIntercom
+            ? "Waiting was interrupted by an incoming intercom message. Selected agents are still active."
+            : waitInterruptedByUser
+              ? "Waiting was interrupted by a user message. Selected agents are still active."
+              : "Waiting was interrupted. Selected agents are still active."
+          : "No selected agent has settled yet. Use wait: true to await the first result.";
+        return textResult(`${message}\n\n${statusLines}`);
       }
 
       const displayName = getDisplayName(record.type);
@@ -1545,24 +1598,26 @@ Guidelines:
         `Type: ${displayName} | Status: ${record.status} | ${statsParts.join(" | ")}\n` +
         `Description: ${record.description}\n\n`;
 
-      if (record.status === "running") {
+      if (record.status === "running" || record.status === "queued") {
+        const state = record.status === "queued" ? "queued" : "still running";
         output += waitInterrupted
           ? waitInterruptedByIntercom
-            ? "Waiting was interrupted by an incoming intercom message. Agent is still running; use wait: true or check back later."
+            ? `Waiting was interrupted by an incoming intercom message. Agent is ${state}; use wait: true or check back later.`
             : waitInterruptedByUser
-              ? "Waiting was interrupted by a user message. Agent is still running; use wait: true or check back later."
-              : "Waiting was interrupted. Agent is still running; use wait: true or check back later."
-          : "Agent is still running. Use wait: true or check back later.";
+              ? `Waiting was interrupted by a user message. Agent is ${state}; use wait: true or check back later.`
+              : `Waiting was interrupted. Agent is ${state}; use wait: true or check back later.`
+          : `Agent is ${state}. Use wait: true or check back later.`;
       } else if (record.status === "error") {
         output += `Error: ${record.error}`;
       } else {
         output += record.result?.trim() || "No output.";
       }
 
-      // Mark result as consumed — suppresses the completion notification
+      // Only the winning terminal result is consumed. Other raced agents retain
+      // their normal completion notifications and can be awaited again.
       if (record.status !== "running" && record.status !== "queued") {
         record.resultConsumed = true;
-        cancelNudge(params.agent_id);
+        cancelNudge(record.id);
       }
 
       // Verbose: include full conversation

@@ -167,13 +167,89 @@ describe("completion notifications", () => {
     expect(h.pi.sendMessage).not.toHaveBeenCalled();
   });
 
+  it("returns the first selected agent to settle without consuming the others", async () => {
+    await h.emit("agent_start");
+    const first = await h.spawn("first");
+    const second = await h.spawn("second");
+    await vi.advanceTimersByTimeAsync(100);
+
+    const waiting = h.call("get_subagent_result", {
+      agent_ids: [first.id, second.id],
+      wait: true,
+    });
+    second.finish();
+
+    const result = await waiting;
+    expect(result.content[0].text).toContain(`Agent: ${second.id}`);
+    expect(result.content[0].text).toContain("second result");
+
+    first.finish();
+    await vi.advanceTimersByTimeAsync(500);
+    await h.emit("agent_settled");
+
+    expect(h.pi.sendMessage).toHaveBeenCalledOnce();
+    const message = h.pi.sendMessage.mock.calls[0][0];
+    expect(message.details.id).toBe(first.id);
+    expect(message.content).not.toContain(second.id);
+  });
+
+  it("does not let a consumed race winner hold loser notification delivery until group timeout", async () => {
+    await h.emit("agent_start");
+    const first = await h.spawn("first");
+    const second = await h.spawn("second");
+
+    const waiting = h.call("get_subagent_result", {
+      agent_ids: [first.id, second.id],
+      wait: true,
+    });
+    second.finish();
+    expect((await waiting).content[0].text).toContain(`Agent: ${second.id}`);
+    first.finish();
+
+    // Batch debounce + individual nudge grace, far shorter than group timeout.
+    await vi.advanceTimersByTimeAsync(300);
+    await h.emit("agent_settled");
+
+    expect(h.pi.sendMessage).toHaveBeenCalledOnce();
+    const message = h.pi.sendMessage.mock.calls[0][0];
+    expect(message.details.id).toBe(first.id);
+    expect(message.content).not.toContain(second.id);
+  });
+
+  it("keeps every selected notification live when a raced wait is interrupted", async () => {
+    await h.emit("agent_start");
+    const first = await h.spawn("first");
+    const second = await h.spawn("second");
+    await vi.advanceTimersByTimeAsync(100);
+
+    const waiting = h.call("get_subagent_result", {
+      agent_ids: [first.id, second.id],
+      wait: true,
+    });
+    await h.emit("input", { source: "interactive", streamingBehavior: "steer", text: "stop waiting" });
+
+    const result = await waiting;
+    expect(result.content[0].text).toContain("Waiting was interrupted by a user message");
+    first.finish();
+    second.finish();
+    await vi.advanceTimersByTimeAsync(500);
+    await h.emit("agent_settled");
+
+    expect(h.pi.sendMessage).toHaveBeenCalledOnce();
+    const message = h.pi.sendMessage.mock.calls[0][0];
+    expect(message.content).toContain(first.id);
+    expect(message.content).toContain(second.id);
+  });
+
   it("preserves notification delivery after an interrupted wait", async () => {
     await h.emit("agent_start");
     const agent = await h.spawn();
     const waiting = h.call("get_subagent_result", { agent_id: agent.id, wait: true });
+    // Queue child completion before interrupting the wait. The abort path must
+    // restore result ownership synchronously, before that completion runs.
+    agent.finish();
     await h.emit("input", { source: "interactive", streamingBehavior: "steer", text: "stop waiting" });
     expect((await waiting).content[0].text).toContain("Waiting was interrupted");
-    agent.finish();
     await vi.advanceTimersByTimeAsync(500);
     expect(h.pi.sendMessage).not.toHaveBeenCalled();
     await h.emit("agent_settled");

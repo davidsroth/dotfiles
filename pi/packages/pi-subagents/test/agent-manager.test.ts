@@ -217,6 +217,91 @@ describe("AgentManager — parent session ownership", () => {
   });
 });
 
+describe("AgentManager — waitForAny", () => {
+  let manager: AgentManager;
+
+  afterEach(() => {
+    manager?.dispose();
+  });
+
+  it("resolves with whichever selected running agent settles first", async () => {
+    let finishFirst!: () => void;
+    let finishSecond!: () => void;
+    vi.mocked(runAgent)
+      .mockImplementationOnce(() => new Promise((resolve) => {
+        finishFirst = () => resolve({ responseText: "first", session: mockSession() } as any);
+      }))
+      .mockImplementationOnce(() => new Promise((resolve) => {
+        finishSecond = () => resolve({ responseText: "second", session: mockSession() } as any);
+      }));
+    manager = new AgentManager(undefined, 2);
+
+    const first = manager.spawn(mockPi, mockCtx, "general-purpose", "first", {
+      description: "first",
+      isBackground: true,
+    });
+    const second = manager.spawn(mockPi, mockCtx, "general-purpose", "second", {
+      description: "second",
+      isBackground: true,
+    });
+
+    const waiting = manager.waitForAny([first, second]);
+    finishSecond();
+    await expect(waiting).resolves.toMatchObject({ id: second, status: "completed", result: "second" });
+
+    finishFirst();
+    await manager.getRecord(first)!.promise;
+  });
+
+  it("keeps queued agents eligible after they start", async () => {
+    let finishRunning!: () => void;
+    let finishQueued!: () => void;
+    vi.mocked(runAgent)
+      .mockImplementationOnce(() => new Promise((resolve) => {
+        finishRunning = () => resolve({ responseText: "running", session: mockSession() } as any);
+      }))
+      .mockImplementationOnce(() => new Promise((resolve) => {
+        finishQueued = () => resolve({ responseText: "queued", session: mockSession() } as any);
+      }));
+    manager = new AgentManager(undefined, 1);
+
+    const running = manager.spawn(mockPi, mockCtx, "general-purpose", "running", {
+      description: "running",
+      isBackground: true,
+    });
+    const queued = manager.spawn(mockPi, mockCtx, "general-purpose", "queued", {
+      description: "queued",
+      isBackground: true,
+    });
+    expect(manager.getRecord(queued)?.status).toBe("queued");
+
+    const waiting = manager.waitForAny([queued]);
+    finishRunning();
+    await manager.getRecord(running)!.promise;
+    expect(manager.getRecord(queued)?.status).toBe("running");
+
+    finishQueued();
+    await expect(waiting).resolves.toMatchObject({ id: queued, status: "completed", result: "queued" });
+  });
+
+  it("cancels only the wait when its signal aborts", async () => {
+    vi.mocked(runAgent).mockImplementation(() => new Promise(() => {}));
+    manager = new AgentManager();
+    const id = manager.spawn(mockPi, mockCtx, "general-purpose", "keep going", {
+      description: "keep going",
+      isBackground: true,
+    });
+    const controller = new AbortController();
+
+    const waiting = manager.waitForAny([id], controller.signal);
+    controller.abort();
+
+    await expect(waiting).resolves.toBeUndefined();
+    expect(manager.getRecord(id)?.status).toBe("running");
+    manager.abort(id);
+  });
+});
+
 describe("AgentManager — cleanup timer", () => {
   let manager: AgentManager;
 
