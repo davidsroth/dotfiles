@@ -22,6 +22,7 @@ import { createServer } from "node:http";
 import { focusApp, getFrontmostAppName, openBrowser } from "./os";
 
 const DEFAULT_TIMEOUT_MS = 30 * 60 * 1000;
+const DEFAULT_EXPIRED_GRACE_MS = 5 * 60 * 1000;
 const MAX_BODY_BYTES = 1_000_000;
 
 export interface StaticAsset {
@@ -42,6 +43,11 @@ export interface ReviewServerSpec<T> {
 	onTimeout: () => T;
 	/** Override the default 30-minute timeout. */
 	timeoutMs?: number;
+	/**
+	 * How long an expired endpoint stays up to reject a late browser decision
+	 * with HTTP 410. Override with a short value in tests.
+	 */
+	expiredGraceMs?: number;
 	/** Called once with the bound URL (best-effort; e.g. to notify the TUI). */
 	onUrl?: (url: string) => void;
 	/** Exact URL paths mapped to reviewed files on the local filesystem. */
@@ -59,8 +65,10 @@ const PAGE_HEADERS = {
 
 export function createReviewServer<T>(spec: ReviewServerSpec<T>): Promise<T> {
 	return new Promise<T>((resolve, reject) => {
-		let done = false;
+		type State = "open" | "decided" | "expired";
+		let state: State = "open";
 		let timeout: ReturnType<typeof setTimeout> | undefined;
+		let expiredClose: ReturnType<typeof setTimeout> | undefined;
 		let returnFocusApp: string | null = null;
 		let port = 0;
 		const nonce = randomBytes(16).toString("hex");
@@ -105,11 +113,6 @@ export function createReviewServer<T>(spec: ReviewServerSpec<T>): Promise<T> {
 					if (body.length > MAX_BODY_BYTES) req.destroy();
 				});
 				req.on("end", () => {
-					if (done) {
-						res.writeHead(200, JSON_HEADERS);
-						res.end(JSON.stringify({ ok: true, duplicate: true }));
-						return;
-					}
 					let data: unknown;
 					try {
 						data = JSON.parse(body);
@@ -123,14 +126,25 @@ export function createReviewServer<T>(spec: ReviewServerSpec<T>): Promise<T> {
 						res.end(JSON.stringify({ error: "bad nonce" }));
 						return;
 					}
+					if (state === "expired") {
+						res.writeHead(410, JSON_HEADERS);
+						res.end(JSON.stringify({ ok: false, expired: true, error: "review expired" }));
+						return;
+					}
+					if (state === "decided") {
+						res.writeHead(200, JSON_HEADERS);
+						res.end(JSON.stringify({ ok: true, duplicate: true }));
+						return;
+					}
 					const parsed = spec.parseDecision(data as Record<string, unknown>);
 					if (parsed === null) {
 						res.writeHead(400, JSON_HEADERS);
 						res.end(JSON.stringify({ error: "bad payload" }));
 						return;
 					}
-					done = true;
+					state = "decided";
 					if (timeout) clearTimeout(timeout);
+					if (expiredClose) clearTimeout(expiredClose);
 					res.writeHead(200, JSON_HEADERS);
 					res.end(JSON.stringify({ ok: true }), () => {
 						focusApp(returnFocusApp);
@@ -150,9 +164,10 @@ export function createReviewServer<T>(spec: ReviewServerSpec<T>): Promise<T> {
 		});
 
 		server.once("error", (err) => {
-			if (!done) {
-				done = true;
+			if (state === "open") {
+				state = "decided";
 				if (timeout) clearTimeout(timeout);
+				if (expiredClose) clearTimeout(expiredClose);
 				reject(err);
 			}
 		});
@@ -168,9 +183,10 @@ export function createReviewServer<T>(spec: ReviewServerSpec<T>): Promise<T> {
 					try { spec.onUrl?.(url); } catch { /* notify is best-effort */ }
 					await openBrowser(url);
 				} catch (err) {
-					if (!done) {
-						done = true;
+					if (state === "open") {
+						state = "decided";
 						if (timeout) clearTimeout(timeout);
+						if (expiredClose) clearTimeout(expiredClose);
 						server.closeAllConnections?.();
 						server.close(() => reject(err instanceof Error ? err : new Error(String(err))));
 					}
@@ -179,11 +195,26 @@ export function createReviewServer<T>(spec: ReviewServerSpec<T>): Promise<T> {
 		});
 
 		timeout = setTimeout(() => {
-			if (!done) {
-				done = true;
+			if (state !== "open") return;
+			let timeoutResult: T;
+			try {
+				timeoutResult = spec.onTimeout();
+			} catch (err) {
+				state = "decided";
 				server.closeAllConnections?.();
-				server.close(() => resolve(spec.onTimeout()));
+				server.close(() => reject(err));
+				return;
 			}
+			state = "expired";
+			resolve(timeoutResult);
+			// Keep the expired endpoint briefly so an already-open tab gets an
+			// explicit 410 instead of a network error. It cannot submit a decision.
+			server.unref();
+			expiredClose = setTimeout(() => {
+				server.closeAllConnections?.();
+				server.close();
+			}, spec.expiredGraceMs ?? DEFAULT_EXPIRED_GRACE_MS);
+			expiredClose.unref?.();
 		}, spec.timeoutMs ?? DEFAULT_TIMEOUT_MS);
 	});
 }

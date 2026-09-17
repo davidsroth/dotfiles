@@ -15,6 +15,13 @@ import { extname, resolve } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { escapeHtml, scriptJson } from "../_review/html";
 import { waitWithHerdrBlocked } from "../_review/herdr";
+import {
+	createPendingReview,
+	parsePendingReview,
+	retryPendingReview,
+	reviewFingerprint,
+	type PendingReview,
+} from "../_review/pending";
 import { createReviewServer } from "../_review/server";
 import { buildPalette, loadTheme, type Palette, rootVarsBlock } from "../_review/theme";
 import { toolText } from "../_review/tool";
@@ -29,13 +36,18 @@ export interface PlanComment {
 	text: string;
 }
 
-export type ReviewAction = "approve" | "send-feedback" | "reply" | "cancel";
+export type ReviewAction = "approve" | "send-feedback" | "reply" | "cancel" | "timeout";
 
 export interface ReviewResult {
 	action?: ReviewAction;
 	approved: boolean;
 	feedback?: string;
 	comments?: PlanComment[];
+}
+
+interface PendingPlanReview extends PendingReview {
+	filePath: string;
+	fullPath: string;
 }
 
 interface ReviewButton {
@@ -54,7 +66,6 @@ interface ReviewPageOptions {
 	buttons: ReviewButton[];
 	defaultAction: ReviewAction;
 	textareaShortcutAction: ReviewAction;
-	timeoutFeedback: string;
 }
 
 // ── Utilities ──────────────────────────────────────────────────────────
@@ -333,7 +344,6 @@ const PLAN_REVIEW_OPTIONS: ReviewPageOptions = {
 	],
 	defaultAction: "approve",
 	textareaShortcutAction: "send-feedback",
-	timeoutFeedback: "Review timed out. Please resubmit.",
 };
 
 const LAST_REPLY_OPTIONS: ReviewPageOptions = {
@@ -346,7 +356,6 @@ const LAST_REPLY_OPTIONS: ReviewPageOptions = {
 	],
 	defaultAction: "reply",
 	textareaShortcutAction: "reply",
-	timeoutFeedback: "",
 };
 
 const COMPACTION_REPLY_OPTIONS: ReviewPageOptions = {
@@ -358,7 +367,7 @@ const COMPACTION_REPLY_OPTIONS: ReviewPageOptions = {
 
 // ── Decision parsing ─────────────────────────────────────────────────────
 
-const VALID_ACTIONS = new Set<ReviewAction>(["approve", "send-feedback", "reply", "cancel"]);
+const VALID_POSTED_ACTIONS = new Set<ReviewAction>(["approve", "send-feedback", "reply", "cancel"]);
 
 function parseComments(raw: unknown): PlanComment[] {
 	if (!Array.isArray(raw)) return [];
@@ -383,12 +392,12 @@ function parseComments(raw: unknown): PlanComment[] {
 export function parseReviewDecision(data: Record<string, unknown>): ReviewResult {
 	const rawAction = data.action;
 	const action: ReviewAction | undefined =
-		typeof rawAction === "string" && VALID_ACTIONS.has(rawAction as ReviewAction)
+		typeof rawAction === "string" && VALID_POSTED_ACTIONS.has(rawAction as ReviewAction)
 			? (rawAction as ReviewAction)
 			: undefined;
 	return {
 		action,
-		approved: data.approved === true,
+		approved: action === "approve" && data.approved === true,
 		feedback: typeof data.feedback === "string" ? data.feedback : undefined,
 		comments: parseComments(data.comments),
 	};
@@ -770,6 +779,12 @@ async function send(action,fallbackAction,approved,doneText){
       notice.textContent=doneText;
       $('foot').replaceChildren(notice);
       setTimeout(()=>{try{window.close();}catch(e){}},800);
+    }else if(r.status===410){
+      const notice=document.createElement('div');
+      notice.className='notice';
+      notice.style.color='var(--danger)';
+      notice.textContent='This review expired. Return to pi to restart or resume it; no decision was recorded.';
+      $('foot').replaceChildren(notice);
     }else{throw new Error('status '+r.status);}
   }catch(e){
     console.error('[Review] fetch error',e);
@@ -898,9 +913,17 @@ export function formatLastReply(result: ReviewResult): string {
 
 export default function plan(pi: ExtensionAPI): void {
 	let currentPlanPath: string | null = null;
+	let pendingReview: PendingPlanReview | null = null;
+	let activeReviewId: string | null = null;
 
 	function persist(): void {
-		pi.appendEntry("plan", { currentPlanPath });
+		pi.appendEntry("plan", { currentPlanPath, pendingReview });
+	}
+
+	function clearPending(reviewId: string): void {
+		if (pendingReview?.reviewId !== reviewId) return;
+		pendingReview = null;
+		persist();
 	}
 
 	pi.registerCommand("plan-status", {
@@ -965,12 +988,16 @@ export default function plan(pi: ExtensionAPI): void {
 			renderPage: (nonce) => buildPage(found.text, pageOptions, palette, nonce),
 			staticAssets: REVIEW_STATIC_ASSETS,
 			parseDecision: parseReviewDecision,
-			onTimeout: () => ({ action: pageOptions.defaultAction, approved: false, feedback: pageOptions.timeoutFeedback }),
+			onTimeout: () => ({ action: "timeout", approved: false }),
 			onUrl: (url) => {
 				try { ctx.ui.notify(`Markup: opening ${targetLabel} in browser: ${url}`, "info"); } catch {}
 			},
 		})
 			.then((result) => {
+				if (result.action === "timeout") {
+					ctx.ui.notify("Markup review timed out with no reply captured.", "info");
+					return;
+				}
 				if (result.action === "cancel") {
 					ctx.ui.notify("Markup review dismissed.", "info");
 					return;
@@ -1021,17 +1048,21 @@ export default function plan(pi: ExtensionAPI): void {
 			"Submit a plan or design for the user to review and sign off on before you implement a " +
 			"non-trivial change. Write the plan to a .md or .mdx file first, then call this tool with " +
 			"that file's path. The user can highlight text to add inline comments and either approve " +
-			"or send feedback; if feedback is sent, revise the same file and call this tool again.",
+			"or send feedback. A timeout is NOT feedback or approval: call submit_plan again with the " +
+			"same unchanged file (and optionally the returned reviewId) to resume the pending review.",
 		parameters: {
 			type: "object",
 			properties: {
 				filePath: { type: "string", description: "Path to the markdown plan file (.md or .mdx). The file must already exist — write the plan to it before calling. Relative paths are resolved against cwd; absolute paths are allowed." },
+				reviewId: { type: "string", description: "Optional pending review ID returned by a timeout. The file must still have exactly the same contents. Calling again with the same unchanged file resumes automatically." },
 			},
 			required: ["filePath"],
 		},
 
 		async execute(_id, params, _signal, _onUpdate, ctx: ExtensionContext) {
-			const inputPath = (params as { filePath?: string })?.filePath?.trim();
+			const input = params as { filePath?: string; reviewId?: string };
+			const inputPath = input?.filePath?.trim();
+			const requestedReviewId = input?.reviewId?.trim();
 			if (!inputPath) return toolText("Error: submit_plan requires filePath.");
 			const fullPath = resolveMarkdownPath(inputPath, ctx.cwd);
 			if (!fullPath) {
@@ -1052,14 +1083,40 @@ export default function plan(pi: ExtensionAPI): void {
 			if (!content.trim()) return toolText(`Error: ${inputPath} is empty.`);
 
 			currentPlanPath = inputPath;
-			persist();
-
+			const fingerprint = reviewFingerprint("plan", `${fullPath}\0${content}`);
+			if (requestedReviewId) {
+				if (!pendingReview || pendingReview.reviewId !== requestedReviewId) {
+					return toolText(`Error: pending plan review ${requestedReviewId} was not found. No review was opened and the plan is NOT approved. Retry without reviewId to start a new review.`);
+				}
+				if (pendingReview.fingerprint !== fingerprint) {
+					return toolText(`Error: plan review ${requestedReviewId} cannot resume because ${inputPath} changed. No review was opened and the plan is NOT approved. Omit reviewId to start a new review of the changed plan.`);
+				}
+			}
+			if (activeReviewId) {
+				const same = pendingReview?.fingerprint === fingerprint && activeReviewId === pendingReview.reviewId;
+				return toolText(
+					same
+						? `PENDING — plan review ${activeReviewId} is already open. No duplicate review was created and the plan is NOT approved. Wait for the existing review decision.`
+						: `PENDING — another plan review (${activeReviewId}) is already open. No new review was created and this plan is NOT approved. Finish or dismiss the existing review first.`,
+				);
+			}
 			if (!ctx.hasUI) {
+				if (pendingReview) clearPending(pendingReview.reviewId);
+				else persist();
 				return toolText(`Plan auto-approved (non-interactive): ${inputPath}`);
 			}
 
+			if (pendingReview?.fingerprint === fingerprint) {
+				pendingReview = { ...retryPendingReview(pendingReview), filePath: inputPath, fullPath };
+			} else {
+				pendingReview = { ...createPendingReview("plan", fingerprint), filePath: inputPath, fullPath };
+			}
+			const review = pendingReview;
+			persist();
+
 			const { colors, isLight } = loadTheme(ctx);
 			const palette = buildPalette(colors, isLight);
+			activeReviewId = review.reviewId;
 
 			let result: ReviewResult;
 			try {
@@ -1068,22 +1125,28 @@ export default function plan(pi: ExtensionAPI): void {
 						renderPage: (nonce) => buildPage(content, { ...PLAN_REVIEW_OPTIONS, sourceLabel: inputPath }, palette, nonce),
 						staticAssets: REVIEW_STATIC_ASSETS,
 						parseDecision: parseReviewDecision,
-						// Timeout = no decision → route to the feedback path (NOT approve).
-						onTimeout: () => ({ action: "send-feedback", approved: false, feedback: PLAN_REVIEW_OPTIONS.timeoutFeedback }),
+						// Timeout is its own outcome. It is never synthesized as feedback.
+						onTimeout: () => ({ action: "timeout", approved: false }),
 						onUrl: (url) => {
-							try { ctx.ui.notify(`Plan: opening review in browser: ${url}`, "info"); } catch {}
+							try { ctx.ui.notify(`Plan: opening review ${review.reviewId} in browser: ${url}`, "info"); } catch {}
 						},
 					}),
 				);
 			} catch (err) {
-				// Fail safe: if review can't happen, do NOT approve. The agent
-				// should treat this as "review unavailable" and not proceed.
+				// Keep the durable pending record: retrying the same input resumes it.
 				const msg = err instanceof Error ? err.message : String(err);
-				return toolText(`Plan review unavailable (${msg}) — NOT approved. The browser review could not open; do not proceed. Try submit_plan again, or ask the user to review ${inputPath} directly.`);
+				return toolText(`Plan review unavailable (${msg}) — NOT approved. Pending review: ${review.reviewId}. Do not proceed. Call submit_plan again with the same unchanged file to resume it.`);
+			} finally {
+				if (activeReviewId === review.reviewId) activeReviewId = null;
 			}
 
+			if (result.action === "timeout") {
+				return toolText(`TIMED OUT — plan review ${review.reviewId} is still pending and is NOT approved. No user decision or feedback was recorded. Do not proceed. Call submit_plan again with the same unchanged file (optionally reviewId: "${review.reviewId}") to resume this review; a changed file starts a new review.`);
+			}
+
+			clearPending(review.reviewId);
 			if (result.action === "cancel") {
-				return toolText(`Plan review dismissed (window closed) for ${inputPath} — NOT approved. Do not proceed; resubmit when ready for review.`);
+				return toolText(`Plan review dismissed (window closed) for ${inputPath} — NOT approved. Do not proceed; submit again when ready for a new review.`);
 			}
 
 			const feedback = formatPlanFeedback(result);
@@ -1103,6 +1166,11 @@ export default function plan(pi: ExtensionAPI): void {
 		if (last?.data && typeof last.data === "object") {
 			const data = last.data as Record<string, unknown>;
 			if (typeof data.currentPlanPath === "string") currentPlanPath = data.currentPlanPath;
+			const base = parsePendingReview(data.pendingReview);
+			const raw = data.pendingReview as Record<string, unknown> | null | undefined;
+			if (base && raw && typeof raw.filePath === "string" && typeof raw.fullPath === "string") {
+				pendingReview = { ...base, filePath: raw.filePath, fullPath: raw.fullPath };
+			}
 		}
 	});
 }

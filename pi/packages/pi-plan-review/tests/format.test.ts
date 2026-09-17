@@ -91,8 +91,19 @@ describe("parseReviewDecision", () => {
 		expect(r.comments).toEqual([]);
 	});
 
-	it("accepts the cancel action", () => {
+	it("accepts the cancel action and does not accept a posted timeout", () => {
 		expect(parseReviewDecision({ action: "cancel" }).action).toBe("cancel");
+		expect(parseReviewDecision({ action: "timeout", approved: true })).toMatchObject({
+			action: undefined,
+			approved: false,
+		});
+	});
+
+	it("requires an approve action as well as the approval boolean", () => {
+		expect(parseReviewDecision({ action: "send-feedback", approved: true })).toMatchObject({
+			action: "send-feedback",
+			approved: false,
+		});
 	});
 });
 

@@ -32,6 +32,13 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { waitWithHerdrBlocked } from "../_review/herdr";
 import { escapeHtml, scriptJson } from "../_review/html";
 import { pbcopy } from "../_review/os";
+import {
+	createPendingReview,
+	parsePendingReview,
+	retryPendingReview,
+	reviewFingerprint,
+	type PendingReview,
+} from "../_review/pending";
 import { createReviewServer } from "../_review/server";
 import { buildPalette, loadTheme, type Palette, rootVarsBlock } from "../_review/theme";
 import { toolText } from "../_review/tool";
@@ -39,12 +46,16 @@ import { wordDiff } from "./diff";
 
 // ── Types ──────────────────────────────────────────────────────────────
 
-type DraftAction = "copy" | "approve" | "reject" | "cancel";
+type DraftAction = "copy" | "approve" | "reject" | "cancel" | "timeout";
 
 interface DraftResult {
 	action: DraftAction;
 	text?: string;       // final draft contents on copy/approve/reject (incl. user edits)
 	feedback?: string;   // required for reject
+}
+
+interface PendingDraftReview extends PendingReview {
+	text: string;
 }
 
 // ── CSS ────────────────────────────────────────────────────────────────
@@ -239,6 +250,13 @@ async function send(action, doneText) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     });
+    if (r.status === 410) {
+      const status = $('status');
+      status.style.color = 'var(--danger)';
+      status.textContent = 'This review expired. Return to pi and call submit_draft again with the same text to resume it.';
+      status.style.display = 'block';
+      return;
+    }
     if (!r.ok) throw new Error('status ' + r.status);
     if (doneText) {
       const status = $('status');
@@ -336,20 +354,29 @@ export function formatDraftRejection(originalText: string, finalText: string, fe
 // ── Extension ──────────────────────────────────────────────────────────
 
 export default function draft(pi: ExtensionAPI): void {
+	let pendingReview: PendingDraftReview | null = null;
+	let activeReviewId: string | null = null;
+
+	function persist(): void {
+		pi.appendEntry("draft-review", { pendingReview });
+	}
+
+	function clearPending(reviewId: string): void {
+		if (pendingReview?.reviewId !== reviewId) return;
+		pendingReview = null;
+		persist();
+	}
+
 	pi.registerTool({
 		name: "submit_draft",
 		label: "Submit Draft",
 		description:
 			"Whenever you're about to send or post a message on the user's behalf (Slack reply, PR " +
 			"comment, email, DM, etc.), route it through this tool instead of posting directly. " +
-			"The user reviews and may edit the text, then chooses one of three outcomes: " +
-			"COPY — the text goes to the user's clipboard and they post it themselves, so do NOT " +
-			"call any posting tool afterward. " +
-			"APPROVE — the final text is returned to you and the user is authorising you to post it, " +
-			"so call the appropriate channel-specific posting tool (Slack, GitHub, email, etc.) with " +
-			"that text. REJECT — do not post; revise according to the user's required feedback and " +
-			"call submit_draft again. If the user edited the draft, a word-level diff of original→final is included " +
-			"in the result. This tool itself never posts anywhere.",
+			"The user reviews and may edit the text, then chooses COPY, APPROVE, or REJECT. " +
+			"A timeout is none of those outcomes and never authorises posting: call submit_draft again " +
+			"with the same text (and optionally the returned reviewId) to resume the pending review. " +
+			"This tool itself never posts anywhere.",
 		parameters: {
 			type: "object",
 			properties: {
@@ -357,22 +384,55 @@ export default function draft(pi: ExtensionAPI): void {
 					type: "string",
 					description: "The proposed message body to be reviewed and approved by the user.",
 				},
+				reviewId: {
+					type: "string",
+					description: "Optional pending review ID returned by a timeout. The text must be unchanged. Calling again with the same text resumes automatically.",
+				},
 			},
 			required: ["text"],
 		},
 
 		async execute(_id, params, _signal, _onUpdate, ctx: ExtensionContext) {
-			const text = (params as { text?: string })?.text;
+			const input = params as { text?: string; reviewId?: string };
+			const text = input?.text;
+			const requestedReviewId = input?.reviewId?.trim();
 			if (typeof text !== "string" || !text.trim()) {
 				return toolText("Error: submit_draft requires a non-empty `text` parameter.");
 			}
 
+			const fingerprint = reviewFingerprint("draft", text);
+			if (requestedReviewId) {
+				if (!pendingReview || pendingReview.reviewId !== requestedReviewId) {
+					return toolText(`Error: pending draft review ${requestedReviewId} was not found. Nothing was approved or copied. Retry without reviewId to start a new review.`);
+				}
+				if (pendingReview.fingerprint !== fingerprint) {
+					return toolText(`Error: draft review ${requestedReviewId} cannot resume because the text changed. Nothing was approved or copied. Omit reviewId to start a new review of the changed draft.`);
+				}
+			}
+			if (activeReviewId) {
+				const same = pendingReview?.fingerprint === fingerprint && activeReviewId === pendingReview.reviewId;
+				return toolText(
+					same
+						? `PENDING — draft review ${activeReviewId} is already open. No duplicate review was created. Nothing was approved, copied, or rejected; wait for the existing decision.`
+						: `PENDING — another draft review (${activeReviewId}) is already open. No new review was created. Finish or dismiss the existing review first.`,
+				);
+			}
 			if (!ctx.hasUI) {
+				if (pendingReview) clearPending(pendingReview.reviewId);
 				return toolText("Draft auto-approved (non-interactive). No clipboard write in headless mode.");
 			}
 
+			if (pendingReview?.fingerprint === fingerprint) {
+				pendingReview = { ...retryPendingReview(pendingReview), text };
+			} else {
+				pendingReview = { ...createPendingReview("draft", fingerprint), text };
+			}
+			const review = pendingReview;
+			persist();
+
 			const { colors, isLight } = loadTheme(ctx);
 			const palette = buildPalette(colors, isLight);
+			activeReviewId = review.reviewId;
 
 			let result: DraftResult;
 			try {
@@ -380,19 +440,26 @@ export default function draft(pi: ExtensionAPI): void {
 					createReviewServer<DraftResult>({
 						renderPage: (nonce) => buildPage(text, palette, nonce),
 						parseDecision: parseDraftDecision,
-						onTimeout: () => ({ action: "cancel" }),
+						onTimeout: () => ({ action: "timeout" }),
 						onUrl: (url) => {
-							try { ctx.ui.notify(`Draft: opening review in browser: ${url}`, "info"); } catch { /* best-effort */ }
+							try { ctx.ui.notify(`Draft: opening review ${review.reviewId} in browser: ${url}`, "info"); } catch { /* best-effort */ }
 						},
 					}),
 				);
 			} catch (err) {
 				const msg = err instanceof Error ? err.message : String(err);
-				return toolText(`Draft review failed (${msg}).`);
+				return toolText(`Draft review unavailable (${msg}). Pending review: ${review.reviewId}. Nothing was approved, copied, or rejected. Call submit_draft again with the same text to resume it.`);
+			} finally {
+				if (activeReviewId === review.reviewId) activeReviewId = null;
 			}
 
+			if (result.action === "timeout") {
+				return toolText(`TIMED OUT — draft review ${review.reviewId} is still pending. Nothing was approved, copied, rejected, or posted. Call submit_draft again with the same text (optionally reviewId: "${review.reviewId}") to resume this review; changed text starts a new review.`);
+			}
+
+			clearPending(review.reviewId);
 			if (result.action === "cancel") {
-				return toolText("(draft cancelled)");
+				return toolText("(draft cancelled; nothing was approved, copied, rejected, or posted)");
 			}
 
 			const finalText = (result.text ?? text).replace(/\s+$/, "");
@@ -424,5 +491,17 @@ export default function draft(pi: ExtensionAPI): void {
 				: `APPROVE — user approved the draft for you to post, no edits.\n\nFinal text:\n\n${finalText}\n\nCall the appropriate channel-specific posting tool now.`;
 			return toolText(body);
 		},
+	});
+
+	pi.on("session_start", async (_event, ctx) => {
+		const entries = ctx.sessionManager.getEntries().filter(
+			(e) => e.type === "custom" && (e as unknown as Record<string, unknown>).customType === "draft-review",
+		);
+		const last = entries.pop() as Record<string, unknown> | undefined;
+		if (!last?.data || typeof last.data !== "object") return;
+		const data = last.data as Record<string, unknown>;
+		const base = parsePendingReview(data.pendingReview);
+		const raw = data.pendingReview as Record<string, unknown> | null | undefined;
+		if (base && raw && typeof raw.text === "string") pendingReview = { ...base, text: raw.text };
 	});
 }

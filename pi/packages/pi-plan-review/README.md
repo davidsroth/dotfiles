@@ -51,7 +51,9 @@ Constraints:
 
 If you approve the plan, the tool returns approval to the assistant. If you send feedback, the tool returns inline comments (ordered first) and general feedback and asks the assistant to revise and resubmit.
 
-**Fail-safe:** the review is a human gate, so it never silently auto-approves when review can't happen interactively. Closing the review window/tab, or a failure to open the browser, returns a *not-approved* result that tells the agent not to proceed. (Non-interactive/headless mode still auto-approves, like `submit_draft`.)
+**Timeout and resume:** a 30-minute timeout is a distinct `TIMED OUT` outcome—not feedback, rejection, cancellation, or approval. The tool returns a stable `reviewId` and keeps the pending review in the Pi session log. Calling `submit_plan` again with the same unchanged file resumes that review automatically; passing the returned `reviewId` is optional but makes the intent explicit. If the file changed, omitting `reviewId` starts a new review, while trying to resume the old ID fails closed. A second call while that review is already open reports `PENDING` and does not open a duplicate browser session.
+
+**Fail-safe:** the review is a human gate, so it never silently auto-approves when review can't happen interactively. Closing the review window/tab is a cancellation; a timeout or browser-open failure leaves the durable review pending for retry. All return *not-approved* results that tell the agent not to proceed. (Non-interactive/headless mode still auto-approves, like `submit_draft`.)
 
 ### `submit_draft`
 
@@ -79,8 +81,10 @@ Return shape:
 - `REJECTED — … Do NOT post it. … call submit_draft again.` + `Feedback:` block (optionally + edits made before rejection)
 - `COPY — … do NOT call a posting tool.` (optionally + `Edits:` block)
 - `APPROVE — … Call the appropriate channel-specific posting tool now.` + `Final text:` block (optionally + `Edits:` block)
-- `(draft cancelled)`
-- Any of the above prefixed with `(clipboard copy failed: …)` if `pbcopy` fails on the Copy path.
+- `(draft cancelled; nothing was approved, copied, rejected, or posted)`
+- `TIMED OUT — draft review <reviewId> is still pending. …` — call `submit_draft` again with the same exact text to resume; `reviewId` is optional
+- `PENDING — … already open` — an idempotent duplicate call did not create another browser review
+- Any terminal Copy/Approve/Reject/Cancel decision clears the pending record. Any of the Copy results may be prefixed with `(clipboard copy failed: …)` if `pbcopy` fails.
 
 ### `/markup`
 
@@ -102,7 +106,8 @@ Shows the active submitted plan path, if any.
 
 Shared plumbing lives in `extensions/_review/`:
 
-- `server.ts` — `createReviewServer<T>` owns the HTTP/lifecycle plumbing (ephemeral loopback bind, nonce, duplicate-POST handling, 1 MB body cap, focus capture/restore, browser open, 30-min timeout). Each extension injects `renderPage(nonce)`, a typed `parseDecision(raw)` validator, and an `onTimeout()` result.
+- `server.ts` — `createReviewServer<T>` owns the HTTP/lifecycle plumbing (ephemeral loopback bind, nonce, duplicate-POST handling, 1 MB body cap, focus capture/restore, browser open, 30-min timeout). Each extension injects `renderPage(nonce)`, a typed `parseDecision(raw)` validator, and an `onTimeout()` result. After timeout the endpoint remains briefly as an expired tombstone: a late action gets HTTP 410 and can never become a decision.
+- `pending.ts` — stable review IDs, exact-input fingerprints, retry accounting, and validation for session-log state used by both review tools.
 - `theme.ts` — theme color resolution + the shared `:root` CSS variable block.
 - `os.ts` — browser open, frontmost-app focus restore, clipboard.
 - `html.ts` — `escapeHtml` / `scriptJson`. `tool.ts` — the `toolText` result helper.
@@ -127,4 +132,6 @@ npm run typecheck
 - `/markup` requires interactive mode.
 - All review pages inherit colors from the active pi theme when available.
 - Browser-side JS errors in `submit_draft` surface as a red banner across the top of the page (rather than silently locking the UI while pi blocks on the tool call). Press `esc` to cancel and resubmit.
+- If an already-open tab submits after timeout, it shows an expired message. Return to Pi and retry the same input; do not treat the late click as accepted.
+- Pending state preserves review identity and the exact submitted plan fingerprint or draft text across Pi session reloads. Unsaved edits that exist only in an expired browser tab are not recovered; copy them before reopening if needed.
 - `submit_draft` is macOS-only for the clipboard write (`pbcopy`). On other platforms the Copy path still works for editing/diff but reports `(clipboard copy failed: …)`.

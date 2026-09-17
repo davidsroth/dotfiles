@@ -47,6 +47,7 @@ function rawRequest(
 async function start(
 	timeoutMs = 2000,
 	staticAssets?: Record<string, { filePath: string; contentType: string }>,
+	expiredGraceMs = 100,
 ) {
 	let url = "";
 	const promise = createReviewServer<{ action: unknown }>({
@@ -54,6 +55,7 @@ async function start(
 		parseDecision: (data) => ({ action: data.action }),
 		onTimeout: () => ({ action: "TIMEOUT" }),
 		timeoutMs,
+		expiredGraceMs,
 		onUrl: (u) => { url = u; },
 		staticAssets,
 	});
@@ -142,8 +144,28 @@ describe("createReviewServer", () => {
 		}
 	});
 
-	it("resolves via onTimeout when no decision is made", async () => {
-		const { promise } = await start(250);
+	it("returns a distinct timeout and rejects late completion as expired", async () => {
+		const { port, promise } = await start(40, undefined, 200);
+		const page = await rawRequest(port, {});
+		const nonce = page.body;
+
 		await expect(promise).resolves.toEqual({ action: "TIMEOUT" });
+
+		const late = await rawRequest(port, {
+			method: "POST",
+			path: "/decision",
+			body: JSON.stringify({ nonce, action: "approve" }),
+		});
+		expect(late.status).toBe(410);
+		expect(JSON.parse(late.body)).toEqual({ ok: false, expired: true, error: "review expired" });
+
+		// Expiration does not weaken nonce validation or turn a late action into
+		// an idempotent success.
+		const forged = await rawRequest(port, {
+			method: "POST",
+			path: "/decision",
+			body: JSON.stringify({ nonce: "wrong", action: "approve" }),
+		});
+		expect(forged.status).toBe(403);
 	});
 });
