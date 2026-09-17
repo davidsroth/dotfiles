@@ -75,8 +75,77 @@ import { addUsage, formatCost, getLifetimeTotal, getSessionContextPercent, type 
 // ---- Shared helpers ----
 
 /** Tool execute return value for a text response. */
-function textResult(msg: string, details?: AgentDetails) {
+function textResult(msg: string, details?: AgentDetails | Record<string, unknown>) {
   return { content: [{ type: "text" as const, text: msg }], details: details as any };
+}
+
+/** Machine-readable failure returned by an LLM-callable tool. */
+function errorResult(
+  msg: string,
+  code: string,
+  details: Record<string, unknown> = {},
+) {
+  return {
+    content: [{ type: "text" as const, text: msg }],
+    isError: true,
+    details: { code, ...details },
+  };
+}
+
+const RESULT_SUMMARY_MAX_BYTES = 6_000;
+
+function utf8Length(value: string): number {
+  return Buffer.byteLength(value, "utf8");
+}
+
+/**
+ * Build a bounded, explicitly incomplete preview. Large JSON values are never
+ * cut into invalid fragments; callers can request the complete result instead.
+ */
+function summarizeResult(result: string): string {
+  const trimmed = result.trim();
+  if (utf8Length(trimmed) <= RESULT_SUMMARY_MAX_BYTES) return trimmed;
+
+  if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      const shape = Array.isArray(parsed)
+        ? `array with ${parsed.length} item${parsed.length === 1 ? "" : "s"}`
+        : `object with ${Object.keys(parsed as Record<string, unknown>).length} key${Object.keys(parsed as Record<string, unknown>).length === 1 ? "" : "s"}`;
+      return `[Full result omitted from summary: valid JSON ${shape}, ${utf8Length(trimmed)} bytes.]`;
+    } catch {
+      // Not complete JSON; fall through to a clearly marked text preview.
+    }
+  }
+
+  let bytes = 0;
+  let end = 0;
+  for (const character of trimmed) {
+    const size = utf8Length(character);
+    if (bytes + size > RESULT_SUMMARY_MAX_BYTES) break;
+    bytes += size;
+    end += character.length;
+  }
+  const rawPreview = trimmed.slice(0, end);
+  const newlineBoundary = rawPreview.lastIndexOf("\n");
+  const wordBoundary = rawPreview.lastIndexOf(" ");
+  const boundary = Math.max(newlineBoundary, wordBoundary);
+  const preview = rawPreview.slice(0, boundary > rawPreview.length / 2 ? boundary : undefined).trimEnd();
+  const omittedBytes = utf8Length(trimmed) - utf8Length(preview);
+  return `${preview}\n\n[Summary preview incomplete: ${omittedBytes} bytes omitted.]`;
+}
+
+function terminalResultInstructions(record: AgentRecord): string {
+  const parts = [
+    `To retrieve the complete result, call get_subagent_result with agent_id "${record.id}" and result_mode "full".`,
+  ];
+  if (record.outputFile) parts.push(`Full transcript: ${record.outputFile}`);
+  return parts.join("\n");
+}
+
+function formatCompletionTimestamp(completedAt: number): string {
+  const ageMs = Math.max(0, Date.now() - completedAt);
+  return `${new Date(completedAt).toISOString()} (${formatMs(ageMs)} ago)`;
 }
 
 /**
@@ -204,7 +273,7 @@ function formatTaskNotification(record: AgentRecord, resultMaxLen: number): stri
 
   const resultPreview = record.result
     ? record.result.length > resultMaxLen
-      ? record.result.slice(0, resultMaxLen) + "\n...(truncated, use get_subagent_result for full output)"
+      ? record.result.slice(0, resultMaxLen) + "\n...(truncated; use get_subagent_result with result_mode: \"full\" for complete output)"
       : record.result
     : "No output.";
 
@@ -279,8 +348,58 @@ export function buildPersistedRecordData(record: AgentRecord) {
     error: record.error,
     startedAt: record.startedAt,
     completedAt: record.completedAt,
+    toolUses: record.toolUses,
+    compactionCount: record.compactionCount,
+    outputFile: record.outputFile,
     usage: { ...record.lifetimeUsage },
   };
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function finiteNumber(value: unknown, fallback = 0): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+/** Recover the newest terminal record for an ID from the active session branch. */
+export function findPersistedTerminalRecord(entries: readonly unknown[], agentId: string): AgentRecord | undefined {
+  for (let index = entries.length - 1; index >= 0; index--) {
+    const entry = entries[index];
+    if (!isObject(entry) || entry.type !== "custom" || entry.customType !== "subagents:record" || !isObject(entry.data)) {
+      continue;
+    }
+    const data = entry.data;
+    if (data.id !== agentId || (data.status !== "completed" && data.status !== "stopped" && data.status !== "error")) {
+      continue;
+    }
+    if (typeof data.startedAt !== "number" || !Number.isFinite(data.startedAt) ||
+      typeof data.completedAt !== "number" || !Number.isFinite(data.completedAt)) {
+      continue;
+    }
+    const usage = isObject(data.usage) ? data.usage : {};
+    return {
+      id: agentId,
+      type: typeof data.type === "string" ? data.type : "general-purpose",
+      description: typeof data.description === "string" ? data.description : "persisted subagent",
+      status: data.status,
+      result: typeof data.result === "string" ? data.result : undefined,
+      error: typeof data.error === "string" ? data.error : undefined,
+      startedAt: data.startedAt,
+      completedAt: data.completedAt,
+      toolUses: finiteNumber(data.toolUses),
+      compactionCount: finiteNumber(data.compactionCount),
+      outputFile: typeof data.outputFile === "string" ? data.outputFile : undefined,
+      lifetimeUsage: {
+        input: finiteNumber(usage.input),
+        output: finiteNumber(usage.output),
+        cacheWrite: finiteNumber(usage.cacheWrite),
+        cost: finiteNumber(usage.cost),
+      },
+    };
+  }
+  return undefined;
 }
 
 /** Return a user-facing validation error, or undefined for an aside-ready record. */
@@ -520,7 +639,7 @@ export default function (pi: ExtensionAPI) {
 
         pi.sendMessage<NotificationDetails>({
           customType: "subagent-notification",
-          content: `Background agent group completed: ${label}\n\n${notifications}\n\nUse get_subagent_result for full output.`,
+          content: `Background agent group completed: ${label}\n\n${notifications}\n\nUse get_subagent_result with result_mode: "full" for complete output.`,
           display: true,
           details,
         }, { deliverAs: "followUp", triggerTurn: true });
@@ -1042,8 +1161,8 @@ Guidelines:
     },
 
     renderResult(result, { expanded, isPartial }, theme) {
-      const details = result.details as AgentDetails | undefined;
-      if (!details) {
+      const details = result.details as (AgentDetails & { code?: string }) | undefined;
+      if (!details || (result as any).isError === true && details.code) {
         const text = result.content[0]?.type === "text" ? result.content[0].text : "";
         return new Text(text, 0, 0);
       }
@@ -1097,7 +1216,7 @@ Guidelines:
               line += "\n" + theme.fg("dim", `  ${l}`);
             }
             if (resultText.split("\n").length > 50) {
-              line += "\n" + theme.fg("muted", "  ... (use get_subagent_result with verbose for full output)");
+              line += "\n" + theme.fg("muted", "  ... (use get_subagent_result with result_mode: full for complete output)");
             }
           }
         } else {
@@ -1129,7 +1248,11 @@ Guidelines:
     execute: async (toolCallId, params, signal, onUpdate, ctx) => {
       const rawParams = params as unknown as Record<string, unknown>;
       if ("max_turns" in rawParams || "maxTurns" in rawParams) {
-        return textResult("Turn limits are not supported by this vendored pi-subagents variant.");
+        return errorResult(
+          "Turn limits are not supported by this vendored pi-subagents variant.",
+          "INVALID_ARGUMENT",
+          { argument: "max_turns" },
+        );
       }
 
       // Ensure we have UI context for widget rendering
@@ -1155,7 +1278,7 @@ Guidelines:
       if (resolvedConfig.modelInput) {
         const resolved = resolveModel(resolvedConfig.modelInput, ctx.modelRegistry);
         if (typeof resolved === "string") {
-          if (resolvedConfig.modelFromParams) return textResult(resolved);
+          if (resolvedConfig.modelFromParams) return errorResult(resolved, "MODEL_NOT_AVAILABLE", { model: resolvedConfig.modelInput });
           // config-specified: silent fallback to parent
         } else {
           model = resolved;
@@ -1196,19 +1319,31 @@ Guidelines:
       // ---- Schedule: register a job, don't spawn now ----
       if (params.schedule) {
         if (!isSchedulingEnabled()) {
-          return textResult("Scheduling is disabled in this project. Enable via /agent-manage → Settings → Scheduling.");
+          return errorResult(
+            "Scheduling is disabled in this project. Enable via /agent-manage → Settings → Scheduling.",
+            "SCHEDULING_DISABLED",
+          );
         }
         if (params.resume) {
-          return textResult("Cannot combine `schedule` with `resume` — schedules create fresh agents.");
+          return errorResult("Cannot combine `schedule` with `resume` — schedules create fresh agents.", "INVALID_ARGUMENT", {
+            arguments: ["schedule", "resume"],
+          });
         }
         if (params.inherit_context) {
-          return textResult("Cannot combine `schedule` with `inherit_context` — there is no parent conversation at fire time.");
+          return errorResult("Cannot combine `schedule` with `inherit_context` — there is no parent conversation at fire time.", "INVALID_ARGUMENT", {
+            arguments: ["schedule", "inherit_context"],
+          });
         }
         if (params.run_in_background === false) {
-          return textResult("Cannot combine `schedule` with `run_in_background: false` — scheduled jobs always run in background.");
+          return errorResult("Cannot combine `schedule` with `run_in_background: false` — scheduled jobs always run in background.", "INVALID_ARGUMENT", {
+            arguments: ["schedule", "run_in_background"],
+          });
         }
         if (!scheduler.isActive()) {
-          return textResult("Scheduler is not active in this session yet. Try again after the session has fully started.");
+          return errorResult(
+            "Scheduler is not active in this session yet. Try again after the session has fully started.",
+            "SCHEDULER_NOT_READY",
+          );
         }
         try {
           const job = scheduler.addJob({
@@ -1229,25 +1364,50 @@ Guidelines:
             `Manage via /agent-manage → Scheduled jobs.`,
           );
         } catch (err) {
-          return textResult(err instanceof Error ? err.message : String(err));
+          return errorResult(err instanceof Error ? err.message : String(err), "SCHEDULE_CREATE_FAILED");
         }
       }
 
-      // Resume existing agent
+      // Resume existing agent. Persisted results are deliberately not enough:
+      // resume requires the retained live conversation session.
       if (params.resume) {
         const existing = manager.getRecord(params.resume);
         if (!existing) {
-          return textResult(`Agent not found: "${params.resume}". It may have been cleaned up.`);
+          return errorResult(
+            `Agent not found: "${params.resume}". It may have been cleaned up.`,
+            "AGENT_NOT_FOUND",
+            { agentId: params.resume },
+          );
         }
         if (!existing.session) {
-          return textResult(`Agent "${params.resume}" has no active session to resume.`);
+          return errorResult(
+            `Agent "${params.resume}" has no active session to resume.`,
+            "AGENT_SESSION_UNAVAILABLE",
+            { agentId: params.resume, status: existing.status },
+          );
         }
-        const record = await manager.resume(params.resume, params.prompt, signal);
+        let record: AgentRecord | undefined;
+        try {
+          record = await manager.resume(params.resume, params.prompt, signal);
+        } catch (err) {
+          return errorResult(
+            `Failed to resume agent "${params.resume}": ${err instanceof Error ? err.message : String(err)}`,
+            "RESUME_FAILED",
+            { agentId: params.resume },
+          );
+        }
         if (!record) {
-          return textResult(`Failed to resume agent "${params.resume}".`);
+          return errorResult(`Failed to resume agent "${params.resume}".`, "RESUME_FAILED", { agentId: params.resume });
+        }
+        if (record.status === "error" || record.status === "stopped") {
+          return errorResult(
+            record.error?.trim() || `Agent "${params.resume}" ${record.status}.`,
+            record.status === "stopped" ? "AGENT_STOPPED" : "AGENT_RUN_FAILED",
+            { agentId: params.resume, status: record.status },
+          );
         }
         return textResult(
-          record.result?.trim() || record.error?.trim() || "No output.",
+          record.result?.trim() || "No output.",
           buildDetails(detailBase, record),
         );
       }
@@ -1282,7 +1442,7 @@ Guidelines:
             ...bgCallbacks,
           });
         } catch (err) {
-          return textResult(err instanceof Error ? err.message : String(err));
+          return errorResult(err instanceof Error ? err.message : String(err), "AGENT_START_FAILED");
         }
 
         // Set output file + join mode synchronously after spawn, before the
@@ -1320,7 +1480,7 @@ Guidelines:
           (record?.outputFile ? `Output file: ${record.outputFile}\n` : "") +
           (isQueued ? `Position: queued (max ${manager.getMaxConcurrent()} concurrent)\n` : "") +
           `\nYou will be notified when this agent completes.\n` +
-          `Use get_subagent_result to retrieve full results, aside_subagent to ask without interruption, or steer_subagent to redirect its work.\n` +
+          `Use get_subagent_result for a bounded summary (or result_mode: "full" for the complete result), aside_subagent to ask without interruption, or steer_subagent to redirect its work.\n` +
           `Do not duplicate this agent's work.`,
           { ...detailBase, toolUses: 0, tokens: "", durationMs: 0, status: "background" as const, agentId: id },
         );
@@ -1417,7 +1577,11 @@ Guidelines:
       } catch (err) {
         streamActive = false;
         clearInterval(spinnerInterval);
-        return textResult(err instanceof Error ? err.message : String(err));
+        return errorResult(
+          err instanceof Error ? err.message : String(err),
+          "AGENT_RUN_FAILED",
+          fgId ? { agentId: fgId } : {},
+        );
       } finally {
         resultWaitControllers.delete(waitController);
         signal?.removeEventListener("abort", forwardToolAbort);
@@ -1428,7 +1592,7 @@ Guidelines:
 
       const record = foregroundRecord;
       if (!record) {
-        return textResult("Agent did not produce a result.");
+        return errorResult("Agent did not produce a result.", "AGENT_RESULT_UNAVAILABLE");
       }
 
       // A message can interrupt the wait while the foreground child continues.
@@ -1461,7 +1625,16 @@ Guidelines:
         : "";
 
       if (record.status === "error") {
-        return textResult(`${fallbackNote}Agent failed: ${record.error}`, details);
+        return {
+          ...errorResult(`${fallbackNote}Agent failed: ${record.error}`, "AGENT_RUN_FAILED", { agentId: record.id }),
+          details: { ...details, code: "AGENT_RUN_FAILED" },
+        };
+      }
+      if (record.status === "stopped") {
+        return {
+          ...errorResult(`${fallbackNote}Agent stopped by user.`, "AGENT_STOPPED", { agentId: record.id }),
+          details: { ...details, code: "AGENT_STOPPED" },
+        };
       }
 
       const durationMs = (record.completedAt ?? Date.now()) - record.startedAt;
@@ -1481,7 +1654,7 @@ Guidelines:
     name: "get_subagent_result",
     label: "Get Agent Result",
     description:
-      "Check status and retrieve background agent results. Pass agent_id for one agent, or agent_ids with wait: true to return whichever selected agent settles first.",
+      "Check status and retrieve background agent results. Returns a bounded summary by default; use result_mode: full for complete output. Pass agent_id for one agent, or agent_ids with wait: true to return whichever selected agent settles first.",
     parameters: Type.Object({
       agent_id: Type.Optional(Type.String({
         description: "One agent ID to check. Mutually exclusive with agent_ids.",
@@ -1496,28 +1669,65 @@ Guidelines:
           description: "Wait for one selected agent to settle before returning. With agent_ids, waits for the first. Default: false.",
         }),
       ),
+      result_mode: Type.Optional(
+        Type.Union([Type.Literal("summary"), Type.Literal("full")], {
+          description: "Result detail level. summary is bounded and reports how to retrieve full output; full returns the complete result. Default: summary.",
+        }),
+      ),
       verbose: Type.Optional(
         Type.Boolean({
-          description: "If true, include the returned agent's full conversation (messages + tool calls). Default: false.",
+          description: "If true, include the returned agent's full retained conversation (messages + tool calls). This can be large. Default: false.",
         }),
       ),
     }),
-    execute: async (_toolCallId, params, signal, _onUpdate, _ctx) => {
+    execute: async (_toolCallId, params, signal, _onUpdate, ctx) => {
       const hasSingleId = typeof params.agent_id === "string" && params.agent_id.length > 0;
       const hasManyIds = Array.isArray(params.agent_ids);
       if (hasSingleId === hasManyIds) {
-        return textResult("Pass exactly one of agent_id or agent_ids.");
+        return errorResult("Pass exactly one of agent_id or agent_ids.", "INVALID_ARGUMENT", {
+          arguments: ["agent_id", "agent_ids"],
+        });
       }
 
       const agentIds = [...new Set(hasManyIds ? params.agent_ids : [params.agent_id!])];
-      if (agentIds.length === 0) return textResult("agent_ids must contain at least one agent ID.");
+      if (agentIds.length === 0) {
+        return errorResult("agent_ids must contain at least one agent ID.", "INVALID_ARGUMENT", { argument: "agent_ids" });
+      }
 
       const records = agentIds.map((id) => manager.getRecord(id));
+      const recoveredIds = new Set<string>();
+      const unresolvedIndexes = records
+        .map((record, index) => record ? -1 : index)
+        .filter((index) => index >= 0);
+      if (unresolvedIndexes.length > 0) {
+        let branch: readonly unknown[];
+        try {
+          branch = ctx.sessionManager.getBranch() ?? [];
+        } catch (err) {
+          return errorResult(
+            `Failed to inspect persisted subagent results: ${err instanceof Error ? err.message : String(err)}`,
+            "RESULT_LOOKUP_FAILED",
+            { agentIds: unresolvedIndexes.map((index) => agentIds[index]!) },
+          );
+        }
+        for (const index of unresolvedIndexes) {
+          const recovered = findPersistedTerminalRecord(branch, agentIds[index]!);
+          if (recovered) {
+            records[index] = recovered;
+            recoveredIds.add(recovered.id);
+          }
+        }
+      }
+
       const missingIds = agentIds.filter((_id, index) => !records[index]);
       if (missingIds.length > 0) {
-        return textResult(
+        const message =
           `Agent${missingIds.length === 1 ? "" : "s"} not found: ${missingIds.map((id) => `"${id}"`).join(", ")}. ` +
-          "They may have been cleaned up.",
+          "They may have expired or never existed in this session.";
+        return errorResult(
+          message,
+          missingIds.length === 1 ? "AGENT_NOT_FOUND" : "AGENTS_NOT_FOUND",
+          missingIds.length === 1 ? { agentId: missingIds[0] } : { agentIds: missingIds },
         );
       }
 
@@ -1527,36 +1737,45 @@ Guidelines:
       let waitInterruptedByIntercom = false;
 
       if (params.wait) {
-        const singleRecord = hasSingleId ? records[0]! : undefined;
-        const singleWasActive = singleRecord?.status === "running" || singleRecord?.status === "queued";
-        if (singleWasActive) {
-          // A singular wait owns this result. Pre-mark it so the completion
-          // callback cannot enqueue a redundant notification before await resumes.
-          singleRecord.resultConsumed = true;
-          cancelNudge(singleRecord.id);
-        }
+        const alreadySettled = records
+          .filter((candidate): candidate is AgentRecord =>
+            candidate !== undefined && candidate.status !== "running" && candidate.status !== "queued",
+          )
+          .sort((a, b) => (a.completedAt ?? Number.MAX_SAFE_INTEGER) - (b.completedAt ?? Number.MAX_SAFE_INTEGER))[0];
+        if (alreadySettled) {
+          record = alreadySettled;
+        } else {
+          const singleRecord = hasSingleId ? records[0]! : undefined;
+          const singleWasActive = singleRecord?.status === "running" || singleRecord?.status === "queued";
+          if (singleWasActive) {
+            // A singular wait owns this result. Pre-mark it so the completion
+            // callback cannot enqueue a redundant notification before await resumes.
+            singleRecord.resultConsumed = true;
+            cancelNudge(singleRecord.id);
+          }
 
-        const waitController = new AbortController();
-        const handleWaitAbort = () => {
-          // Restore synchronously with the abort, before a concurrently queued
-          // child completion can observe the singular pre-mark.
-          if (singleWasActive) singleRecord.resultConsumed = false;
-          waitInterrupted = true;
-          waitInterruptedByUser = waitController.signal.reason === USER_MESSAGE_INTERRUPT;
-          waitInterruptedByIntercom = waitController.signal.reason === INTERCOM_MESSAGE_INTERRUPT;
-        };
-        waitController.signal.addEventListener("abort", handleWaitAbort, { once: true });
-        const forwardToolAbort = () => waitController.abort(signal?.reason);
-        if (signal?.aborted) forwardToolAbort();
-        else signal?.addEventListener("abort", forwardToolAbort, { once: true });
-        resultWaitControllers.add(waitController);
+          const waitController = new AbortController();
+          const handleWaitAbort = () => {
+            // Restore synchronously with the abort, before a concurrently queued
+            // child completion can observe the singular pre-mark.
+            if (singleWasActive) singleRecord.resultConsumed = false;
+            waitInterrupted = true;
+            waitInterruptedByUser = waitController.signal.reason === USER_MESSAGE_INTERRUPT;
+            waitInterruptedByIntercom = waitController.signal.reason === INTERCOM_MESSAGE_INTERRUPT;
+          };
+          waitController.signal.addEventListener("abort", handleWaitAbort, { once: true });
+          const forwardToolAbort = () => waitController.abort(signal?.reason);
+          if (signal?.aborted) forwardToolAbort();
+          else signal?.addEventListener("abort", forwardToolAbort, { once: true });
+          resultWaitControllers.add(waitController);
 
-        try {
-          record = await manager.waitForAny(agentIds, waitController.signal);
-        } finally {
-          resultWaitControllers.delete(waitController);
-          waitController.signal.removeEventListener("abort", handleWaitAbort);
-          signal?.removeEventListener("abort", forwardToolAbort);
+          try {
+            record = await manager.waitForAny(agentIds, waitController.signal);
+          } finally {
+            resultWaitControllers.delete(waitController);
+            waitController.signal.removeEventListener("abort", handleWaitAbort);
+            signal?.removeEventListener("abort", forwardToolAbort);
+          }
         }
       } else if (hasSingleId) {
         record = records[0];
@@ -1592,11 +1811,16 @@ Guidelines:
       if (contextPercent !== null) statsParts.push(`Context: ${Math.round(contextPercent)}%`);
       if (record.compactionCount) statsParts.push(`Compactions: ${record.compactionCount}`);
       statsParts.push(`Duration: ${duration}`);
+      if (record.completedAt) statsParts.push(`Completed: ${formatCompletionTimestamp(record.completedAt)}`);
 
+      const recoveredFromPersistence = recoveredIds.has(record.id);
+      const resultMode = params.result_mode ?? "summary";
       let output =
         `Agent: ${record.id}\n` +
         `Type: ${displayName} | Status: ${record.status} | ${statsParts.join(" | ")}\n` +
-        `Description: ${record.description}\n\n`;
+        `Description: ${record.description}\n` +
+        (recoveredFromPersistence ? "Recovered from persisted session record.\n" : "") +
+        "\n";
 
       if (record.status === "running" || record.status === "queued") {
         const state = record.status === "queued" ? "queued" : "still running";
@@ -1607,28 +1831,40 @@ Guidelines:
               ? `Waiting was interrupted by a user message. Agent is ${state}; use wait: true or check back later.`
               : `Waiting was interrupted. Agent is ${state}; use wait: true or check back later.`
           : `Agent is ${state}. Use wait: true or check back later.`;
-      } else if (record.status === "error") {
-        output += `Error: ${record.error}`;
       } else {
-        output += record.result?.trim() || "No output.";
+        const fullResult = record.status === "error"
+          ? `Error: ${record.error?.trim() || "unknown"}`
+          : record.result?.trim() || "No output.";
+        output += resultMode === "full"
+          ? fullResult
+          : `${summarizeResult(fullResult)}\n\n${terminalResultInstructions(record)}`;
       }
 
-      // Only the winning terminal result is consumed. Other raced agents retain
-      // their normal completion notifications and can be awaited again.
-      if (record.status !== "running" && record.status !== "queued") {
+      // Only the winning live terminal result is consumed. Recovered records
+      // have no pending in-memory completion notification to suppress.
+      if (record.status !== "running" && record.status !== "queued" && !recoveredFromPersistence) {
         record.resultConsumed = true;
         cancelNudge(record.id);
       }
 
-      // Verbose: include full conversation
-      if (params.verbose && record.session) {
-        const conversation = getAgentConversation(record.session);
-        if (conversation) {
-          output += `\n\n--- Agent Conversation ---\n${conversation}`;
+      // Verbose is an explicit request for potentially unbounded conversation
+      // output. Persisted records contain the final result, not live messages.
+      if (params.verbose) {
+        if (record.session) {
+          const conversation = getAgentConversation(record.session);
+          if (conversation) output += `\n\n--- Agent Conversation ---\n${conversation}`;
+        } else {
+          output += "\n\nAgent conversation unavailable; only the persisted terminal result was retained.";
         }
       }
 
-      return textResult(output);
+      return textResult(output, {
+        agentId: record.id,
+        status: record.status,
+        resultMode,
+        recoveredFromPersistence,
+        outputFile: record.outputFile,
+      });
     },
   }));
 
@@ -1652,9 +1888,20 @@ Guidelines:
     execute: async (_toolCallId, params, signal, _onUpdate, ctx) => {
       const record = manager.getRecord(params.agent_id);
       const targetError = getAsideTargetError(record, params.agent_id);
-      if (targetError) return textResult(targetError);
+      if (targetError) {
+        const code = !record
+          ? "AGENT_NOT_FOUND"
+          : !record.session
+            ? "AGENT_SESSION_UNAVAILABLE"
+            : "AGENT_STATE_UNSUPPORTED";
+        return errorResult(targetError, code, { agentId: params.agent_id, status: record?.status });
+      }
       if (activeAsides.has(params.agent_id)) {
-        return textResult(`An aside for agent "${params.agent_id}" is already in progress. Wait for it to finish before asking another.`);
+        return errorResult(
+          `An aside for agent "${params.agent_id}" is already in progress. Wait for it to finish before asking another.`,
+          "ASIDE_ALREADY_IN_PROGRESS",
+          { agentId: params.agent_id },
+        );
       }
 
       const controller = new AbortController();
@@ -1684,7 +1931,11 @@ Guidelines:
           usage: answer.usage,
         } as any;
       } catch (err) {
-        return textResult(`Aside failed for agent ${params.agent_id}: ${err instanceof Error ? err.message : String(err)}`);
+        return errorResult(
+          `Aside failed for agent ${params.agent_id}: ${err instanceof Error ? err.message : String(err)}`,
+          "ASIDE_FAILED",
+          { agentId: params.agent_id },
+        );
       } finally {
         signal?.removeEventListener("abort", forwardParentAbort);
         activeAsides.delete(params.agent_id);
@@ -1711,10 +1962,20 @@ Guidelines:
     execute: async (_toolCallId, params, _signal, _onUpdate, _ctx) => {
       const record = manager.getRecord(params.agent_id);
       if (!record) {
-        return textResult(`Agent not found: "${params.agent_id}". It may have been cleaned up.`);
+        return errorResult(
+          `Agent not found: "${params.agent_id}". It may have been cleaned up.`,
+          "AGENT_NOT_FOUND",
+          { agentId: params.agent_id },
+        );
       }
       const sent = await sendSteeringMessage(record, params.message);
-      if (!sent.ok) return textResult(sent.message);
+      if (!sent.ok) {
+        return errorResult(
+          sent.message,
+          record.status === "running" ? "STEER_FAILED" : "AGENT_NOT_RUNNING",
+          { agentId: params.agent_id, status: record.status },
+        );
+      }
       if (sent.queued) {
         return textResult(`Steering message queued for agent ${record.id}. It will be delivered once the session initializes.`);
       }

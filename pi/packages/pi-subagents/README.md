@@ -237,6 +237,8 @@ Launch a sub-agent.
 
 Check status and retrieve results from background agents. Pass `agent_id` to inspect or await one agent. Pass `agent_ids` with `wait: true` to race several selected agents and return whichever completes, fails, or stops first; the other agents keep running and retain their normal completion notifications.
 
+Results default to a bounded `summary` that clearly marks omitted content, reports the transcript path when available, and shows the exact `result_mode: "full"` request for complete output. Large JSON results are omitted as a whole rather than cut into invalid fragments. If an in-memory terminal record has expired, the tool recovers its persisted `subagents:record` entry from the active session branch when available. Live conversation operations (`resume`, `aside_subagent`, and `steer_subagent`) still require a retained agent session.
+
 Awaiting or retrieving a completed result suppresses its pending completion message. Notifications stay cancellable while the parent is working and are delivered only after it settles, omitting results already retrieved. Interrupting a wait leaves notification delivery enabled for every unread result.
 
 | Parameter | Type | Required | Description |
@@ -244,7 +246,8 @@ Awaiting or retrieving a completed result suppresses its pending completion mess
 | `agent_id` | string | one selector required | One agent ID to check; mutually exclusive with `agent_ids` |
 | `agent_ids` | string[] | one selector required | Agent IDs to race; mutually exclusive with `agent_id` |
 | `wait` | boolean | no | Wait for one selected agent to settle; with `agent_ids`, returns the first; a user message interrupts only the wait |
-| `verbose` | boolean | no | Include the returned agent's full conversation log |
+| `result_mode` | `"summary" \| "full"` | no | Result detail level; defaults to bounded `summary`; use `full` for the complete result |
+| `verbose` | boolean | no | Include the returned agent's full retained conversation log; this can be large |
 
 ### `aside_subagent`
 
