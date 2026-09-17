@@ -13,6 +13,14 @@ topology, and incident details belong in local memory instead.
   approach is right for the goal or merely more tractable.
 - Confirm before destructive actions or changes to shared resources.
 
+### Plan approval means proceed
+
+When the user approves a plan, immediately begin the work authorized by that plan; do not ask for a redundant proceed confirmation. Preserve any separately gated actions or exclusions in the approved plan.
+
+### Ambitious, end-to-end delivery
+
+Prefer complete useful workflows and bounded real-world pilots over overly narrow metadata-only slices or extensive mock-only scaffolding. Keep safeguards around confidential disclosure, authoritative changes, and deployment, but do not turn every meaningful implementation step into a separately deferred release. Plan approvals should explicitly authorize the practical work needed for the intended outcome.
+
 ## Concurrent work safety
 
 - Shared working trees may be edited by multiple sessions. Use a dedicated
@@ -48,6 +56,9 @@ topology, and incident details belong in local memory instead.
 
 Give each protocol stream one serialized writer. Mixing asynchronous `process.stdout.write()` with raw `writeSync()` can interleave JSON records; pipe writes can also be short under backpressure. Use a dedicated channel with a backpressure-aware writer for independent producers. Test real OS pipes with concurrent large frames and slow readers—not just parsers fed complete synthetic frames. Separate channels also require explicit completion ordering when one channel carries reports needed before another can announce completion.
 
+### Avoid implicit dependency installation during qualification
+
+Package-manager run/exec wrappers can automatically reinstall dependencies when HOME or store settings differ, even when the requested action is code generation. With symlinked node_modules, that can delete a shared dependency target before a network-denied install fails. Invoke installed tool entrypoints directly for hermetic tests/builds/codegen; never run installation-capable wrappers against borrowed dependency links. After recovery, verify actual dependency links and executable bytes, not just an install command's success status.
 
 ## Delegation and subagents
 
@@ -65,6 +76,9 @@ Give each protocol stream one serialized writer. Mixing asynchronous `process.st
 
 When checking progress on a running subagent, use `aside_subagent` by default so the update does not interrupt or alter the agent’s work. Use `steer_subagent` only when intentionally redirecting the task.
 
+### Subagent control-channel ownership
+
+Send task corrections to an `Agent` child with `steer_subagent`, and use `aside_subagent` for non-interrupting questions. An intercom delivery acknowledgement is not proof that a message entered the child's active model conversation; verify receipt before relying on a correction. Intercom replies can resolve explicit asks without making subsequent one-way sends a reliable steering channel.
 
 ## Git and GitHub mechanics
 
