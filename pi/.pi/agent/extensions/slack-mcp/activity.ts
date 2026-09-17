@@ -546,6 +546,7 @@ function groupMyMessages(
     threadTs?: string;
     participantIds: string[];
     participants: Array<{ id?: string; label: string; isAuthenticatedUser: boolean }>;
+    participantCoverage: "observed_message_authors_only";
     authorship: { authenticatedUserId: string; myMessageCount: number; allMessagesByAuthenticatedUser: boolean };
     messageCount: number;
     messageRefs: Array<{ channelId: string; messageTs: string }>;
@@ -566,6 +567,10 @@ function groupMyMessages(
         ...(threadTs ? { threadTs } : {}),
         participantIds: [],
         participants: [],
+        // Search is deliberately restricted to messages authored by the
+        // authenticated user. This is observed-author provenance, not a full
+        // channel/DM roster.
+        participantCoverage: "observed_message_authors_only",
         authorship: { authenticatedUserId, myMessageCount: 0, allMessagesByAuthenticatedUser: true },
         messageCount: 0,
         messageRefs: [],

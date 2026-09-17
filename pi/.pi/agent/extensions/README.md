@@ -64,10 +64,12 @@ Slack's four composite read tools return the stable `slack-wrapper/v1`
 envelope. `slack_my_conversations` uses `data.schemaVersion` of
 `slack-my-conversations/v2`: `data.messages` is the canonical, deduplicated
 message/body array, while each group carries counts, authorship/participant
-provenance, and `(channelId, messageTs)` entries in `messageRefs`. Resolve those
-references against `data.messages`; bodies are intentionally not repeated in
-each group. Envelope metadata keeps retrieval completeness separate from
-response-budget completeness.
+provenance, and `(channelId, messageTs)` entries in `messageRefs`. The
+`participantCoverage` field makes explicit that these are observed message
+authors, not a complete channel or DM roster. Resolve the references against
+`data.messages`; bodies are intentionally not repeated in each group. Envelope
+metadata keeps retrieval completeness separate from response-budget
+completeness.
 
 `slack_mcp_status` reports two inventories separately: the nine static wrapper
 tools that exist as soon as the extension loads, and dynamic upstream tools

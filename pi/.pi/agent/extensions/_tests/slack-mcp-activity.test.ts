@@ -139,6 +139,7 @@ describe("runMyConversations", () => {
     expect(result.messageCount).toBe(2);
     expect(result.groups.map((group) => group.kind).sort()).toEqual(["conversation", "thread"]);
     expect(result.groups[0].authorship.authenticatedUserId).toBe("UME");
+    expect(result.groups.every((group) => group.participantCoverage === "observed_message_authors_only")).toBe(true);
     expect(result.groups.flatMap((group) => group.messageRefs)).toEqual(expect.arrayContaining([
       { channelId: "C123", messageTs: middleTs },
       { channelId: "C123", messageTs: startTs },

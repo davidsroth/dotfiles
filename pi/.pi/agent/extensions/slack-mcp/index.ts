@@ -387,7 +387,8 @@ export default async function slackMCPExtension(pi: ExtensionAPI): Promise<void>
     description:
       "List conversations in which the authenticated Slack user authored at least one message. " +
       "Automatically resolves identity, follows search cursors, applies exact start-inclusive/end-exclusive bounds, " +
-      "deduplicates, groups by message references without repeating bodies, and reports completeness. " +
+      "deduplicates, groups by message references without repeating bodies, marks group participants as observed message authors rather than a full roster, " +
+      "and reports completeness. " +
       "Coverage is Slack's accessible search index, not inaccessible or unindexed history.",
     parameters: Type.Object({
       ...exactWindowFields,
