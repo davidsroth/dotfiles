@@ -16,6 +16,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { escapeHtml, scriptJson } from "../_review/html";
 import { waitWithHerdrBlocked } from "../_review/herdr";
 import {
+	contentHash,
 	createPendingReview,
 	parsePendingReview,
 	retryPendingReview,
@@ -24,7 +25,7 @@ import {
 } from "../_review/pending";
 import { createReviewServer } from "../_review/server";
 import { buildPalette, loadTheme, type Palette, rootVarsBlock } from "../_review/theme";
-import { toolText } from "../_review/tool";
+import { toolText, toolTextWithDetails } from "../_review/tool";
 import { mdToHtml } from "./markdown";
 
 // ── Types ──────────────────────────────────────────────────────────────
@@ -48,6 +49,14 @@ export interface ReviewResult {
 interface PendingPlanReview extends PendingReview {
 	filePath: string;
 	fullPath: string;
+}
+
+export interface PlanApprovalDetails {
+	readonly outcome: "approved";
+	readonly reviewId: string;
+	readonly filePath: string;
+	readonly reviewFingerprint: string;
+	readonly reviewedContentHash: `sha256:${string}`;
 }
 
 interface ReviewButton {
@@ -1058,6 +1067,7 @@ export default function plan(pi: ExtensionAPI): void {
 			},
 			required: ["filePath"],
 		},
+		executionMode: "sequential",
 
 		async execute(_id, params, signal, _onUpdate, ctx: ExtensionContext) {
 			const input = params as { filePath?: string; reviewId?: string };
@@ -1176,7 +1186,17 @@ export default function plan(pi: ExtensionAPI): void {
 
 			const feedback = formatPlanFeedback(result);
 			if (result.approved) {
-				return toolText(`Plan approved!\n\n${feedback}`.trim());
+				const reviewedContentHash = `sha256:${contentHash(content)}` as const;
+				const approval = `Plan approved!\n\nApproval applies only to the exact reviewed content digest ${reviewedContentHash}. Any later file change requires a fresh review.`;
+				const text = feedback ? `${approval}\n\n${feedback}` : approval;
+				const details: PlanApprovalDetails = Object.freeze({
+					outcome: "approved",
+					reviewId: review.reviewId,
+					filePath: inputPath,
+					reviewFingerprint: review.fingerprint,
+					reviewedContentHash,
+				});
+				return toolTextWithDetails(text, details);
 			}
 			const fb = feedback || "Plan needs revision. Please update and resubmit.";
 			return toolText(`Feedback on ${inputPath}:\n\n${fb}\n\nRevise and submit again.`);

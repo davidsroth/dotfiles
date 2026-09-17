@@ -53,7 +53,7 @@ If you approve the plan, the tool returns approval to the assistant. If you send
 
 **Timeout and resume:** a 30-minute timeout is a distinct `TIMED OUT` outcome—not feedback, rejection, cancellation, or approval. The tool returns a stable `reviewId` and keeps the pending review in the Pi session log. Calling `submit_plan` again with the same unchanged file resumes that review automatically; passing the returned `reviewId` is optional but makes the intent explicit. If the file changed, omitting `reviewId` starts a new review, while trying to resume the old ID fails closed. A second call while that review is already open reports `PENDING` and does not open a duplicate browser session.
 
-**Approval binding:** approval applies only to the exact content rendered in the browser. `submit_plan` re-reads and fingerprints the file immediately after the browser decision. If the file changed, disappeared, or became unreadable during review, it returns `STALE APPROVAL` or `APPROVAL INVALIDATED`, never approval, and preserves or creates pending state for a fresh review.
+**Approval binding:** approval applies only to the exact content rendered in the browser. `submit_plan` re-reads and fingerprints the file immediately after the browser decision. If the file changed, disappeared, or became unreadable during review, it returns `STALE APPROVAL` or `APPROVAL INVALIDATED`, never approval, and preserves or creates pending state for a fresh review. Successful approval text includes the reviewed `sha256:` content digest, and structured result `details` include that digest plus the immutable review fingerprint, review ID, and path. Consumers can compare the digest if an external process may have changed the file after approval.
 
 **Fail-safe:** the review is a human gate, so it never silently auto-approves when review can't happen interactively. Closing the review window/tab is a cancellation; a timeout, tool abort, or browser-open failure leaves the durable review pending for retry. Tool abort returns a distinct `ABORTED` result. All return *not-approved* results that tell the agent not to proceed. (Non-interactive/headless mode still auto-approves, like `submit_draft`.)
 
@@ -77,6 +77,8 @@ The browser opens a focused review page with the draft loaded into an editable t
 If the user edits the draft inline before copying, approving, or rejecting, a **word-level diff** of original→final (LCS over tokens, rendered in `git diff --word-diff` style — `{-deleted-}` and `{+inserted+}`) is included in the tool result so the agent sees the delta directly. Rejection includes both this diff and the feedback so inline edits are not lost.
 
 The tool itself never posts anywhere. It exists as the explicit-approval channel between "draft something" and "actually send something on the user's behalf".
+
+Both `submit_plan` and `submit_draft` declare `executionMode: "sequential"`. Pi therefore does not run sibling tool calls from the same assistant response alongside the approval gate: a plan mutation cannot race plan approval, and a posting tool cannot race draft approval. External processes remain outside Pi's scheduler, which is why plan approval also carries the reviewed digest.
 
 Return shape:
 

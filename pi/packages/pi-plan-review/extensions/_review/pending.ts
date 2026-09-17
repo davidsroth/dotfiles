@@ -9,8 +9,12 @@ export interface PendingReview {
 	attempts: number;
 }
 
+export function contentHash(value: string): string {
+	return createHash("sha256").update(value).digest("hex");
+}
+
 export function reviewFingerprint(kind: "plan" | "draft", value: string): string {
-	return createHash("sha256").update(`${kind}\0${value}`).digest("hex");
+	return contentHash(`${kind}\0${value}`);
 }
 
 export function createPendingReview(kind: "plan" | "draft", fingerprint: string): PendingReview {

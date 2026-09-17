@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+	contentHash,
 	createPendingReview,
 	parsePendingReview,
 	retryPendingReview,
@@ -7,7 +8,9 @@ import {
 } from "../extensions/_review/pending";
 
 describe("pending review identity", () => {
-	it("fingerprints kind and exact input deterministically", () => {
+	it("hashes reviewed content and fingerprints kind/input deterministically", () => {
+		expect(contentHash("same")).toMatch(/^[0-9a-f]{64}$/);
+		expect(contentHash("same")).toBe(contentHash("same"));
 		expect(reviewFingerprint("plan", "same")).toBe(reviewFingerprint("plan", "same"));
 		expect(reviewFingerprint("plan", "same")).not.toBe(reviewFingerprint("draft", "same"));
 		expect(reviewFingerprint("draft", "same")).not.toBe(reviewFingerprint("draft", "changed"));

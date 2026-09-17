@@ -391,6 +391,7 @@ export default function draft(pi: ExtensionAPI): void {
 			},
 			required: ["text"],
 		},
+		executionMode: "sequential",
 
 		async execute(_id, params, signal, _onUpdate, ctx: ExtensionContext) {
 			const input = params as { text?: string; reviewId?: string };

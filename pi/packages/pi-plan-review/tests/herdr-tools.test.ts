@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -57,14 +58,31 @@ describe("review tools report only browser decision waits to Herdr", () => {
 		dir = undefined;
 	});
 
-	it("wraps submit_plan review approval and failure in balanced events", async () => {
+	it("registers both approval gates for sequential sibling-tool execution", () => {
+		const plan = captureTools(planExtension);
+		const draft = captureTools(draftExtension);
+		expect(plan.tools.get("submit_plan").executionMode).toBe("sequential");
+		expect(draft.tools.get("submit_draft").executionMode).toBe("sequential");
+	});
+
+	it("binds successful plan approval text and details to the reviewed content digest", async () => {
 		dir = mkdtempSync(join(tmpdir(), "plan-herdr-"));
-		writeFileSync(join(dir, "PLAN.md"), "# Plan\n\nShip it.\n");
+		const reviewedContent = "# Plan\n\nShip it.\n";
+		writeFileSync(join(dir, "PLAN.md"), reviewedContent);
 		const { tools, emit } = captureTools(planExtension);
 		vi.mocked(createReviewServer).mockResolvedValueOnce({ action: "approve", approved: true });
 
 		const approved = await tools.get("submit_plan").execute("plan-1", { filePath: "PLAN.md" }, undefined, undefined, interactiveCtx(dir));
-		expect(approved.content[0].text).toMatch(/Plan approved/);
+		const digest = `sha256:${createHash("sha256").update(reviewedContent).digest("hex")}`;
+		expect(approved.content[0].text).toContain(`Approval applies only to the exact reviewed content digest ${digest}`);
+		expect(approved.details).toMatchObject({
+			outcome: "approved",
+			filePath: "PLAN.md",
+			reviewedContentHash: digest,
+			reviewFingerprint: expect.stringMatching(/^[0-9a-f]{64}$/),
+			reviewId: expect.stringMatching(/^plan-/),
+		});
+		expect(Object.isFrozen(approved.details)).toBe(true);
 		expectBalancedBlocker(emit.mock.calls, "Waiting for plan review");
 
 		emit.mockClear();
