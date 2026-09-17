@@ -85,3 +85,9 @@ symlink (directly or through a linked ancestor) under
 `~/.pi/agent/extensions`. The check is read-only, skips hosts where that runtime
 directory has not been deployed, and tells you to run `just stow` when a newly
 tracked module has not reached an existing runtime tree.
+
+## Idle recaps
+
+`recap.ts` provides `/recap` and automatically generates an idle-session recap
+after 30 minutes. Both use the same notification renderer. Override the delay
+for testing or personal preference with `PI_RECAP_IDLE_MINUTES`.
