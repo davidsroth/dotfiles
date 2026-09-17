@@ -49,6 +49,32 @@ function expectBalancedBlocker(events: any[][], label: string) {
 	expect(closed.id).toBe(opened.id);
 }
 
+interface BatchCall {
+	id: string;
+	name: string;
+	execute: () => unknown | Promise<unknown>;
+}
+
+async function preflightBatch(handler: any, calls: BatchCall[]) {
+	const branch = [{
+		type: "message",
+		message: {
+			role: "assistant",
+			stopReason: "toolUse",
+			content: calls.map((call) => ({ type: "toolCall", id: call.id, name: call.name, arguments: {} })),
+		},
+	}];
+	const ctx = { sessionManager: { getBranch: () => branch } };
+	const results = [];
+	for (const call of calls) {
+		results.push(await handler({ toolCallId: call.id, toolName: call.name, input: {} }, ctx));
+	}
+	for (const [index, call] of calls.entries()) {
+		if (!results[index]?.block) await call.execute();
+	}
+	return results;
+}
+
 describe("review tools report only browser decision waits to Herdr", () => {
 	let dir: string | undefined;
 
@@ -63,6 +89,44 @@ describe("review tools report only browser decision waits to Herdr", () => {
 		const draft = captureTools(draftExtension);
 		expect(plan.tools.get("submit_plan").executionMode).toBe("sequential");
 		expect(draft.tools.get("submit_draft").executionMode).toBe("sequential");
+		expect(plan.tools.get("submit_plan").description).toContain("MUST be the only tool call");
+		expect(draft.tools.get("submit_draft").description).toContain("MUST be the only tool call");
+		expect(plan.tools.get("submit_plan").promptGuidelines[0]).toContain("only tool call");
+		expect(draft.tools.get("submit_draft").promptGuidelines[0]).toContain("only tool call");
+	});
+
+	it("blocks every plan+mutation and draft+posting sibling before either execute runs", async () => {
+		const plan = captureTools(planExtension);
+		const draft = captureTools(draftExtension);
+		const planCalls: BatchCall[] = [
+			{ id: "plan", name: "submit_plan", execute: vi.fn() },
+			{ id: "edit", name: "edit", execute: vi.fn() },
+		];
+		const draftCalls: BatchCall[] = [
+			{ id: "draft", name: "submit_draft", execute: vi.fn() },
+			{ id: "post", name: "slack_post", execute: vi.fn() },
+		];
+
+		const planResults = await preflightBatch(plan.handlers.get("tool_call"), planCalls);
+		const draftResults = await preflightBatch(draft.handlers.get("tool_call"), draftCalls);
+		for (const result of [...planResults, ...draftResults]) {
+			expect(result).toMatchObject({ block: true, terminate: true });
+			expect(result.reason).toContain("entire batch was blocked");
+		}
+		for (const call of [...planCalls, ...draftCalls]) expect(call.execute).not.toHaveBeenCalled();
+	});
+
+	it("allows and invokes an alone gate and an unrelated batch", async () => {
+		const plan = captureTools(planExtension);
+		const alone: BatchCall[] = [{ id: "plan", name: "submit_plan", execute: vi.fn() }];
+		const unrelated: BatchCall[] = [
+			{ id: "read", name: "read", execute: vi.fn() },
+			{ id: "grep", name: "grep", execute: vi.fn() },
+		];
+
+		expect(await preflightBatch(plan.handlers.get("tool_call"), alone)).toEqual([undefined]);
+		expect(await preflightBatch(plan.handlers.get("tool_call"), unrelated)).toEqual([undefined, undefined]);
+		for (const call of [...alone, ...unrelated]) expect(call.execute).toHaveBeenCalledOnce();
 	});
 
 	it("binds successful plan approval text and details to the reviewed content digest", async () => {

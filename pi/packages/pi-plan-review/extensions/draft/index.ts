@@ -29,6 +29,7 @@
  */
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { inspectApprovalBatch } from "../_review/batch";
 import { waitWithHerdrBlocked } from "../_review/herdr";
 import { escapeHtml, scriptJson } from "../_review/html";
 import { pbcopy } from "../_review/os";
@@ -367,16 +368,30 @@ export default function draft(pi: ExtensionAPI): void {
 		persist();
 	}
 
+	pi.on("tool_call", (event, ctx) => {
+		const inspection = inspectApprovalBatch(
+			ctx.sessionManager.getBranch() as readonly unknown[],
+			event.toolCallId,
+			"submit_draft",
+		);
+		if (!inspection.blocked) return;
+		return { block: true, terminate: true, reason: inspection.reason };
+	});
+
 	pi.registerTool({
 		name: "submit_draft",
 		label: "Submit Draft",
 		description:
 			"Whenever you're about to send or post a message on the user's behalf (Slack reply, PR " +
 			"comment, email, DM, etc.), route it through this tool instead of posting directly. " +
-			"The user reviews and may edit the text, then chooses COPY, APPROVE, or REJECT. " +
-			"A timeout is none of those outcomes and never authorises posting: call submit_draft again " +
-			"with the same text (and optionally the returned reviewId) to resume the pending review. " +
+			"submit_draft MUST be the only tool call in its assistant response; any sibling tool call " +
+			"blocks the entire batch. The user reviews and may edit the text, then chooses COPY, APPROVE, " +
+			"or REJECT. A timeout is none of those outcomes and never authorises posting: call submit_draft " +
+			"again with the same text (and optionally the returned reviewId) to resume the pending review. " +
 			"This tool itself never posts anywhere.",
+		promptGuidelines: [
+			"Call submit_draft as the only tool call in the assistant response. Never batch it with posting, messaging, mutation, or any other tool.",
+		],
 		parameters: {
 			type: "object",
 			properties: {

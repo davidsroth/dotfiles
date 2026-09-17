@@ -78,7 +78,7 @@ If the user edits the draft inline before copying, approving, or rejecting, a **
 
 The tool itself never posts anywhere. It exists as the explicit-approval channel between "draft something" and "actually send something on the user's behalf".
 
-Both `submit_plan` and `submit_draft` declare `executionMode: "sequential"`. Pi therefore does not run sibling tool calls from the same assistant response alongside the approval gate: a plan mutation cannot race plan approval, and a posting tool cannot race draft approval. External processes remain outside Pi's scheduler, which is why plan approval also carries the reviewed digest.
+Both `submit_plan` and `submit_draft` declare `executionMode: "sequential"` and must be the **only** tool call in their assistant response. A `tool_call` preflight inspects Pi's synchronized current assistant message; if either gate has any sibling call, every call in that batch is blocked with `terminate: true` and the agent must retry the gate alone. Sequential execution remains defense in depth, while the preflight prevents already-queued mutations or posting calls from running at all. External processes remain outside Pi's scheduler, which is why plan approval also carries the reviewed digest.
 
 Return shape:
 
@@ -113,6 +113,7 @@ Shared plumbing lives in `extensions/_review/`:
 
 - `server.ts` — `createReviewServer<T>` owns the HTTP/lifecycle plumbing (ephemeral loopback bind, nonce, duplicate-POST handling, 1 MB body cap, focus capture/restore, browser open, 30-min timeout, and optional `AbortSignal`). Each extension injects `renderPage(nonce)`, a typed `parseDecision(raw)` validator, and distinct timeout/abort results. After timeout or abort the endpoint remains briefly as an expired tombstone: a late action gets HTTP 410 and can never become a decision. Decision/abort races are settled by the first synchronous terminal state transition, and the abort listener is removed on every terminal path.
 - `pending.ts` — stable review IDs, exact-input fingerprints, retry accounting, and validation for session-log state used by both review tools.
+- `batch.ts` — pure inspection of the synchronized assistant tool-call batch, used to enforce that approval gates run alone.
 - `theme.ts` — theme color resolution + the shared `:root` CSS variable block.
 - `os.ts` — browser open, frontmost-app focus restore, clipboard.
 - `html.ts` — `escapeHtml` / `scriptJson`. `tool.ts` — the `toolText` result helper.

@@ -13,6 +13,7 @@ import { readFileSync, statSync } from "node:fs";
 import { createRequire } from "node:module";
 import { extname, resolve } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { inspectApprovalBatch } from "../_review/batch";
 import { escapeHtml, scriptJson } from "../_review/html";
 import { waitWithHerdrBlocked } from "../_review/herdr";
 import {
@@ -935,6 +936,16 @@ export default function plan(pi: ExtensionAPI): void {
 		persist();
 	}
 
+	pi.on("tool_call", (event, ctx) => {
+		const inspection = inspectApprovalBatch(
+			ctx.sessionManager.getBranch() as readonly unknown[],
+			event.toolCallId,
+			"submit_plan",
+		);
+		if (!inspection.blocked) return;
+		return { block: true, terminate: true, reason: inspection.reason };
+	});
+
 	pi.registerCommand("plan-status", {
 		description: "Show active plan path",
 		handler: async (_args, ctx) => {
@@ -1056,9 +1067,13 @@ export default function plan(pi: ExtensionAPI): void {
 		description:
 			"Submit a plan or design for the user to review and sign off on before you implement a " +
 			"non-trivial change. Write the plan to a .md or .mdx file first, then call this tool with " +
-			"that file's path. The user can highlight text to add inline comments and either approve " +
-			"or send feedback. A timeout is NOT feedback or approval: call submit_plan again with the " +
-			"same unchanged file (and optionally the returned reviewId) to resume the pending review.",
+			"that file's path. submit_plan MUST be the only tool call in its assistant response; any " +
+			"sibling tool call blocks the entire batch. The user can highlight text to add inline comments " +
+			"and either approve or send feedback. A timeout is NOT feedback or approval: call submit_plan " +
+			"again with the same unchanged file (and optionally the returned reviewId) to resume the pending review.",
+		promptGuidelines: [
+			"Call submit_plan as the only tool call in the assistant response. Never batch it with file mutations, execution, messaging, or any other tool.",
+		],
 		parameters: {
 			type: "object",
 			properties: {
