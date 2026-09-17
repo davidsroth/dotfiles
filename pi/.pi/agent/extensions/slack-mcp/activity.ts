@@ -68,7 +68,10 @@ export interface MyConversationsArgs extends StructuredSearchFilters {
   search_query?: string;
   filters?: StructuredSearchFilters;
   start?: string | number | Date;
+  start_time?: string | number | Date;
   end?: string | number | Date;
+  end_time?: string | number | Date;
+  granularity?: "conversation" | "thread";
   lookbackHours?: number;
   lookback_hours?: number;
   now?: string | number | Date;
@@ -86,7 +89,9 @@ export interface SearchBatchArgs extends StructuredSearchFilters {
   queries: string[];
   filters?: StructuredSearchFilters;
   start?: string | number | Date;
+  start_time?: string | number | Date;
   end?: string | number | Date;
+  end_time?: string | number | Date;
   pageSize?: number;
   page_size?: number;
   maxPages?: number;
@@ -101,7 +106,8 @@ export interface SearchBatchArgs extends StructuredSearchFilters {
 export type OpenMessageContext = "auto" | "thread" | "around";
 
 export interface OpenMessageArgs {
-  permalink: string;
+  permalink?: string;
+  url?: string;
   context?: OpenMessageContext;
   oldest?: string | number | Date;
   latest?: string | number | Date;
@@ -117,7 +123,7 @@ export interface OpenMessageArgs {
   snippet_length?: number;
 }
 
-export type ThreadReference = string | OpenMessageArgs;
+export type ThreadReference = string | (OpenMessageArgs & ({ permalink: string } | { url: string }));
 
 export interface ThreadsGetManyArgs {
   refs: ThreadReference[];
@@ -200,11 +206,15 @@ function isoFromMessage(message: SlackMessageRow): string {
 
 function messageMillis(message: SlackMessageRow): number | null {
   try {
-    return message.time
-      ? timestampMillis(message.time, "message time")
-      : timestampMillis(message.messageTs, "message timestamp");
+    // MsgID is Slack's microsecond timestamp. The rendered Time column is only
+    // second-precision in pinned upstream 1.3.0 and cannot enforce exact bounds.
+    return timestampMillis(message.messageTs, "message timestamp");
   } catch {
-    return null;
+    try {
+      return message.time ? timestampMillis(message.time, "message time") : null;
+    } catch {
+      return null;
+    }
   }
 }
 
@@ -468,7 +478,11 @@ function resultLimit(messages: SlackMessageRow[], maxResults: number): { message
     : { messages, truncated: false };
 }
 
-function groupMyMessages(messages: CompactSlackMessage[], authenticatedUserId: string) {
+function groupMyMessages(
+  messages: CompactSlackMessage[],
+  authenticatedUserId: string,
+  granularity: "conversation" | "thread",
+) {
   const groups = new Map<string, {
     key: string;
     kind: "thread" | "conversation";
@@ -483,7 +497,7 @@ function groupMyMessages(messages: CompactSlackMessage[], authenticatedUserId: s
   }>();
 
   for (const message of messages) {
-    const threadTs = message.threadTs;
+    const threadTs = granularity === "thread" ? message.threadTs : undefined;
     const key = threadTs ? `${message.channelId}:thread:${threadTs}` : `${message.channelId}:conversation`;
     let group = groups.get(key);
     if (!group) {
@@ -529,10 +543,12 @@ export async function runMyConversations(
   }
 
   const nowMs = args.now === undefined ? Date.now() : timestampMillis(args.now, "now");
-  const endMs = args.end === undefined ? nowMs : timestampMillis(args.end, "end");
+  const endValue = args.end_time ?? args.end;
+  const endMs = endValue === undefined ? nowMs : timestampMillis(endValue, "end_time");
   const lookbackHours = args.lookbackHours ?? args.lookback_hours ?? 24;
   if (!Number.isFinite(lookbackHours) || lookbackHours <= 0) throw new Error("lookbackHours must be positive");
-  const startMs = args.start === undefined ? endMs - lookbackHours * 3_600_000 : timestampMillis(args.start, "start");
+  const startValue = args.start_time ?? args.start;
+  const startMs = startValue === undefined ? endMs - lookbackHours * 3_600_000 : timestampMillis(startValue, "start_time");
   if (startMs >= endMs) throw new Error("start must be earlier than end");
 
   const pageSize = boundedInteger(args.pageSize ?? args.page_size, 100, 100, "pageSize");
@@ -566,8 +582,9 @@ export async function runMyConversations(
       team: identity.team,
       teamId: identity.team_id,
     },
-    window: { start: new Date(startMs).toISOString(), end: new Date(endMs).toISOString(), semantics: "start <= Time < end" },
-    groups: groupMyMessages(compact, identity.user_id),
+    window: { start: new Date(startMs).toISOString(), end: new Date(endMs).toISOString(), semantics: "start <= MsgID < end" },
+    granularity: args.granularity ?? "thread",
+    groups: groupMyMessages(compact, identity.user_id, args.granularity ?? "thread"),
     messages: compact,
     messageCount: compact.length,
     pagesFetched: paginated.pagesFetched,
@@ -598,8 +615,10 @@ export async function runSearchBatch(caller: SlackToolCaller, args: SearchBatchA
   if (queries.some((query) => !query)) throw new Error("queries must not contain empty variants");
   if (new Set(queries).size !== queries.length) throw new Error("queries must contain distinct lexical variants");
 
-  const startMs = args.start === undefined ? undefined : timestampMillis(args.start, "start");
-  const endMs = args.end === undefined ? undefined : timestampMillis(args.end, "end");
+  const startValue = args.start_time ?? args.start;
+  const endValue = args.end_time ?? args.end;
+  const startMs = startValue === undefined ? undefined : timestampMillis(startValue, "start_time");
+  const endMs = endValue === undefined ? undefined : timestampMillis(endValue, "end_time");
   if (startMs !== undefined && endMs !== undefined && startMs >= endMs) throw new Error("start must be earlier than end");
   const pageSize = boundedInteger(args.pageSize ?? args.page_size, 100, 100, "pageSize");
   const maxPages = boundedInteger(args.maxPages ?? args.max_pages, 3, HARD_MAX_PAGES, "maxPages");
@@ -644,7 +663,7 @@ export async function runSearchBatch(caller: SlackToolCaller, args: SearchBatchA
       window: {
         ...(startMs !== undefined ? { start: new Date(startMs).toISOString() } : {}),
         ...(endMs !== undefined ? { end: new Date(endMs).toISOString() } : {}),
-        semantics: "start <= Time < end",
+        semantics: "start <= MsgID < end",
       },
     } : {}),
     messages: selected.map(({ message, matchedQueries }) => compactSlackMessage(message, {
@@ -771,9 +790,11 @@ export async function runOpenMessage(
   authEnv: Record<string, string>,
   args: OpenMessageArgs,
 ) {
-  const ref = parseSlackPermalink(args.permalink);
+  const permalink = args.url ?? args.permalink;
+  if (!permalink) throw new Error("url (Slack permalink) is required");
+  const ref = parseSlackPermalink(permalink);
   const exactSearch = parseSlackMessageCsv(await callUpstream(caller, SEARCH_TOOL, {
-    search_query: args.permalink,
+    search_query: permalink,
     limit: 100,
     _raw: true,
   }));
@@ -857,7 +878,7 @@ export async function runThreadsGetMany(
   }
   const concurrency = boundedInteger(args.concurrency, 4, HARD_MAX_CONCURRENCY, "concurrency");
   const results = await mapWithConcurrency(args.refs, concurrency, async (reference, index) => {
-    const openArgs: OpenMessageArgs = typeof reference === "string" ? { permalink: reference } : reference;
+    const openArgs: OpenMessageArgs = typeof reference === "string" ? { url: reference } : reference;
     const merged: OpenMessageArgs = {
       ...openArgs,
       ...(openArgs.maxPages === undefined && openArgs.max_pages === undefined && (args.maxPages ?? args.max_pages) !== undefined
@@ -874,7 +895,7 @@ export async function runThreadsGetMany(
       const result = await runOpenMessage(caller, authEnv, merged);
       return {
         index,
-        ref: openArgs.permalink,
+        ref: openArgs.url ?? openArgs.permalink ?? "",
         result,
         complete: result.complete,
         pagesFetched: result.pagesFetched,
@@ -882,7 +903,7 @@ export async function runThreadsGetMany(
     } catch (caught) {
       return {
         index,
-        ref: openArgs.permalink,
+        ref: openArgs.url ?? openArgs.permalink ?? "",
         error: errorMessage(caught),
         complete: false,
         pagesFetched: 0,

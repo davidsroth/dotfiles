@@ -53,7 +53,9 @@
  * LLM-callable tools (always present):
  *   slack_mcp_connect, slack_mcp_disconnect, slack_mcp_status, slack_mcp_call,
  *   slack_mcp_whoami (auth.test — returns the authenticated user_id; use
- *   `from:<user_id>` in searches since `from:@me` is unsupported by Slack)
+ *   `from:<user_id>` in searches since `from:@me` is unsupported by Slack),
+ *   slack_my_conversations, slack_search_messages_batch, slack_open_message,
+ *   and slack_threads_get_many.
  *
  * Plus every tool reported by the upstream MCP server (e.g. conversations_history,
  * channels_list, conversations_search_messages), each prefixed with `toolPrefix`.
@@ -64,6 +66,9 @@
  *   types.ts           — shared data shapes
  *   config.ts          — auth-file loading / resolution
  *   identity.ts        — Slack auth.test / users.info (whoami)
+ *   activity.ts        — paginated/grouped composite read workflows
+ *   slack-api.ts       — allowlisted read-only Web API context retrieval
+ *   composite-output.ts— stable response envelopes + whole-result budgets
  *   postprocess.ts     — CSV trimming + mention resolution
  *   process-tracker.ts — child-PID tracking + last-resort reaper
  *   mcp-client.ts      — StdioMCPClient (spawn + JSON-RPC handshake)
@@ -73,6 +78,18 @@
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
+import {
+  runMyConversations,
+  runOpenMessage,
+  runSearchBatch,
+  runThreadsGetMany,
+  type MyConversationsArgs,
+  type OpenMessageArgs,
+  type SearchBatchArgs,
+  type SlackToolCaller,
+  type ThreadsGetManyArgs,
+} from "./activity";
+import { formatCompositeResult } from "./composite-output";
 import { AUTH_FILE, TOOL_DESCRIPTION_NOTES } from "./constants";
 import { hasAuthEnv, loadConfig, resolveConfig } from "./config";
 import { slackAuthTest } from "./identity";
@@ -125,7 +142,17 @@ export default async function slackMCPExtension(pi: ExtensionAPI): Promise<void>
 
   const registryDiagnostics = (): StatusDiagnostics => {
     try {
-      const controlToolNames = new Set(["slack_mcp_connect", "slack_mcp_disconnect", "slack_mcp_call", "slack_mcp_status", "slack_mcp_whoami"]);
+      const controlToolNames = new Set([
+        "slack_mcp_connect",
+        "slack_mcp_disconnect",
+        "slack_mcp_call",
+        "slack_mcp_status",
+        "slack_mcp_whoami",
+        "slack_my_conversations",
+        "slack_search_messages_batch",
+        "slack_open_message",
+        "slack_threads_get_many",
+      ]);
       const isSlackTool = (name: string) => name.startsWith(cfg.toolPrefix) && !controlToolNames.has(name);
       return {
         registeredToolNames: pi.getAllTools().map((t) => t.name).filter(isSlackTool).sort(),
@@ -235,6 +262,39 @@ export default async function slackMCPExtension(pi: ExtensionAPI): Promise<void>
     }
   };
 
+  const executeComposite = async (
+    toolName: string,
+    params: Record<string, unknown>,
+    runner: (caller: SlackToolCaller, authEnv: Record<string, string>) => Promise<unknown>,
+  ): Promise<ToolExecutionResult> => {
+    const connected = client?.isConnected ? { ok: true as const } : await doConnect(notify);
+    if (!connected.ok) return toolError(toolName, connected.error);
+    if (!client?.isConnected) return toolError(toolName, "Not connected to Slack MCP.");
+
+    // Respect disabledTools inside composites instead of silently bypassing the
+    // user's configured tool boundary.
+    const baseClient = client;
+    const caller: SlackToolCaller = {
+      callTool: (name: string, args: Record<string, unknown>) => {
+        if (cfg.disabledTools.has(name)) {
+          return Promise.resolve({ text: `Required upstream Slack tool '${name}' is disabled by ${AUTH_FILE}.`, isError: true });
+        }
+        return baseClient.callTool(name, args);
+      },
+    };
+
+    try {
+      const data = await runner(caller, cfg.env);
+      const rawBudget = params.max_response_chars;
+      const budget = typeof rawBudget === "number" ? rawBudget : 50_000;
+      const formatted = formatCompositeResult(toolName, data, budget);
+      return toolResult(toolName, formatted.text, formatted.envelope.meta);
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      return toolError(toolName, msg, { error: msg });
+    }
+  };
+
   // === Synchronous fast-path ===============================================
   // If a shared client is already connected for this config (e.g. the parent
   // session connected before spawning us), take a ref and register dynamic
@@ -301,6 +361,117 @@ export default async function slackMCPExtension(pi: ExtensionAPI): Promise<void>
         if (result.ok) ctx.ui.notify(`Reconnected. ${result.tools} tools.`, "info");
         else ctx.ui.notify(`Reconnect failed: ${result.error}`, "error");
       }
+    },
+  });
+
+  // Composite read tools ----------------------------------------------------
+  // These encode the pagination, exact-boundary, deduplication, DM-context,
+  // and response-budget behavior that repeated session usage showed models do
+  // not reliably reconstruct from low-level primitives.
+  const exactWindowFields = {
+    start_time: Type.Optional(Type.String({ description: "Inclusive ISO-8601 or Slack timestamp boundary." })),
+    end_time: Type.Optional(Type.String({ description: "Exclusive ISO-8601 or Slack timestamp boundary." })),
+  };
+  const pagingFields = {
+    page_size: Type.Optional(Type.Integer({ minimum: 1, maximum: 100, default: 100 })),
+    max_pages: Type.Optional(Type.Integer({ minimum: 1, maximum: 50, default: 5 })),
+    snippet_length: Type.Optional(Type.Integer({ minimum: 20, maximum: 2000, default: 280 })),
+    max_response_chars: Type.Optional(Type.Integer({ minimum: 1000, maximum: 200000, default: 50000 })),
+  };
+  const searchFilterFields = {
+    filter_in_channel: Type.Optional(Type.String({ description: "Public/private channel ID or #name." })),
+    filter_in_im_or_mpim: Type.Optional(Type.String({ description: "Other person's U…/W… user ID or @handle; not a D… conversation ID." })),
+    filter_users_with: Type.Optional(Type.String()),
+    filter_users_from: Type.Optional(Type.String()),
+    filter_threads_only: Type.Optional(Type.Boolean()),
+  };
+
+  pi.registerTool({
+    name: "slack_my_conversations",
+    label: "Slack: my conversations",
+    description:
+      "List conversations in which the authenticated Slack user authored at least one message. " +
+      "Automatically resolves identity, follows search cursors, applies exact start-inclusive/end-exclusive bounds, " +
+      "deduplicates, groups, and reports completeness. Coverage is Slack's accessible search index, not inaccessible or unindexed history.",
+    parameters: Type.Object({
+      ...exactWindowFields,
+      lookback_hours: Type.Optional(Type.Number({ minimum: 0.25, maximum: 720, default: 24 })),
+      granularity: Type.Optional(Type.Union([Type.Literal("conversation"), Type.Literal("thread")], { default: "thread" })),
+      search_query: Type.Optional(Type.String({ description: "Optional lexical narrowing query." })),
+      max_results: Type.Optional(Type.Integer({ minimum: 1, maximum: 1000, default: 200 })),
+      ...pagingFields,
+      filter_in_channel: searchFilterFields.filter_in_channel,
+      filter_in_im_or_mpim: searchFilterFields.filter_in_im_or_mpim,
+      filter_threads_only: searchFilterFields.filter_threads_only,
+    }),
+    async execute(_toolCallId, rawParams) {
+      const params = (rawParams ?? {}) as Record<string, unknown>;
+      return executeComposite("slack_my_conversations", params, (caller, authEnv) =>
+        runMyConversations(caller, authEnv, params as MyConversationsArgs));
+    },
+  });
+
+  pi.registerTool({
+    name: "slack_search_messages_batch",
+    label: "Slack: search messages batch",
+    description:
+      "Run 1-20 lexical Slack search variants with shared filters, bounded concurrency, cursor pagination, exact time filtering, " +
+      "deduplication, query provenance, and per-query completeness. Prefer this over manually spraying near-duplicate searches.",
+    parameters: Type.Object({
+      queries: Type.Array(Type.String({ minLength: 1 }), { minItems: 1, maxItems: 20 }),
+      ...exactWindowFields,
+      ...searchFilterFields,
+      concurrency: Type.Optional(Type.Integer({ minimum: 1, maximum: 8, default: 4 })),
+      max_results: Type.Optional(Type.Integer({ minimum: 1, maximum: 1000, default: 300 })),
+      ...pagingFields,
+    }),
+    async execute(_toolCallId, rawParams) {
+      const params = (rawParams ?? {}) as unknown as SearchBatchArgs & Record<string, unknown>;
+      return executeComposite("slack_search_messages_batch", params, (caller) => runSearchBatch(caller, params));
+    },
+  });
+
+  pi.registerTool({
+    name: "slack_open_message",
+    label: "Slack: open message",
+    description:
+      "Dereference a Slack permalink and return the exact message plus bounded context. " +
+      "Threads are auto-paginated; unthreaded DMs/MPDMs use adjacent conversation history instead of replies-only retrieval.",
+    parameters: Type.Object({
+      url: Type.String({ description: "Slack message permalink containing /archives/{channel}/p{timestamp}." }),
+      context: Type.Optional(Type.Union([Type.Literal("auto"), Type.Literal("thread"), Type.Literal("around")], { default: "auto" })),
+      before_seconds: Type.Optional(Type.Integer({ minimum: 0, maximum: 604800, default: 86400 })),
+      after_seconds: Type.Optional(Type.Integer({ minimum: 0, maximum: 604800, default: 86400 })),
+      ...pagingFields,
+    }),
+    async execute(_toolCallId, rawParams) {
+      const params = (rawParams ?? {}) as unknown as OpenMessageArgs & Record<string, unknown>;
+      return executeComposite("slack_open_message", params, (caller, authEnv) => runOpenMessage(caller, authEnv, params));
+    },
+  });
+
+  pi.registerTool({
+    name: "slack_threads_get_many",
+    label: "Slack: get message contexts",
+    description:
+      "Fetch bounded context for 1-30 Slack permalinks with limited concurrency and per-item errors/completeness. " +
+      "DM and MPDM references use surrounding history rather than assuming replies are threaded.",
+    parameters: Type.Object({
+      refs: Type.Array(Type.Union([
+        Type.String({ description: "Slack message permalink." }),
+        Type.Object({
+          url: Type.String({ description: "Slack message permalink." }),
+          context: Type.Optional(Type.Union([Type.Literal("auto"), Type.Literal("thread"), Type.Literal("around")])),
+          before_seconds: Type.Optional(Type.Integer({ minimum: 0, maximum: 604800 })),
+          after_seconds: Type.Optional(Type.Integer({ minimum: 0, maximum: 604800 })),
+        }),
+      ]), { minItems: 1, maxItems: 30 }),
+      concurrency: Type.Optional(Type.Integer({ minimum: 1, maximum: 8, default: 4 })),
+      ...pagingFields,
+    }),
+    async execute(_toolCallId, rawParams) {
+      const params = (rawParams ?? {}) as unknown as ThreadsGetManyArgs & Record<string, unknown>;
+      return executeComposite("slack_threads_get_many", params, (caller, authEnv) => runThreadsGetMany(caller, authEnv, params));
     },
   });
 

@@ -42,10 +42,12 @@ export const TOOL_DESCRIPTION_NOTES: Record<string, string> = {
     "Resolution caveat: `from:<id>` and `\"<@id>\"` searches reliably surface a " +
     "person's own question, but frequently MISS the reply that resolved it — " +
     "answers often don't @-mention the asker, and in DMs/mpDMs replies are usually " +
-    "top-level (un-threaded) messages. To confirm whether a question was actually " +
-    "answered, call conversations_history on that channel_id and read the messages " +
-    "after it (conversations_replies only sees threaded replies, so it misses " +
-    "un-threaded DM/mpDM answers).",
+    "top-level (un-threaded) messages. Prefer slack_open_message for a permalink or " +
+    "conversations_history for manual follow-up.",
+  conversations_replies:
+    "DM/mpDM caveat: ordinary replies are usually top-level, not threaded, so this " +
+    "tool often returns only the referenced message. Prefer slack_open_message or " +
+    "slack_threads_get_many; they automatically use surrounding history for DMs.",
 };
 
 // Max NEW users.info lookups per tool call when resolving bare <@U…> mentions.

@@ -8,6 +8,7 @@ const identityMocks = vi.hoisted(() => ({
 vi.mock("../slack-mcp/identity", () => identityMocks);
 
 import {
+  isMessageInWindow,
   parseSlackMessageCsv,
   parseSlackPermalink,
   runMyConversations,
@@ -51,7 +52,7 @@ function csv(messages: CsvMessage[]): string {
 function callerFrom(
   implementation: (name: string, args: Record<string, unknown>) => Promise<{ text: string; isError: boolean }> | { text: string; isError: boolean },
 ): SlackToolCaller & { callTool: ReturnType<typeof vi.fn> } {
-  return { callTool: vi.fn(implementation) };
+  return { callTool: vi.fn(async (name: string, args: Record<string, unknown>) => implementation(name, args)) };
 }
 
 beforeEach(() => {
@@ -83,6 +84,20 @@ describe("raw Slack CSV parsing", () => {
   });
 });
 
+describe("exact time filtering", () => {
+  it("uses microsecond MsgID rather than the second-precision Time column", () => {
+    const message = {
+      messageTs: "1700000000.500000",
+      channelId: "C1",
+      channelLabel: "#one",
+      text: "boundary",
+      time: "2023-11-14T22:13:20Z",
+    };
+    expect(isMessageInWindow(message, 1_700_000_000_500, 1_700_000_000_501)).toBe(true);
+    expect(isMessageInWindow(message, undefined, 1_700_000_000_500)).toBe(false);
+  });
+});
+
 describe("runMyConversations", () => {
   it("uses exact start-inclusive/end-exclusive filtering, stable page filters, dedupe, and grouping", async () => {
     const start = "2026-08-12T10:00:00.000Z";
@@ -103,8 +118,9 @@ describe("runMyConversations", () => {
     const caller = callerFrom(() => ({ text: pages.shift()!, isError: false }));
 
     const result = await runMyConversations(caller, {}, {
-      start,
-      end,
+      start_time: start,
+      end_time: end,
+      granularity: "thread",
       filter_in_channel: "#general",
       maxPages: 4,
     });
@@ -257,7 +273,7 @@ describe("permalink opening", () => {
       };
     });
 
-    const result = await runOpenMessage(caller, {}, { permalink: channelPermalink, maxPages: 1 });
+    const result = await runOpenMessage(caller, {}, { url: channelPermalink, maxPages: 1 });
 
     expect(result.contextSource).toBe("replies");
     expect(result.complete).toBe(false);
