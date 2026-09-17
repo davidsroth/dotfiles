@@ -48,12 +48,15 @@ async function start(
 	timeoutMs = 2000,
 	staticAssets?: Record<string, { filePath: string; contentType: string }>,
 	expiredGraceMs = 100,
+	signal?: AbortSignal,
 ) {
 	let url = "";
 	const promise = createReviewServer<{ action: unknown }>({
 		renderPage: (nonce) => nonce,
 		parseDecision: (data) => ({ action: data.action }),
 		onTimeout: () => ({ action: "TIMEOUT" }),
+		signal,
+		onAbort: () => ({ action: "ABORTED" }),
 		timeoutMs,
 		expiredGraceMs,
 		onUrl: (u) => { url = u; },
@@ -144,12 +147,72 @@ describe("createReviewServer", () => {
 		}
 	});
 
-	it("returns a distinct timeout and rejects late completion as expired", async () => {
-		const { port, promise } = await start(40, undefined, 200);
+	it("settles an already-aborted signal without opening a review endpoint", async () => {
+		const controller = new AbortController();
+		controller.abort();
+		const onUrl = vi.fn();
+		const removeListener = vi.spyOn(controller.signal, "removeEventListener");
+		const result = createReviewServer<{ action: string }>({
+			renderPage: (nonce) => nonce,
+			parseDecision: () => ({ action: "approve" }),
+			onTimeout: () => ({ action: "TIMEOUT" }),
+			signal: controller.signal,
+			onAbort: () => ({ action: "ABORTED" }),
+			onUrl,
+		});
+
+		await expect(result).resolves.toEqual({ action: "ABORTED" });
+		expect(onUrl).not.toHaveBeenCalled();
+		expect(removeListener).toHaveBeenCalledWith("abort", expect.any(Function));
+	});
+
+	it("aborts before decision, removes its listener, and rejects a late completion", async () => {
+		const controller = new AbortController();
+		const removeListener = vi.spyOn(controller.signal, "removeEventListener");
+		const { port, promise } = await start(2000, undefined, 200, controller.signal);
+		const page = await rawRequest(port, {});
+		const nonce = page.body;
+
+		controller.abort();
+		await expect(promise).resolves.toEqual({ action: "ABORTED" });
+		expect(removeListener).toHaveBeenCalledWith("abort", expect.any(Function));
+
+		const late = await rawRequest(port, {
+			method: "POST",
+			path: "/decision",
+			body: JSON.stringify({ nonce, action: "approve" }),
+		});
+		expect(late.status).toBe(410);
+		expect(JSON.parse(late.body)).toEqual({ ok: false, expired: true, error: "review expired" });
+	});
+
+	it("lets an accepted decision win a decision/abort race and removes the listener", async () => {
+		const controller = new AbortController();
+		const removeListener = vi.spyOn(controller.signal, "removeEventListener");
+		const { port, promise } = await start(2000, undefined, 200, controller.signal);
+		const page = await rawRequest(port, {});
+
+		const decision = await rawRequest(port, {
+			method: "POST",
+			path: "/decision",
+			body: JSON.stringify({ nonce: page.body, action: "approve" }),
+		});
+		expect(decision.status).toBe(200);
+		controller.abort();
+
+		await expect(promise).resolves.toEqual({ action: "approve" });
+		expect(removeListener).toHaveBeenCalledWith("abort", expect.any(Function));
+	});
+
+	it("returns a distinct timeout, removes its abort listener, and rejects late completion", async () => {
+		const controller = new AbortController();
+		const removeListener = vi.spyOn(controller.signal, "removeEventListener");
+		const { port, promise } = await start(40, undefined, 200, controller.signal);
 		const page = await rawRequest(port, {});
 		const nonce = page.body;
 
 		await expect(promise).resolves.toEqual({ action: "TIMEOUT" });
+		expect(removeListener).toHaveBeenCalledWith("abort", expect.any(Function));
 
 		const late = await rawRequest(port, {
 			method: "POST",

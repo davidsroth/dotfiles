@@ -36,7 +36,7 @@ export interface PlanComment {
 	text: string;
 }
 
-export type ReviewAction = "approve" | "send-feedback" | "reply" | "cancel" | "timeout";
+export type ReviewAction = "approve" | "send-feedback" | "reply" | "cancel" | "timeout" | "aborted";
 
 export interface ReviewResult {
 	action?: ReviewAction;
@@ -1059,7 +1059,7 @@ export default function plan(pi: ExtensionAPI): void {
 			required: ["filePath"],
 		},
 
-		async execute(_id, params, _signal, _onUpdate, ctx: ExtensionContext) {
+		async execute(_id, params, signal, _onUpdate, ctx: ExtensionContext) {
 			const input = params as { filePath?: string; reviewId?: string };
 			const inputPath = input?.filePath?.trim();
 			const requestedReviewId = input?.reviewId?.trim();
@@ -1125,8 +1125,10 @@ export default function plan(pi: ExtensionAPI): void {
 						renderPage: (nonce) => buildPage(content, { ...PLAN_REVIEW_OPTIONS, sourceLabel: inputPath }, palette, nonce),
 						staticAssets: REVIEW_STATIC_ASSETS,
 						parseDecision: parseReviewDecision,
-						// Timeout is its own outcome. It is never synthesized as feedback.
+						// Timeout and tool cancellation are distinct fail-closed outcomes.
 						onTimeout: () => ({ action: "timeout", approved: false }),
+						signal,
+						onAbort: () => ({ action: "aborted", approved: false }),
 						onUrl: (url) => {
 							try { ctx.ui.notify(`Plan: opening review ${review.reviewId} in browser: ${url}`, "info"); } catch {}
 						},
@@ -1142,6 +1144,29 @@ export default function plan(pi: ExtensionAPI): void {
 
 			if (result.action === "timeout") {
 				return toolText(`TIMED OUT — plan review ${review.reviewId} is still pending and is NOT approved. No user decision or feedback was recorded. Do not proceed. Call submit_plan again with the same unchanged file (optionally reviewId: "${review.reviewId}") to resume this review; a changed file starts a new review.`);
+			}
+			if (result.action === "aborted") {
+				return toolText(`ABORTED — plan review ${review.reviewId} is still pending and is NOT approved. Tool cancellation recorded no user decision or feedback. Do not proceed. Call submit_plan again with the same unchanged file to resume this review.`);
+			}
+
+			if (result.approved) {
+				let latestContent: string;
+				try {
+					latestContent = readFileSync(fullPath, "utf-8");
+				} catch (err) {
+					persist();
+					const msg = err instanceof Error ? err.message : String(err);
+					return toolText(`APPROVAL INVALIDATED — ${inputPath} could not be re-read after review (${msg}). Plan review ${review.reviewId} is NOT approved and remains pending. Do not proceed; restore the file and submit it for a fresh review.`);
+				}
+				const latestFingerprint = reviewFingerprint("plan", `${fullPath}\0${latestContent}`);
+				if (latestFingerprint !== review.fingerprint) {
+					if (latestContent.trim()) {
+						pendingReview = { ...createPendingReview("plan", latestFingerprint), filePath: inputPath, fullPath };
+					}
+					persist();
+					const nextId = pendingReview?.reviewId ?? review.reviewId;
+					return toolText(`STALE APPROVAL — ${inputPath} changed after it was displayed for plan review ${review.reviewId}. That approval is invalid and the plan is NOT approved. Fresh review required; call submit_plan again for pending review ${nextId}. Do not proceed.`);
+				}
 			}
 
 			clearPending(review.reviewId);

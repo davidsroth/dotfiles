@@ -41,6 +41,10 @@ export interface ReviewServerSpec<T> {
 	parseDecision: (data: Record<string, unknown>) => T | null;
 	/** Result to resolve with if the user never decides within the timeout. */
 	onTimeout: () => T;
+	/** Optional tool cancellation signal. */
+	signal?: AbortSignal;
+	/** Distinct fail-closed result for signal cancellation. Required with signal. */
+	onAbort?: () => T;
 	/** Override the default 30-minute timeout. */
 	timeoutMs?: number;
 	/**
@@ -71,7 +75,20 @@ export function createReviewServer<T>(spec: ReviewServerSpec<T>): Promise<T> {
 		let expiredClose: ReturnType<typeof setTimeout> | undefined;
 		let returnFocusApp: string | null = null;
 		let port = 0;
+		let abortListenerAttached = false;
 		const nonce = randomBytes(16).toString("hex");
+
+		const removeAbortListener = () => {
+			if (!abortListenerAttached || !spec.signal) return;
+			spec.signal.removeEventListener("abort", onAbort);
+			abortListenerAttached = false;
+		};
+
+		const clearOpenWait = () => {
+			if (timeout) clearTimeout(timeout);
+			timeout = undefined;
+			removeAbortListener();
+		};
 
 		const closeSoon = (finish: () => void) => {
 			setTimeout(() => {
@@ -79,6 +96,53 @@ export function createReviewServer<T>(spec: ReviewServerSpec<T>): Promise<T> {
 				server.close(finish);
 			}, 150);
 		};
+
+		const retainExpiredEndpoint = () => {
+			if (!server.listening || expiredClose) return;
+			server.unref();
+			expiredClose = setTimeout(() => {
+				server.closeAllConnections?.();
+				server.close();
+			}, spec.expiredGraceMs ?? DEFAULT_EXPIRED_GRACE_MS);
+			expiredClose.unref?.();
+		};
+
+		const failOpen = (err: unknown) => {
+			if (state !== "open") return;
+			state = "decided";
+			clearOpenWait();
+			server.closeAllConnections?.();
+			if (server.listening) {
+				server.close(() => reject(err instanceof Error ? err : new Error(String(err))));
+			} else {
+				reject(err instanceof Error ? err : new Error(String(err)));
+			}
+		};
+
+		const expire = (result: () => T): boolean => {
+			if (state !== "open") return false;
+			let value: T;
+			try {
+				value = result();
+			} catch (err) {
+				failOpen(err);
+				return true;
+			}
+			// This synchronous state transition arbitrates decision/timeout/abort:
+			// whichever path changes "open" first owns the terminal result.
+			state = "expired";
+			clearOpenWait();
+			resolve(value);
+			retainExpiredEndpoint();
+			return true;
+		};
+
+		function onAbort(): void {
+			expire(() => {
+				if (!spec.onAbort) throw new Error("ReviewServerSpec.onAbort is required when signal is provided");
+				return spec.onAbort();
+			});
+		}
 
 		const hostAllowed = (host: string | undefined): boolean =>
 			host === `127.0.0.1:${port}` || host === `localhost:${port}`;
@@ -143,7 +207,7 @@ export function createReviewServer<T>(spec: ReviewServerSpec<T>): Promise<T> {
 						return;
 					}
 					state = "decided";
-					if (timeout) clearTimeout(timeout);
+					clearOpenWait();
 					if (expiredClose) clearTimeout(expiredClose);
 					res.writeHead(200, JSON_HEADERS);
 					res.end(JSON.stringify({ ok: true }), () => {
@@ -163,58 +227,41 @@ export function createReviewServer<T>(spec: ReviewServerSpec<T>): Promise<T> {
 			res.end(spec.renderPage(nonce));
 		});
 
-		server.once("error", (err) => {
-			if (state === "open") {
-				state = "decided";
-				if (timeout) clearTimeout(timeout);
-				if (expiredClose) clearTimeout(expiredClose);
-				reject(err);
-			}
-		});
+		server.once("error", failOpen);
+
+		if (spec.signal) {
+			spec.signal.addEventListener("abort", onAbort, { once: true });
+			abortListenerAttached = true;
+			if (spec.signal.aborted) onAbort();
+		}
+
+		if (state !== "open") return;
 
 		server.listen(0, "127.0.0.1", () => {
+			if (state === "expired") {
+				retainExpiredEndpoint();
+				return;
+			}
+			if (state !== "open") return;
 			void (async () => {
 				try {
 					const addr = server.address();
 					if (!addr || typeof addr === "string") throw new Error("bind failed");
 					port = addr.port;
 					returnFocusApp = await getFrontmostAppName();
+					if (state !== "open") return;
 					const url = `http://127.0.0.1:${port}`;
 					try { spec.onUrl?.(url); } catch { /* notify is best-effort */ }
+					if (state !== "open") return;
 					await openBrowser(url);
 				} catch (err) {
-					if (state === "open") {
-						state = "decided";
-						if (timeout) clearTimeout(timeout);
-						if (expiredClose) clearTimeout(expiredClose);
-						server.closeAllConnections?.();
-						server.close(() => reject(err instanceof Error ? err : new Error(String(err))));
-					}
+					failOpen(err);
 				}
 			})();
 		});
 
 		timeout = setTimeout(() => {
-			if (state !== "open") return;
-			let timeoutResult: T;
-			try {
-				timeoutResult = spec.onTimeout();
-			} catch (err) {
-				state = "decided";
-				server.closeAllConnections?.();
-				server.close(() => reject(err));
-				return;
-			}
-			state = "expired";
-			resolve(timeoutResult);
-			// Keep the expired endpoint briefly so an already-open tab gets an
-			// explicit 410 instead of a network error. It cannot submit a decision.
-			server.unref();
-			expiredClose = setTimeout(() => {
-				server.closeAllConnections?.();
-				server.close();
-			}, spec.expiredGraceMs ?? DEFAULT_EXPIRED_GRACE_MS);
-			expiredClose.unref?.();
+			expire(spec.onTimeout);
 		}, spec.timeoutMs ?? DEFAULT_TIMEOUT_MS);
 	});
 }

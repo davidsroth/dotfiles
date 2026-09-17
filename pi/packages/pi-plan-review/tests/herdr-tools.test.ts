@@ -74,6 +74,47 @@ describe("review tools report only browser decision waits to Herdr", () => {
 		expectBalancedBlocker(emit.mock.calls, "Waiting for plan review");
 	});
 
+	it("invalidates approval when the displayed plan changes and requires a fresh review", async () => {
+		dir = mkdtempSync(join(tmpdir(), "plan-content-race-"));
+		const planPath = join(dir, "PLAN.md");
+		writeFileSync(planPath, "# Original\n");
+		const { tools, appendEntry } = captureTools(planExtension);
+		vi.mocked(createReviewServer)
+			.mockImplementationOnce(async () => {
+				writeFileSync(planPath, "# Changed during review\n");
+				return { action: "approve", approved: true };
+			})
+			.mockResolvedValueOnce({ action: "approve", approved: true });
+
+		const stale = await tools.get("submit_plan").execute("plan-1", { filePath: "PLAN.md" }, undefined, undefined, interactiveCtx(dir));
+		expect(stale.content[0].text).toMatch(/^STALE APPROVAL/);
+		expect(stale.content[0].text).toContain("NOT approved");
+		expect(stale.content[0].text).toContain("Fresh review required");
+		const states = appendEntry.mock.calls.map(([, data]) => data.pendingReview).filter(Boolean);
+		expect(states).toHaveLength(2);
+		expect(states[1].reviewId).not.toBe(states[0].reviewId);
+
+		const approved = await tools.get("submit_plan").execute("plan-2", { filePath: "PLAN.md" }, undefined, undefined, interactiveCtx(dir));
+		expect(approved.content[0].text).toMatch(/^Plan approved!/);
+	});
+
+	it("invalidates approval when the displayed plan cannot be re-read and retains pending state", async () => {
+		dir = mkdtempSync(join(tmpdir(), "plan-delete-race-"));
+		const planPath = join(dir, "PLAN.md");
+		writeFileSync(planPath, "# Original\n");
+		const { tools, appendEntry } = captureTools(planExtension);
+		vi.mocked(createReviewServer).mockImplementationOnce(async () => {
+			rmSync(planPath);
+			return { action: "approve", approved: true };
+		});
+
+		const result = await tools.get("submit_plan").execute("plan-1", { filePath: "PLAN.md" }, undefined, undefined, interactiveCtx(dir));
+		expect(result.content[0].text).toMatch(/^APPROVAL INVALIDATED/);
+		expect(result.content[0].text).toContain("NOT approved and remains pending");
+		const states = appendEntry.mock.calls.map(([, data]) => data.pendingReview).filter(Boolean);
+		expect(states.at(-1).reviewId).toBe(states[0].reviewId);
+	});
+
 	it("keeps timeout distinct, resumes the same plan review, and clears it on feedback", async () => {
 		dir = mkdtempSync(join(tmpdir(), "plan-resume-"));
 		writeFileSync(join(dir, "PLAN.md"), "# Plan\n\nShip it.\n");
@@ -130,6 +171,34 @@ describe("review tools report only browser decision waits to Herdr", () => {
 		const changed = await tools.get("submit_draft").execute("draft-2", { text: "Changed", reviewId }, undefined, undefined, interactiveCtx(process.cwd()));
 		expect(changed.content[0].text).toContain("cannot resume because the text changed");
 		expect(createReviewServer).toHaveBeenCalledTimes(1);
+	});
+
+	it("passes AbortSignal through both tools and returns distinct pending abort outcomes", async () => {
+		dir = mkdtempSync(join(tmpdir(), "review-abort-"));
+		writeFileSync(join(dir, "PLAN.md"), "# Plan\n");
+		const plan = captureTools(planExtension);
+		const draft = captureTools(draftExtension);
+		const planController = new AbortController();
+		const draftController = new AbortController();
+		vi.mocked(createReviewServer)
+			.mockImplementationOnce(async (spec: any) => {
+				expect(spec.signal).toBe(planController.signal);
+				return spec.onAbort();
+			})
+			.mockImplementationOnce(async (spec: any) => {
+				expect(spec.signal).toBe(draftController.signal);
+				return spec.onAbort();
+			});
+
+		const planResult = await plan.tools.get("submit_plan").execute("plan-abort", { filePath: "PLAN.md" }, planController.signal, undefined, interactiveCtx(dir));
+		expect(planResult.content[0].text).toMatch(/^ABORTED — plan review/);
+		expect(planResult.content[0].text).toContain("NOT approved");
+		expect(plan.appendEntry.mock.calls.at(-1)![1].pendingReview).not.toBeNull();
+
+		const draftResult = await draft.tools.get("submit_draft").execute("draft-abort", { text: "Ready." }, draftController.signal, undefined, interactiveCtx(dir));
+		expect(draftResult.content[0].text).toMatch(/^ABORTED — draft review/);
+		expect(draftResult.content[0].text).toContain("approved, copied, rejected, and posted nothing");
+		expect(draft.appendEntry.mock.calls.at(-1)![1].pendingReview).not.toBeNull();
 	});
 
 	it("wraps submit_draft approval and emits nothing in headless mode", async () => {

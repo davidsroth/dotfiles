@@ -46,7 +46,7 @@ import { wordDiff } from "./diff";
 
 // ── Types ──────────────────────────────────────────────────────────────
 
-type DraftAction = "copy" | "approve" | "reject" | "cancel" | "timeout";
+type DraftAction = "copy" | "approve" | "reject" | "cancel" | "timeout" | "aborted";
 
 interface DraftResult {
 	action: DraftAction;
@@ -392,7 +392,7 @@ export default function draft(pi: ExtensionAPI): void {
 			required: ["text"],
 		},
 
-		async execute(_id, params, _signal, _onUpdate, ctx: ExtensionContext) {
+		async execute(_id, params, signal, _onUpdate, ctx: ExtensionContext) {
 			const input = params as { text?: string; reviewId?: string };
 			const text = input?.text;
 			const requestedReviewId = input?.reviewId?.trim();
@@ -441,6 +441,8 @@ export default function draft(pi: ExtensionAPI): void {
 						renderPage: (nonce) => buildPage(text, palette, nonce),
 						parseDecision: parseDraftDecision,
 						onTimeout: () => ({ action: "timeout" }),
+						signal,
+						onAbort: () => ({ action: "aborted" }),
 						onUrl: (url) => {
 							try { ctx.ui.notify(`Draft: opening review ${review.reviewId} in browser: ${url}`, "info"); } catch { /* best-effort */ }
 						},
@@ -455,6 +457,9 @@ export default function draft(pi: ExtensionAPI): void {
 
 			if (result.action === "timeout") {
 				return toolText(`TIMED OUT — draft review ${review.reviewId} is still pending. Nothing was approved, copied, rejected, or posted. Call submit_draft again with the same text (optionally reviewId: "${review.reviewId}") to resume this review; changed text starts a new review.`);
+			}
+			if (result.action === "aborted") {
+				return toolText(`ABORTED — draft review ${review.reviewId} is still pending. Tool cancellation approved, copied, rejected, and posted nothing. Call submit_draft again with the same text to resume this review.`);
 			}
 
 			clearPending(review.reviewId);
