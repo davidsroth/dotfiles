@@ -30,7 +30,9 @@ vi.mock("../slack-mcp/postprocess", () => ({
   postProcessCsv: vi.fn((_text: string, _pp: unknown, _env: unknown) => "postprocessed"),
 }));
 
+import { hasAuthEnv, resolveConfig } from "../slack-mcp/config";
 import { buildChildEnv, ENV_ALLOWLIST, ENV_ALLOWLIST_PREFIXES } from "../slack-mcp/constants";
+import { _upstreamToolResult } from "../slack-mcp/index";
 import { StdioMCPClient } from "../slack-mcp/mcp-client";
 import {
   _resetForTesting as resetTracker,
@@ -271,6 +273,65 @@ describe("buildChildEnv — cfgEnv wins", () => {
   });
 });
 
+describe("effective Slack credential environment", () => {
+  let origEnv: NodeJS.ProcessEnv;
+
+  beforeEach(() => {
+    origEnv = process.env;
+    process.env = { PATH: "/usr/bin", SLACK_MCP_XOXP_TOKEN: "inherited-xoxp" } as NodeJS.ProcessEnv;
+  });
+
+  afterEach(() => {
+    process.env = origEnv;
+  });
+
+  it("configured XOXB suppresses an inherited XOXP everywhere", () => {
+    const cfg = resolveConfig({ env: { SLACK_MCP_XOXB_TOKEN: "configured-xoxb" } });
+    expect(cfg.env).toEqual({ SLACK_MCP_XOXB_TOKEN: "configured-xoxb" });
+    expect(hasAuthEnv(cfg.env)).toBe(true);
+    expect(buildChildEnv(cfg.env)).toMatchObject({
+      PATH: "/usr/bin",
+      SLACK_MCP_XOXB_TOKEN: "configured-xoxb",
+    });
+    expect(buildChildEnv(cfg.env)).not.toHaveProperty("SLACK_MCP_XOXP_TOKEN");
+  });
+
+  it("configured XOXC/XOXD suppresses an inherited XOXP everywhere", () => {
+    const cfg = resolveConfig({ env: {
+      SLACK_MCP_XOXC_TOKEN: "configured-xoxc",
+      SLACK_MCP_XOXD_TOKEN: "configured-xoxd",
+    } });
+    expect(cfg.env).toEqual({
+      SLACK_MCP_XOXC_TOKEN: "configured-xoxc",
+      SLACK_MCP_XOXD_TOKEN: "configured-xoxd",
+    });
+    const childEnv = buildChildEnv(cfg.env);
+    expect(childEnv).not.toHaveProperty("SLACK_MCP_XOXP_TOKEN");
+    expect(childEnv.SLACK_MCP_XOXC_TOKEN).toBe("configured-xoxc");
+    expect(childEnv.SLACK_MCP_XOXD_TOKEN).toBe("configured-xoxd");
+  });
+
+  it("fails closed for an explicit partial browser credential", () => {
+    process.env.SLACK_MCP_XOXD_TOKEN = "inherited-xoxd";
+    const cfg = resolveConfig({ env: { SLACK_MCP_XOXC_TOKEN: "configured-xoxc" } });
+    expect(cfg.env).toEqual({});
+    expect(hasAuthEnv(cfg.env)).toBe(false);
+    const childEnv = buildChildEnv(cfg.env);
+    expect(childEnv).not.toHaveProperty("SLACK_MCP_XOXP_TOKEN");
+    expect(childEnv).not.toHaveProperty("SLACK_MCP_XOXC_TOKEN");
+    expect(childEnv).not.toHaveProperty("SLACK_MCP_XOXD_TOKEN");
+  });
+
+  it("uses inherited credentials only when the config specifies none", () => {
+    const cfg = resolveConfig({ env: { SLACK_MCP_TEAM: "T123" } });
+    expect(cfg.env).toEqual({
+      SLACK_MCP_TEAM: "T123",
+      SLACK_MCP_XOXP_TOKEN: "inherited-xoxp",
+    });
+    expect(hasAuthEnv(cfg.env)).toBe(true);
+  });
+});
+
 describe("ENV_ALLOWLIST and ENV_ALLOWLIST_PREFIXES exports", () => {
   it("ENV_ALLOWLIST contains PATH", () => {
     expect(ENV_ALLOWLIST).toContain("PATH");
@@ -450,8 +511,8 @@ describe("jsonrpc — request/response correlation", () => {
     respond(child, { jsonrpc: "2.0", id: 3, result: { content: [{ type: "text", text: "result-for-3" }] } });
 
     const [r3, r4] = await Promise.all([result3Promise, result4Promise]);
-    expect(r3).toBe("result-for-3");
-    expect(r4).toBe("result-for-4");
+    expect(r3).toEqual({ text: "result-for-3", isError: false });
+    expect(r4).toEqual({ text: "result-for-4", isError: false });
   });
 });
 
@@ -514,7 +575,7 @@ describe("jsonrpc — invalid JSON does not crash", () => {
     respond(child, { jsonrpc: "2.0", id: 3, result: { content: [{ type: "text", text: "ok" }] } });
 
     const result = await p;
-    expect(result).toBe("ok");
+    expect(result).toEqual({ text: "ok", isError: false });
     expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("Invalid JSON"));
   });
 });
@@ -535,7 +596,7 @@ describe("jsonrpc — newline framing buffer", () => {
     child.stdout.push(full.slice(mid));
     await Promise.resolve();
 
-    expect(await p).toBe("split-ok");
+    expect(await p).toEqual({ text: "split-ok", isError: false });
   });
 });
 
@@ -598,8 +659,36 @@ describe("callTool — _raw bypasses postprocess", () => {
     respond(child, { jsonrpc: "2.0", id: 3, result: { content: [{ type: "text", text: "raw,csv,data" }] } });
 
     const result = await p;
-    expect(result).toBe("raw,csv,data");
+    expect(result).toEqual({ text: "raw,csv,data", isError: false });
     expect(postProcessCsv).not.toHaveBeenCalled();
+  });
+});
+
+describe("callTool — upstream isError propagation", () => {
+  it("returns the explicit upstream error text with isError=true", async () => {
+    const client = new StdioMCPClient();
+    const child = makeFakeChild();
+    await connectWithHandshake(client, child);
+
+    const p = client.callTool("my_tool", {});
+    await Promise.resolve();
+    respond(child, {
+      jsonrpc: "2.0",
+      id: 3,
+      result: { content: [{ type: "text", text: "channel_not_found" }], isError: true },
+    });
+
+    expect(await p).toEqual({ text: "channel_not_found", isError: true });
+    expect(postProcessCsv).not.toHaveBeenCalled();
+  });
+
+  it("produces pi isError results for dynamic and slack_mcp_call routes", () => {
+    const upstream = { text: "invalid_auth", isError: true };
+    const dynamic = _upstreamToolResult("slack_channels_list", upstream, { upstreamTool: "channels_list" });
+    const fallback = _upstreamToolResult("slack_mcp_call", upstream, { upstreamTool: "channels_list" });
+
+    expect(dynamic).toMatchObject({ isError: true, content: [{ text: "invalid_auth" }] });
+    expect(fallback).toMatchObject({ isError: true, content: [{ text: "invalid_auth" }] });
   });
 });
 
@@ -679,7 +768,7 @@ describe("callTool — empty result", () => {
     await Promise.resolve();
     respond(child, { jsonrpc: "2.0", id: 3, result: null });
 
-    expect(await p).toBe("");
+    expect(await p).toEqual({ text: "", isError: false });
   });
 });
 
@@ -693,7 +782,7 @@ describe("callTool — non-array content", () => {
     await Promise.resolve();
     respond(child, { jsonrpc: "2.0", id: 3, result: { someKey: "val" } });
 
-    expect(await p).toBe(JSON.stringify({ someKey: "val" }));
+    expect(await p).toEqual({ text: JSON.stringify({ someKey: "val" }), isError: false });
   });
 });
 

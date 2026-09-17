@@ -210,6 +210,14 @@ describe("registry-configKey-excludes-toolPrefix", () => {
     expect(_configKey(cfg1)).not.toBe(_configKey(cfg2));
   });
 
+  it("returns only a SHA-256 fingerprint and never embeds env secrets", () => {
+    const secret = "xoxb-super-secret-registry-value";
+    const key = _configKey(makeResolvedConfig({ env: { SLACK_MCP_XOXB_TOKEN: secret } }));
+    expect(key).toMatch(/^[a-f0-9]{64}$/);
+    expect(key).not.toContain(secret);
+    expect(key).not.toContain("SLACK_MCP_XOXB_TOKEN");
+  });
+
   it("env key order is normalised (sorted)", () => {
     const cfg1 = makeResolvedConfig({ env: { Z: "1", A: "2" } });
     const cfg2 = makeResolvedConfig({ env: { A: "2", Z: "1" } });
@@ -659,10 +667,10 @@ describe("constants-buildChildEnv-allowlist-filtering", () => {
     expect(out.HOME).toBe("/home/test");
   });
 
-  it("SLACK_ prefix keys are forwarded", () => {
+  it("inherited Slack auth keys are not forwarded without effective config", () => {
     process.env.SLACK_MCP_XOXP_TOKEN = "xoxp-token";
     const out = buildChildEnv({});
-    expect(out.SLACK_MCP_XOXP_TOKEN).toBe("xoxp-token");
+    expect(out.SLACK_MCP_XOXP_TOKEN).toBeUndefined();
   });
 
   it("NPM_ prefix keys are forwarded", () => {

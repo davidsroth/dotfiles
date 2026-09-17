@@ -85,7 +85,18 @@ import {
   toolError,
   toolResult,
 } from "./tool-helpers";
-import type { NotifyFn, NotifyLevel, ResolvedConfig } from "./types";
+import type { MCPToolCallResult, NotifyFn, NotifyLevel, ResolvedConfig, ToolExecutionResult } from "./types";
+
+/** @internal exported for hermetic result-propagation tests */
+export function _upstreamToolResult(
+  toolName: string,
+  result: MCPToolCallResult,
+  details: Record<string, unknown>,
+): ToolExecutionResult {
+  return result.isError
+    ? toolError(toolName, result.text, details)
+    : toolResult(toolName, result.text, details);
+}
 
 export default async function slackMCPExtension(pi: ExtensionAPI): Promise<void> {
   let cfg: ResolvedConfig = resolveConfig(loadConfig());
@@ -171,8 +182,8 @@ export default async function slackMCPExtension(pi: ExtensionAPI): Promise<void>
             return toolError(piName, "Not connected to Slack MCP. Run /slack to connect.");
           }
           try {
-            const text = await client.callTool(tool.name, (params ?? {}) as Record<string, unknown>);
-            return toolResult(piName, text || "", { upstreamTool: tool.name });
+            const result = await client.callTool(tool.name, (params ?? {}) as Record<string, unknown>);
+            return _upstreamToolResult(piName, result, { upstreamTool: tool.name });
           } catch (error) {
             const msg = error instanceof Error ? error.message : String(error);
             return toolError(piName, `Error calling ${tool.name}: ${msg}`, { upstreamTool: tool.name, error: msg });
@@ -396,8 +407,8 @@ export default async function slackMCPExtension(pi: ExtensionAPI): Promise<void>
 
       try {
         const args = rawArgs as Record<string, unknown>;
-        const text = await client.callTool(upstreamTool, args);
-        return toolResult("slack_mcp_call", text || "", { upstreamTool, calledAs: rawTool, args });
+        const callResult = await client.callTool(upstreamTool, args);
+        return _upstreamToolResult("slack_mcp_call", callResult, { upstreamTool, calledAs: rawTool, args });
       } catch (error) {
         const msg = error instanceof Error ? error.message : String(error);
         return toolError("slack_mcp_call", `Error calling ${upstreamTool}: ${msg}`, { upstreamTool, error: msg });

@@ -6,7 +6,10 @@
 // modifiers like `from:@me` don't resolve and silently return zero rows.
 // We call Slack's auth.test directly with the configured token to surface the
 // authenticated user's ID (use `from:<user_id>` in searches). Result is cached
-// per token so repeated calls are free.
+// per credential fingerprint so repeated calls are free without retaining raw
+// credentials as Map keys.
+
+import { credentialFingerprint, resolveSlackCredentials } from "./credentials";
 
 export interface SlackIdentity {
   ok: boolean;
@@ -21,21 +24,17 @@ export interface SlackIdentity {
 export const identityCache = new Map<string, SlackIdentity>();
 
 export function resolveSlackToken(env: Record<string, string>): { token: string; cookie?: string } | null {
-  const xoxp = env.SLACK_MCP_XOXP_TOKEN || process.env.SLACK_MCP_XOXP_TOKEN;
-  if (xoxp) return { token: xoxp };
-  const xoxb = env.SLACK_MCP_XOXB_TOKEN || process.env.SLACK_MCP_XOXB_TOKEN;
-  if (xoxb) return { token: xoxb };
-  // Browser (stealth) tokens: xoxc is the Bearer, xoxd is the `d` cookie.
-  const xoxc = env.SLACK_MCP_XOXC_TOKEN || process.env.SLACK_MCP_XOXC_TOKEN;
-  const xoxd = env.SLACK_MCP_XOXD_TOKEN || process.env.SLACK_MCP_XOXD_TOKEN;
-  if (xoxc && xoxd) return { token: xoxc, cookie: `d=${xoxd}` };
-  return null;
+  const credentials = resolveSlackCredentials(env);
+  if (!credentials) return null;
+  return { token: credentials.token, ...(credentials.cookie ? { cookie: credentials.cookie } : {}) };
 }
 
 export async function slackAuthTest(env: Record<string, string>): Promise<SlackIdentity> {
-  const creds = resolveSlackToken(env);
-  if (!creds) return { ok: false, error: "no_token" };
-  const cached = identityCache.get(creds.token);
+  const credentials = resolveSlackCredentials(env);
+  if (!credentials) return { ok: false, error: "no_token" };
+  const creds = { token: credentials.token, cookie: credentials.cookie };
+  const cacheKey = credentialFingerprint(credentials);
+  const cached = identityCache.get(cacheKey);
   if (cached) return cached;
   try {
     const headers: Record<string, string> = {
@@ -45,7 +44,7 @@ export async function slackAuthTest(env: Record<string, string>): Promise<SlackI
     if (creds.cookie) headers.Cookie = creds.cookie;
     const resp = await fetch("https://slack.com/api/auth.test", { method: "POST", headers });
     const data = (await resp.json()) as SlackIdentity;
-    if (data.ok) identityCache.set(creds.token, data);
+    if (data.ok) identityCache.set(cacheKey, data);
     return data;
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : String(error) };

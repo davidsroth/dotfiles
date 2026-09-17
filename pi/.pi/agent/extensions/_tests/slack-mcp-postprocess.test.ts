@@ -571,20 +571,21 @@ describe("resolveSlackToken", () => {
       expect(r).toBeNull();
     });
 
-    it("falls back to process.env.SLACK_MCP_XOXP_TOKEN when env param is empty", () => {
-      process.env.SLACK_MCP_XOXP_TOKEN = "xoxp-from-env";
-      const r = resolveSlackToken({});
-      expect(r).toEqual({ token: "xoxp-from-env" });
+    it("does not consult process.env after config resolves the effective env", () => {
+      process.env.SLACK_MCP_XOXP_TOKEN = "inherited-xoxp";
+      expect(resolveSlackToken({})).toBeNull();
     });
   });
 
   // --- resolveSlackToken-xoxc-requires-both ----------------------------------
   describe("xoxc requires both xoxc and xoxd", () => {
-    it("returns null when only xoxc present (no xoxd)", () => {
+    it("returns null when only xoxc is explicit even if xoxd is inherited", () => {
+      process.env.SLACK_MCP_XOXD_TOKEN = "inherited-xoxd";
       expect(resolveSlackToken({ SLACK_MCP_XOXC_TOKEN: "xoxc-tok" })).toBeNull();
     });
 
-    it("returns null when only xoxd present (no xoxc)", () => {
+    it("returns null when only xoxd is explicit even if xoxc is inherited", () => {
+      process.env.SLACK_MCP_XOXC_TOKEN = "inherited-xoxc";
       expect(resolveSlackToken({ SLACK_MCP_XOXD_TOKEN: "xoxd-val" })).toBeNull();
     });
 
@@ -726,9 +727,9 @@ describe("slackAuthTest", () => {
     });
   });
 
-  // --- identityCache-keyed-by-token ------------------------------------------
-  describe("identityCache keyed by token", () => {
-    it("caches two different tokens independently", async () => {
+  // --- identityCache-keyed-by-credential-fingerprint -------------------------
+  describe("identityCache keyed by credential fingerprint", () => {
+    it("caches two different tokens independently without retaining either token", async () => {
       const fetchMock = vi
         .fn()
         .mockResolvedValueOnce({ json: async () => ({ ok: true, user_id: "U1" }) })
@@ -741,6 +742,12 @@ describe("slackAuthTest", () => {
       expect(fetchMock).toHaveBeenCalledTimes(2);
       expect(r1.user_id).toBe("U1");
       expect(r2.user_id).toBe("U2");
+      expect([...identityCache.keys()]).toHaveLength(2);
+      for (const key of identityCache.keys()) {
+        expect(key).toMatch(/^[a-f0-9]{64}$/);
+        expect(key).not.toContain("tok-A");
+        expect(key).not.toContain("tok-B");
+      }
     });
   });
 });

@@ -13,6 +13,7 @@ import {
   DEFAULT_STARTUP_TIMEOUT_MS,
   DEFAULT_TOOL_PREFIX,
 } from "./constants";
+import { resolveEffectiveSlackEnv, resolveSlackCredentials } from "./credentials";
 import type { PostProcessConfig, ResolvedConfig, ResolvedPostProcess, SlackMCPConfig } from "./types";
 
 export function loadConfig(): SlackMCPConfig | null {
@@ -30,7 +31,7 @@ export function resolveConfig(cfg: SlackMCPConfig | null): ResolvedConfig {
   return {
     command: cfg?.command || DEFAULT_COMMAND,
     args: cfg?.args ?? DEFAULT_ARGS,
-    env: cfg?.env ?? {},
+    env: resolveEffectiveSlackEnv(cfg?.env),
     toolPrefix: cfg?.toolPrefix ?? DEFAULT_TOOL_PREFIX,
     startupTimeoutMs: cfg?.startupTimeoutMs ?? DEFAULT_STARTUP_TIMEOUT_MS,
     requestTimeoutMs: cfg?.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS,
@@ -54,13 +55,5 @@ export function resolvePostProcess(pp?: PostProcessConfig | boolean): ResolvedPo
 }
 
 export function hasAuthEnv(env: Record<string, string>): boolean {
-  return Boolean(
-    env.SLACK_MCP_XOXP_TOKEN ||
-      env.SLACK_MCP_XOXB_TOKEN ||
-      (env.SLACK_MCP_XOXC_TOKEN && env.SLACK_MCP_XOXD_TOKEN) ||
-      // Allow falling back to the parent process env (e.g. exported in zshenv)
-      process.env.SLACK_MCP_XOXP_TOKEN ||
-      process.env.SLACK_MCP_XOXB_TOKEN ||
-      (process.env.SLACK_MCP_XOXC_TOKEN && process.env.SLACK_MCP_XOXD_TOKEN),
-  );
+  return resolveSlackCredentials(env) !== null;
 }

@@ -44,7 +44,7 @@ export interface PostProcessConfig {
    * preserved as a `next_cursor: <value>` footer so pagination still works.
    */
   dropColumns?: string[];
-  /** Truncate the `Text` column to this many chars (0 = no truncation). Default 800. */
+  /** Truncate the `Text` column to this many chars (0 = no truncation). Default 2000. */
   maxTextLength?: number;
   /** Resolve `<@U…>` / `<#C…>` mentions to @name / #name inline. Default true. */
   resolveMentions?: boolean;
@@ -74,6 +74,11 @@ export interface MCPTool {
   name: string;
   description: string;
   inputSchema: Record<string, unknown>;
+}
+
+export interface MCPToolCallResult {
+  text: string;
+  isError: boolean;
 }
 
 export interface JsonRpcResponse {

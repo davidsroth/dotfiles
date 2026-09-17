@@ -12,7 +12,7 @@ import {
 import { resolvePostProcess } from "./config";
 import { postProcessCsv } from "./postprocess";
 import { installExitHookOnce, killProcessTreeHard, trackedChildren } from "./process-tracker";
-import type { JsonRpcResponse, MCPTool, ResolvedConfig, ResolvedPostProcess } from "./types";
+import type { JsonRpcResponse, MCPTool, MCPToolCallResult, ResolvedConfig, ResolvedPostProcess } from "./types";
 
 export class StdioMCPClient {
   private child: ChildProcessWithoutNullStreams | null = null;
@@ -151,7 +151,7 @@ export class StdioMCPClient {
     }
   }
 
-  async callTool(name: string, args: Record<string, unknown>): Promise<string> {
+  async callTool(name: string, args: Record<string, unknown>): Promise<MCPToolCallResult> {
     // Pull out wrapper-only control args (NOT forwarded to the upstream server,
     // which would reject unknown params). These let the model override
     // post-processing for a single call without editing the JSON config.
@@ -174,7 +174,7 @@ export class StdioMCPClient {
       | { content?: Array<{ type: string; text?: string }>; isError?: boolean }
       | undefined;
 
-    if (!result) return "";
+    if (!result) return { text: "", isError: false };
     const content = result.content;
     let text: string;
     if (Array.isArray(content)) {
@@ -182,12 +182,14 @@ export class StdioMCPClient {
     } else {
       text = JSON.stringify(result);
     }
-    if (raw || !this.postProcess.enabled) return text;
+    const isError = result.isError === true;
+    // Upstream errors are already human-readable and must be preserved exactly.
+    if (isError || raw || !this.postProcess.enabled) return { text, isError };
     const pp =
       maxTextOverride === undefined
         ? this.postProcess
         : { ...this.postProcess, maxTextLength: maxTextOverride };
-    return postProcessCsv(text, pp, this.authEnv);
+    return { text: await postProcessCsv(text, pp, this.authEnv), isError };
   }
 
   async disconnect(): Promise<void> {

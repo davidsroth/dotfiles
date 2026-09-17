@@ -4,6 +4,7 @@
 
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { isSlackAuthEnvKey } from "./credentials";
 
 export const AUTH_FILE = join(process.env.HOME || homedir(), ".pi", "agent", "slack-mcp.json");
 
@@ -80,10 +81,11 @@ export function buildChildEnv(cfgEnv: Record<string, string>): Record<string, st
     if (v !== undefined) out[key] = v;
   }
   for (const [key, value] of Object.entries(process.env)) {
-    if (value === undefined) continue;
+    if (value === undefined || isSlackAuthEnvKey(key)) continue;
     if (ENV_ALLOWLIST_PREFIXES.some((p) => key.startsWith(p))) out[key] = value;
   }
-  // Caller-supplied env wins (e.g. SLACK_MCP_XOXP_TOKEN).
+  // cfgEnv already contains the single credential mode selected by
+  // resolveConfig. Never reintroduce inherited conflicting credentials here.
   for (const [k, v] of Object.entries(cfgEnv)) out[k] = v;
   return out;
 }

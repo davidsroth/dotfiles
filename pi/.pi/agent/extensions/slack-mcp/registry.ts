@@ -56,6 +56,7 @@
 // fanout). For a personal dotfiles-grade extension, restart-on-edit
 // is the right tradeoff.
 
+import { sha256Fingerprint } from "./credentials";
 import { StdioMCPClient } from "./mcp-client";
 import type { ResolvedConfig } from "./types";
 
@@ -96,7 +97,7 @@ export function _configKey(cfg: ResolvedConfig): string {
 
 function configKey(cfg: ResolvedConfig): string {
   const envEntries = Object.entries(cfg.env).sort(([a], [b]) => a.localeCompare(b));
-  return JSON.stringify({ command: cfg.command, args: cfg.args, env: envEntries });
+  return sha256Fingerprint(JSON.stringify({ command: cfg.command, args: cfg.args, env: envEntries }));
 }
 
 /**
