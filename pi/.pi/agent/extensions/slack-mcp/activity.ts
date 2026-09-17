@@ -547,7 +547,8 @@ function groupMyMessages(
     participantIds: string[];
     participants: Array<{ id?: string; label: string; isAuthenticatedUser: boolean }>;
     authorship: { authenticatedUserId: string; myMessageCount: number; allMessagesByAuthenticatedUser: boolean };
-    messages: CompactSlackMessage[];
+    messageCount: number;
+    messageRefs: Array<{ channelId: string; messageTs: string }>;
   }>();
 
   for (const message of messages) {
@@ -566,11 +567,13 @@ function groupMyMessages(
         participantIds: [],
         participants: [],
         authorship: { authenticatedUserId, myMessageCount: 0, allMessagesByAuthenticatedUser: true },
-        messages: [],
+        messageCount: 0,
+        messageRefs: [],
       };
       groups.set(key, group);
     }
-    group.messages.push(message);
+    group.messageCount++;
+    group.messageRefs.push({ channelId: message.channelId, messageTs: message.messageTs });
     if (message.author.id && !group.participantIds.includes(message.author.id)) group.participantIds.push(message.author.id);
     if (!group.participants.some((participant) => participant.id === message.author.id && participant.label === message.author.label)) {
       group.participants.push({
@@ -632,6 +635,10 @@ export async function runMyConversations(
   }));
 
   return {
+    // Keep the long-standing top-level messages array as the canonical body
+    // store. Groups point into it by Slack's stable (channelId, messageTs)
+    // identity so message text is not serialized twice.
+    schemaVersion: "slack-my-conversations/v2" as const,
     authenticatedUser: {
       id: identity.user_id,
       name: identity.user,

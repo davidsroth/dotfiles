@@ -60,5 +60,26 @@ the reference example:
 and `tool-helpers`. Non-`.ts` files (e.g. `slack-mcp.example.json`) can live in
 the directory too — discovery ignores them.
 
+Slack's four composite read tools return the stable `slack-wrapper/v1`
+envelope. `slack_my_conversations` uses `data.schemaVersion` of
+`slack-my-conversations/v2`: `data.messages` is the canonical, deduplicated
+message/body array, while each group carries counts, authorship/participant
+provenance, and `(channelId, messageTs)` entries in `messageRefs`. Resolve those
+references against `data.messages`; bodies are intentionally not repeated in
+each group. Envelope metadata keeps retrieval completeness separate from
+response-budget completeness.
+
+`slack_mcp_status` reports two inventories separately: the nine static wrapper
+tools that exist as soon as the extension loads, and dynamic upstream tools
+that are discovered/registered after a connection. Composite reads and
+`slack_mcp_call` connect lazily on first use, so a disconnected status does not
+mean the static tools are unavailable.
+
 Keep only `index.ts` as an entry point — sibling `*.ts` files are imported, not
 discovered (discovery does not recurse past the directory's entry point).
+
+`just pi-check` also verifies that every tracked extension module has a live
+symlink (directly or through a linked ancestor) under
+`~/.pi/agent/extensions`. The check is read-only, skips hosts where that runtime
+directory has not been deployed, and tells you to run `just stow` when a newly
+tracked module has not reached an existing runtime tree.

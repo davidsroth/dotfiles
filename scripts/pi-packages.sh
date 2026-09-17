@@ -8,7 +8,7 @@ SETTINGS="$REPO_ROOT/pi/.pi/agent/settings.base.json"
 EXTENSIONS="$REPO_ROOT/pi/.pi/agent/extensions"
 
 usage() {
-  echo "Usage: $0 {list|verify|install-runtime|install-dev|typecheck|load|test|check}" >&2
+  echo "Usage: $0 {list|verify|runtime-links|install-runtime|install-dev|typecheck|load|test|check}" >&2
   exit 2
 }
 
@@ -169,6 +169,9 @@ case "$action" in
     verify_inventory
     echo "Pi package inventory verified (${#packages[@]} local packages)."
     ;;
+  runtime-links)
+    bash "$REPO_ROOT/scripts/check-pi-extension-links.sh"
+    ;;
   install-runtime)
     verify_inventory
     for package in "${packages[@]}"; do
@@ -189,6 +192,7 @@ case "$action" in
     ;;
   typecheck)
     verify_inventory
+    bash "$REPO_ROOT/scripts/check-pi-extension-links.sh"
     bash "$REPO_ROOT/scripts/pi-typecheck.sh"
     run_script typecheck
     ;;

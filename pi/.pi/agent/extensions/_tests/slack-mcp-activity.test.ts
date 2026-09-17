@@ -8,6 +8,7 @@ const identityMocks = vi.hoisted(() => ({
 
 vi.mock("../slack-mcp/identity", () => identityMocks);
 
+import { resolveConfig } from "../slack-mcp/config";
 import {
   directChannelLabelCache,
   isMessageInWindow,
@@ -19,6 +20,10 @@ import {
   runThreadsGetMany,
   type SlackToolCaller,
 } from "../slack-mcp/activity";
+import {
+  STATIC_SLACK_TOOL_NAMES,
+  statusText,
+} from "../slack-mcp/tool-helpers";
 
 interface CsvMessage {
   msg: string;
@@ -129,10 +134,19 @@ describe("runMyConversations", () => {
       maxPages: 4,
     });
 
+    expect(result.schemaVersion).toBe("slack-my-conversations/v2");
     expect(result.messages.map((message) => message.text)).toEqual(["middle", "at start"]);
     expect(result.messageCount).toBe(2);
     expect(result.groups.map((group) => group.kind).sort()).toEqual(["conversation", "thread"]);
     expect(result.groups[0].authorship.authenticatedUserId).toBe("UME");
+    expect(result.groups.flatMap((group) => group.messageRefs)).toEqual(expect.arrayContaining([
+      { channelId: "C123", messageTs: middleTs },
+      { channelId: "C123", messageTs: startTs },
+    ]));
+    expect(result.groups.reduce((sum, group) => sum + group.messageCount, 0)).toBe(result.messageCount);
+    expect(result.groups.every((group) => !("messages" in group))).toBe(true);
+    expect(JSON.stringify(result).match(/middle/g)).toHaveLength(1);
+    expect(JSON.stringify(result).match(/at start/g)).toHaveLength(1);
     expect(result.complete).toBe(true);
     expect(result.pagesFetched).toBe(2);
 
@@ -188,6 +202,46 @@ describe("runMyConversations", () => {
     expect(caller.callTool).toHaveBeenCalledTimes(1);
     expect(result.complete).toBe(false);
     expect(result.warnings.join(" ")).toContain("maxPages=1");
+  });
+});
+
+describe("Slack MCP status", () => {
+  it("distinguishes always-defined wrappers from lazy dynamic upstream tools", () => {
+    const text = statusText(null, resolveConfig(null), {
+      staticRegisteredToolNames: [...STATIC_SLACK_TOOL_NAMES],
+      staticActiveToolNames: ["slack_mcp_status"],
+      dynamicRegisteredToolNames: [],
+      dynamicActiveToolNames: [],
+    });
+
+    expect(text).toContain("Upstream connection: Not connected");
+    expect(text).toContain("Lazy connect: composite read tools and slack_mcp_call connect on first use");
+    expect(text).toContain(`Static wrapper tools defined: ${STATIC_SLACK_TOOL_NAMES.length}`);
+    expect(text).toContain("Static wrapper tools registered in this session: 9");
+    expect(text).toContain("Dynamic upstream tools discovered: 0 (requires a connection)");
+    expect(text).toContain("slack_my_conversations");
+  });
+
+  it("reports discovered, enabled, and registered dynamic upstream tools separately", () => {
+    const cfg = resolveConfig({ disabledTools: ["users_search"] });
+    const client = {
+      isConnected: true,
+      getTools: () => [
+        { name: "channels_list", description: "", inputSchema: {} },
+        { name: "users_search", description: "", inputSchema: {} },
+      ],
+    };
+    const text = statusText(client as never, cfg, {
+      dynamicRegisteredToolNames: ["slack_channels_list"],
+      dynamicActiveToolNames: ["slack_channels_list"],
+    });
+
+    expect(text).toContain("Dynamic upstream tools discovered: 2");
+    expect(text).toContain("Dynamic upstream tools enabled by config: 1");
+    expect(text).toContain("Dynamic upstream tools registered in this session: 1");
+    expect(text).toContain("Enabled dynamic upstream tools:\n  - slack_channels_list");
+    expect(text).toContain("Disabled by config");
+    expect(text).toContain("slack_users_search");
   });
 });
 

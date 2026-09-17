@@ -99,6 +99,7 @@ import { acquireClient, acquireExistingRef, peekConnectedShared, releaseClient, 
 import { normalizeUpstreamArgs, patchUpstreamSchema } from "./upstream-contract";
 import {
   enabledSlackTools,
+  STATIC_SLACK_TOOL_NAMES,
   type StatusDiagnostics,
   statusText,
   toolError,
@@ -142,21 +143,15 @@ export default async function slackMCPExtension(pi: ExtensionAPI): Promise<void>
 
   const registryDiagnostics = (): StatusDiagnostics => {
     try {
-      const controlToolNames = new Set([
-        "slack_mcp_connect",
-        "slack_mcp_disconnect",
-        "slack_mcp_call",
-        "slack_mcp_status",
-        "slack_mcp_whoami",
-        "slack_my_conversations",
-        "slack_search_messages_batch",
-        "slack_open_message",
-        "slack_threads_get_many",
-      ]);
-      const isSlackTool = (name: string) => name.startsWith(cfg.toolPrefix) && !controlToolNames.has(name);
+      const staticToolNames = new Set<string>(STATIC_SLACK_TOOL_NAMES);
+      const isDynamicSlackTool = (name: string) => name.startsWith(cfg.toolPrefix) && !staticToolNames.has(name);
+      const registered = pi.getAllTools().map((tool) => tool.name);
+      const active = pi.getActiveTools();
       return {
-        registeredToolNames: pi.getAllTools().map((t) => t.name).filter(isSlackTool).sort(),
-        activeToolNames: pi.getActiveTools().filter(isSlackTool).sort(),
+        staticRegisteredToolNames: registered.filter((name) => staticToolNames.has(name)).sort(),
+        staticActiveToolNames: active.filter((name) => staticToolNames.has(name)).sort(),
+        dynamicRegisteredToolNames: registered.filter(isDynamicSlackTool).sort(),
+        dynamicActiveToolNames: active.filter(isDynamicSlackTool).sort(),
       };
     } catch {
       return {};
@@ -392,7 +387,8 @@ export default async function slackMCPExtension(pi: ExtensionAPI): Promise<void>
     description:
       "List conversations in which the authenticated Slack user authored at least one message. " +
       "Automatically resolves identity, follows search cursors, applies exact start-inclusive/end-exclusive bounds, " +
-      "deduplicates, groups, and reports completeness. Coverage is Slack's accessible search index, not inaccessible or unindexed history.",
+      "deduplicates, groups by message references without repeating bodies, and reports completeness. " +
+      "Coverage is Slack's accessible search index, not inaccessible or unindexed history.",
     parameters: Type.Object({
       ...exactWindowFields,
       lookback_hours: Type.Optional(Type.Number({ minimum: 0.25, maximum: 720, default: 24 })),
@@ -646,10 +642,16 @@ export default async function slackMCPExtension(pi: ExtensionAPI): Promise<void>
       const diagnostics = registryDiagnostics();
       return toolResult("slack_mcp_status", statusText(client, cfg, diagnostics), {
         connected: client?.isConnected ?? false,
+        staticToolCount: STATIC_SLACK_TOOL_NAMES.length,
+        staticRegisteredToolCount: diagnostics.staticRegisteredToolNames?.length,
+        staticActiveToolCount: diagnostics.staticActiveToolNames?.length,
         upstreamToolCount: client?.getTools().length ?? 0,
         enabledToolCount: enabledSlackTools(client, cfg).length,
-        registeredToolCount: diagnostics.registeredToolNames?.length,
-        activeToolCount: diagnostics.activeToolNames?.length,
+        dynamicRegisteredToolCount: diagnostics.dynamicRegisteredToolNames?.length,
+        dynamicActiveToolCount: diagnostics.dynamicActiveToolNames?.length,
+        // Backward-compatible aliases for the pre-polish dynamic-only counts.
+        registeredToolCount: diagnostics.dynamicRegisteredToolNames?.length,
+        activeToolCount: diagnostics.dynamicActiveToolNames?.length,
         sharedRefs: refs,
       });
     },
