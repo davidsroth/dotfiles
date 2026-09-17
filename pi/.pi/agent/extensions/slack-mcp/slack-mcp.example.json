@@ -1,6 +1,6 @@
 {
   "_comment_1": "Copy this file to ~/.pi/agent/slack-mcp.json (NOT stowed; per-machine secrets).",
-  "_comment_2": "Use one of the auth methods below. Priority: XOXP > XOXB > XOXC+XOXD.",
+  "_comment_2": "Use exactly one auth method below. An explicit env credential is authoritative and never mixed with inherited SLACK_MCP_* credentials; priority within one source is XOXP > XOXB > XOXC+XOXD.",
 
   "command": "npx",
   "args": ["-y", "slack-mcp-server@1.3.0", "--transport", "stdio"],
@@ -26,10 +26,12 @@
   "requestTimeoutMs": 60000,
   "requestTimeoutMsByTool": { "conversations_unreads": 180000 },
 
-  "_comment_postprocess": "CSV output cleanup (default on). Drops wide rarely-used columns, truncates long Text (maxTextLength, 0=off), and resolves <@U...> mentions to names. Dropping Cursor preserves pagination via a 'next_cursor:' footer. Set \"postProcess\": false for fully raw output, or omit a column from dropColumns to keep it (e.g. Permalink). Per-call escape hatch: conversations_history/replies/search_messages accept tool args _maxTextLength (override truncation for one call; 0=none) and _raw (true=fully raw for one call).",
+  "_comment_postprocess": "CSV output cleanup (default on). maxTextLength is per message; maxResponseChars is the whole processed response budget. Rows omitted by a response budget are reported explicitly. Dropping Cursor preserves it with a conspicuous incomplete-results footer. Per-call controls: _maxTextLength, _maxResponseChars, _maxRows, _includePermalink, and _raw.",
   "postProcess": {
     "dropColumns": ["Permalink", "AttachmentIDs", "HasMedia", "BotName", "Cursor"],
     "maxTextLength": 2000,
+    "maxResponseChars": 50000,
+    "maxRows": 0,
     "resolveMentions": true
   }
 }
