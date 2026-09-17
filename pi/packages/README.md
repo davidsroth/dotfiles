@@ -12,6 +12,7 @@ Current packages (wired into Pi via `settings.base.json`):
 - `pi-memory`
 - `pi-qna`
 - `pi-plan-review`
+- `pi-session-recall` (bounded visible-text search and evidence-cited historical session queries)
 
 Previously this directory also held `rpiv-mono` (a third-party Pi pipeline
 monorepo, upstream: `juicesharp/rpiv-mono`, fork: `davidroth-distyl/rpiv-mono`).
@@ -59,4 +60,5 @@ Recommended workflow:
 - `pi-subagents` is the most active/complex vendored package and is the most likely to need compatibility updates as Pi evolves
 - `pi-aside` is a minimal local replacement for the former vendored BTW plugin
 - `pi-qna` and `pi-plan-review` are local packages extracted from this dotfiles config for easier sharing with coworkers
+- `pi-session-recall` complements (and does not replace or modify) the notes repository's `review-pi-sessions` skill
 - Relative package loading assumes the stowed Pi config layout used by this repo

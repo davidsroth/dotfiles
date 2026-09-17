@@ -14,6 +14,7 @@
     "../../dotfiles/pi/packages/pi-qna",
     "../../dotfiles/pi/packages/pi-plan-review",
     "../../dotfiles/pi/packages/pi-memory",
+    "../../dotfiles/pi/packages/pi-session-recall",
     "npm:pi-mcp-adapter@2.26.0",
     {
       "source": "npm:pi-web-access@0.13.0",
