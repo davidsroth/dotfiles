@@ -140,13 +140,61 @@ class NonIdleAgentTest(unittest.TestCase):
 
         self.assertIsNone(switch.select_target([active], [active], "w0:closed"))
 
+    def test_recent_session_prefers_mru_history(self):
+        agents = [
+            agent("idle", "w0:p1", focused=True),
+            agent("idle", "w0:p2"),
+            agent("idle", "w0:p3"),
+        ]
+
+        self.assertEqual(
+            switch.select_recent_session(agents, ["w0:p1", "w0:p3", "w0:p2"])[
+                "pane_id"
+            ],
+            "w0:p3",
+        )
+
+    def test_recent_session_reverse_uses_oldest_known_session(self):
+        agents = [
+            agent("idle", "w0:p1", focused=True),
+            agent("idle", "w0:p2"),
+            agent("idle", "w0:p3"),
+        ]
+
+        self.assertEqual(
+            switch.select_recent_session(
+                agents, ["w0:p1", "w0:p3", "w0:p2"], reverse=True
+            )["pane_id"],
+            "w0:p2",
+        )
+
+    def test_recent_session_seeds_unseen_entries_by_state_change_sequence(self):
+        agents = [
+            {**agent("idle", "w0:p1", focused=True), "state_change_seq": 4},
+            {**agent("idle", "w0:p2"), "state_change_seq": 6},
+            {**agent("idle", "w0:p3"), "state_change_seq": 5},
+        ]
+
+        self.assertEqual(
+            switch.select_recent_session(agents, [])["pane_id"], "w0:p2"
+        )
+
     def test_focus_history_round_trip(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "focus-history.json"
 
             self.assertIsNone(switch.load_return_pane(path))
             switch.save_return_pane(path, "w0:p1")
+            switch.record_recent_sessions(path, "w0:p2", "w0:p1")
             self.assertEqual(switch.load_return_pane(path), "w0:p1")
+            self.assertEqual(switch.load_focus_history(path)[1], ["w0:p2", "w0:p1"])
+
+    def test_focus_history_reads_the_old_return_only_format(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "focus-history.json"
+            path.write_text('{"return_pane_id":"w0:p1"}\n', encoding="utf-8")
+
+            self.assertEqual(switch.load_focus_history(path), ("w0:p1", []))
 
 
 if __name__ == "__main__":

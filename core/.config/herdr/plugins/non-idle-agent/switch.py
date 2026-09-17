@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Prefer done Herdr agents, then cycle other non-idle agents."""
+"""Prefer done Herdr agents, then cycle non-idle agents or recent sessions."""
 
 from __future__ import annotations
 
@@ -13,6 +13,7 @@ from typing import Any
 
 NON_IDLE_STATES = frozenset({"working", "blocked", "done", "unknown"})
 PRIORITY_STATE = "done"
+RECENT_HISTORY_LIMIT = 32
 
 
 def run(herdr: str, *args: str) -> subprocess.CompletedProcess[str]:
@@ -93,6 +94,41 @@ def select_target(
     )
 
 
+def select_recent_session(
+    agents: list[dict[str, Any]],
+    recent_pane_ids: list[str],
+    *,
+    reverse: bool = False,
+) -> dict[str, Any] | None:
+    """Choose the MRU agent session, seeding unseen entries by state recency."""
+    by_pane_id = {agent["pane_id"]: agent for agent in agents}
+    focused_pane_id = next(
+        (agent["pane_id"] for agent in agents if agent.get("focused")), None
+    )
+    ordered_ids = [
+        pane_id
+        for pane_id in recent_pane_ids
+        if pane_id in by_pane_id and pane_id != focused_pane_id
+    ]
+    seen = set(ordered_ids)
+    unseen = sorted(
+        (
+            agent
+            for agent in agents
+            if agent["pane_id"] != focused_pane_id
+            and agent["pane_id"] not in seen
+        ),
+        key=lambda agent: agent.get("state_change_seq")
+        if isinstance(agent.get("state_change_seq"), int)
+        else -1,
+        reverse=True,
+    )
+    candidates = [by_pane_id[pane_id] for pane_id in ordered_ids] + unseen
+    if not candidates:
+        return None
+    return candidates[-1] if reverse else candidates[0]
+
+
 def state_dir() -> Path:
     plugin_state = os.environ.get("HERDR_PLUGIN_STATE_DIR")
     if plugin_state:
@@ -102,21 +138,58 @@ def state_dir() -> Path:
     return root / "herdr" / "plugins" / "local.non-idle-agent"
 
 
-def load_return_pane(path: Path) -> str | None:
+def load_focus_history(path: Path) -> tuple[str | None, list[str]]:
     try:
-        value = json.loads(path.read_text(encoding="utf-8")).get("return_pane_id")
+        payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, AttributeError, json.JSONDecodeError):
-        return None
-    return value if isinstance(value, str) and value else None
+        return None, []
+    if not isinstance(payload, dict):
+        return None, []
+    return_pane_id = payload.get("return_pane_id")
+    recent_pane_ids = payload.get("recent_pane_ids")
+    return (
+        return_pane_id if isinstance(return_pane_id, str) and return_pane_id else None,
+        [
+            pane_id
+            for pane_id in recent_pane_ids
+            if isinstance(pane_id, str) and pane_id
+        ]
+        if isinstance(recent_pane_ids, list)
+        else [],
+    )
 
 
-def save_return_pane(path: Path, pane_id: str) -> None:
+def load_return_pane(path: Path) -> str | None:
+    return load_focus_history(path)[0]
+
+
+def save_focus_history(
+    path: Path, return_pane_id: str | None, recent_pane_ids: list[str]
+) -> None:
     temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
     temporary.write_text(
-        json.dumps({"return_pane_id": pane_id}, sort_keys=True) + "\n",
+        json.dumps(
+            {
+                "recent_pane_ids": recent_pane_ids[:RECENT_HISTORY_LIMIT],
+                "return_pane_id": return_pane_id,
+            },
+            sort_keys=True,
+        )
+        + "\n",
         encoding="utf-8",
     )
     os.replace(temporary, path)
+
+
+def save_return_pane(path: Path, pane_id: str) -> None:
+    _, recent_pane_ids = load_focus_history(path)
+    save_focus_history(path, pane_id, recent_pane_ids)
+
+
+def record_recent_sessions(path: Path, *pane_ids: str) -> None:
+    return_pane_id, prior_pane_ids = load_focus_history(path)
+    recent_pane_ids = list(dict.fromkeys((*pane_ids, *prior_pane_ids)))
+    save_focus_history(path, return_pane_id, recent_pane_ids)
 
 
 def notify(herdr: str, title: str) -> None:
@@ -160,15 +233,21 @@ def main() -> int:
             agent for agent in agents if agent.get("agent_status") in NON_IDLE_STATES
         ]
         history_path = directory / "focus-history.json"
-        target = select_target(
-            agents,
-            active,
-            load_return_pane(history_path),
-            reverse=reverse,
-        )
+        if active:
+            target = select_target(
+                agents,
+                active,
+                load_return_pane(history_path),
+                reverse=reverse,
+            )
+        else:
+            _, recent_pane_ids = load_focus_history(history_path)
+            target = select_recent_session(
+                agents, recent_pane_ids, reverse=reverse
+            )
         if target is None:
             if not active:
-                notify(herdr, "No non-idle agents")
+                notify(herdr, "No other recent agent sessions")
             elif len(active) == 1 and active[0].get("focused"):
                 notify(herdr, "No previous agent to return to")
             else:
@@ -186,6 +265,11 @@ def main() -> int:
             return result.returncode
         if source and source["pane_id"] != target["pane_id"]:
             save_return_pane(history_path, source["pane_id"])
+            record_recent_sessions(
+                history_path, target["pane_id"], source["pane_id"]
+            )
+        else:
+            record_recent_sessions(history_path, target["pane_id"])
     return 0
 
 

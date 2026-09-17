@@ -98,19 +98,20 @@ command = "vim-herdr-navigation.right"
 description = "navigate right (vim/herdr)"
 
 # Ctrl+s prefers green done agents, then cycles other non-idle agents (working,
-# blocked, or unknown) in Herdr's panel order. Idle agents are skipped.
+# blocked, or unknown) in Herdr's panel order. When none are non-idle, it
+# switches between the most recently focused idle agent sessions.
 [[keys.command]]
 key = "ctrl+s"
 type = "plugin_action"
 command = "local.non-idle-agent.swap"
-description = "prefer done, then switch non-idle agent"
+description = "prefer done, then switch non-idle agent or recent session"
 
 # Ctrl+Shift+s applies the same priority rules while cycling in reverse.
 [[keys.command]]
 key = "ctrl+shift+s"
 type = "plugin_action"
 command = "local.non-idle-agent.swap-reverse"
-description = "prefer done, then switch non-idle agent in reverse"
+description = "prefer done, then switch non-idle agent or recent session in reverse"
 
 # tmux prefix+s: workspace/directory picker. Herdr's own new_workspace always
 # starts at $HOME with no prompt, so this covers the missing flow — open a
