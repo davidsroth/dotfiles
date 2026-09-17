@@ -463,6 +463,15 @@ describe("resolveMentions", () => {
       expect(out).toBe("@alice");
       expect(mockFetchUserName).not.toHaveBeenCalled();
     });
+
+    it("does not reuse a user label across credential/workspace scopes", async () => {
+      await resolveMentions("<@U12345|alice>", { SLACK_MCP_XOXP_TOKEN: "workspace-a" }, { n: 25 });
+      mockFetchUserName.mockResolvedValueOnce("bob");
+
+      const out = await resolveMentions("<@U12345>", { SLACK_MCP_XOXP_TOKEN: "workspace-b" }, { n: 25 });
+      expect(out).toBe("@bob");
+      expect(mockFetchUserName).toHaveBeenCalledWith("U12345", { SLACK_MCP_XOXP_TOKEN: "workspace-b" });
+    });
   });
 
   // --- resolveMentions-bare-mention-lookup -----------------------------------

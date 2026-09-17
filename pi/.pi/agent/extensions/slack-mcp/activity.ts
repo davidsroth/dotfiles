@@ -2,7 +2,8 @@
 // Composite, read-only Slack activity tools
 // =============================================================================
 
-import { slackAuthTest } from "./identity";
+import { credentialFingerprint, resolveSlackCredentials } from "./credentials";
+import { fetchUserName, slackAuthTest } from "./identity";
 import { parseCSV } from "./postprocess";
 import { fetchConversationHistory, type SlackHistoryMessage } from "./slack-api";
 
@@ -149,6 +150,20 @@ const HARD_MAX_PAGES = 50;
 const HARD_MAX_RESULTS = 1_000;
 const HARD_MAX_CONCURRENCY = 8;
 const DEFAULT_SNIPPET_LENGTH = 280;
+const DIRECT_LABEL_LOOKUP_CAP = 25;
+
+// Credential-scoped because Slack user IDs and labels belong to a workspace.
+export const directChannelLabelCache = new Map<string, string>();
+
+function directLabelCacheKey(userId: string, authEnv: Record<string, string>): string | null {
+  const credentials = resolveSlackCredentials(authEnv);
+  return credentials ? `${credentialFingerprint(credentials)}:${userId}` : null;
+}
+
+function directLabelUserId(message: SlackMessageRow): string | null {
+  if (!/^[DG]/i.test(message.channelId)) return null;
+  return message.channelLabel.match(/^#?([UW][A-Z0-9]+)$/i)?.[1] ?? null;
+}
 
 const SEARCH_FILTER_KEYS: Array<keyof StructuredSearchFilters> = [
   "filter_in_channel",
@@ -478,6 +493,45 @@ function resultLimit(messages: SlackMessageRow[], maxResults: number): { message
     : { messages, truncated: false };
 }
 
+async function resolveDirectChannelLabels(
+  messages: SlackMessageRow[],
+  authEnv: Record<string, string>,
+): Promise<{ messages: SlackMessageRow[]; warnings: string[] }> {
+  const warnings: string[] = [];
+  const userIds = [...new Set(messages.map(directLabelUserId).filter((id): id is string => Boolean(id)))];
+  if (userIds.length === 0) return { messages, warnings };
+
+  const credentials = resolveSlackCredentials(authEnv);
+  if (!credentials) {
+    warnings.push("Could not resolve DM participant labels because no effective Slack credential was available.");
+    return { messages, warnings };
+  }
+
+  const pending = userIds.filter((id) => {
+    const key = directLabelCacheKey(id, authEnv);
+    return key !== null && !directChannelLabelCache.has(key);
+  });
+  const selected = pending.slice(0, DIRECT_LABEL_LOOKUP_CAP);
+  await mapWithConcurrency(selected, 4, async (id) => {
+    const name = await fetchUserName(id, authEnv);
+    const key = directLabelCacheKey(id, authEnv);
+    if (name && key) directChannelLabelCache.set(key, `@${name}`);
+  });
+  if (pending.length > selected.length) {
+    warnings.push(`DM label lookup capped at ${DIRECT_LABEL_LOOKUP_CAP}; ${pending.length - selected.length} participant label(s) remain unresolved.`);
+  }
+
+  return {
+    messages: messages.map((message) => {
+      const userId = directLabelUserId(message);
+      const key = userId ? directLabelCacheKey(userId, authEnv) : null;
+      const resolved = key ? directChannelLabelCache.get(key) : undefined;
+      return resolved ? { ...message, channelLabel: resolved } : message;
+    }),
+    warnings,
+  };
+}
+
 function groupMyMessages(
   messages: CompactSlackMessage[],
   authenticatedUserId: string,
@@ -570,7 +624,9 @@ export async function runMyConversations(
   const limited = resultLimit(exact, maxResults);
   const warnings = [...paginated.warnings];
   if (limited.truncated) warnings.push(`Result output was limited to maxResults=${maxResults}.`);
-  const compact = limited.messages.map((message) => compactSlackMessage(message, {
+  const labeled = await resolveDirectChannelLabels(limited.messages, authEnv);
+  warnings.push(...labeled.warnings);
+  const compact = labeled.messages.map((message) => compactSlackMessage(message, {
     snippetLength: args.snippetLength ?? args.snippet_length,
     authenticatedUserId: identity.user_id,
   }));
@@ -607,7 +663,11 @@ async function mapWithConcurrency<T, R>(items: T[], concurrency: number, worker:
   return results;
 }
 
-export async function runSearchBatch(caller: SlackToolCaller, args: SearchBatchArgs) {
+export async function runSearchBatch(
+  caller: SlackToolCaller,
+  args: SearchBatchArgs,
+  authEnv: Record<string, string> = {},
+) {
   if (!Array.isArray(args.queries) || args.queries.length < 1 || args.queries.length > 20) {
     throw new Error("queries must contain between 1 and 20 lexical variants");
   }
@@ -657,6 +717,9 @@ export async function runSearchBatch(caller: SlackToolCaller, args: SearchBatchA
   const selected = truncated ? ordered.slice(0, maxResults) : ordered;
   const warnings = queryRuns.flatMap((run) => run.warnings.map((warning) => `[${run.query}] ${warning}`));
   if (truncated) warnings.push(`Deduplicated batch output was limited to maxResults=${maxResults}.`);
+  const labeled = await resolveDirectChannelLabels(selected.map(({ message }) => message), authEnv);
+  warnings.push(...labeled.warnings);
+  const labeledByKey = new Map(labeled.messages.map((message) => [messageKey(message), message]));
 
   return {
     ...(startMs !== undefined || endMs !== undefined ? {
@@ -666,10 +729,13 @@ export async function runSearchBatch(caller: SlackToolCaller, args: SearchBatchA
         semantics: "start <= MsgID < end",
       },
     } : {}),
-    messages: selected.map(({ message, matchedQueries }) => compactSlackMessage(message, {
-      snippetLength: args.snippetLength ?? args.snippet_length,
-      matchedQueries,
-    })),
+    messages: selected.map(({ message, matchedQueries }) => compactSlackMessage(
+      labeledByKey.get(messageKey(message)) ?? message,
+      {
+        snippetLength: args.snippetLength ?? args.snippet_length,
+        matchedQueries,
+      },
+    )),
     messageCount: selected.length,
     queryResults: queryRuns.map((run) => ({
       query: run.query,
@@ -852,12 +918,15 @@ export async function runOpenMessage(
   }
 
   const context = dedupeSlackMessages([...contextRows, exact]).sort((a, b) => (messageMillis(a) ?? 0) - (messageMillis(b) ?? 0));
+  const labeled = await resolveDirectChannelLabels(context, authEnv);
+  warnings.push(...labeled.warnings);
+  const exactLabeled = labeled.messages.find((message) => messageKey(message) === messageKey(exact)) ?? exact;
   return {
     reference: ref,
-    conversationType: direct ? (ref.channelId.startsWith("D") ? "dm" : "mpdm") : "channel",
+    conversationType: direct ? (ref.channelId.startsWith("D") ? "dm" : "mpdm_or_private") : "channel",
     contextSource,
-    exactMessage: compactSlackMessage(exact, { snippetLength: args.snippetLength ?? args.snippet_length }),
-    context: context.map((message) => compactSlackMessage(message, {
+    exactMessage: compactSlackMessage(exactLabeled, { snippetLength: args.snippetLength ?? args.snippet_length }),
+    context: labeled.messages.map((message) => compactSlackMessage(message, {
       snippetLength: args.snippetLength ?? args.snippet_length,
     })),
     searchPagesFetched: 1,

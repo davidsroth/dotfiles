@@ -10,12 +10,19 @@
 // (never re-serialize for nothing). All transforms are config-gated.
 
 import { MENTION_LOOKUP_CAP, MESSAGE_TEXT_TOOLS } from "./constants";
+import { credentialFingerprint, resolveSlackCredentials } from "./credentials";
 import { fetchUserName } from "./identity";
 import type { ResolvedPostProcess } from "./types";
 
 // id -> display name, accumulated across calls (seeded from CSV rows for free,
 // topped up via bounded users.info lookups).
 export const userNameCache = new Map<string, string>();
+
+function scopedUserKey(id: string, env: Record<string, string>): string {
+  const credentials = resolveSlackCredentials(env);
+  const scope = credentials ? credentialFingerprint(credentials) : "no-credentials";
+  return `${scope}:${id}`;
+}
 
 export function parseCSV(text: string): string[][] | null {
   const rows: string[][] = [];
@@ -56,23 +63,25 @@ function serializeCSV(rows: string[][]): string {
 // the shared cache, then via up to `budget.n` users.info lookups.
 export async function resolveMentions(text: string, env: Record<string, string>, budget: { n: number }): Promise<string> {
   let out = text.replace(/<@([UW][A-Z0-9]+)\|([^>]+)>/g, (_m, id: string, nm: string) => {
-    if (!userNameCache.has(id)) userNameCache.set(id, nm);
+    const key = scopedUserKey(id, env);
+    if (!userNameCache.has(key)) userNameCache.set(key, nm);
     return `@${nm}`;
   });
   out = out.replace(/<#(C[A-Z0-9]+)\|([^>]+)>/g, (_m, _id: string, nm: string) => `#${nm}`);
   const bare = new Set<string>();
   for (const m of out.matchAll(/<@([UW][A-Z0-9]+)>/g)) {
-    if (!userNameCache.has(m[1])) bare.add(m[1]);
+    if (!userNameCache.has(scopedUserKey(m[1], env))) bare.add(m[1]);
   }
   for (const id of bare) {
     if (budget.n <= 0) break;
     const nm = await fetchUserName(id, env);
     budget.n--;
-    if (nm) userNameCache.set(id, nm);
+    if (nm) userNameCache.set(scopedUserKey(id, env), nm);
   }
-  out = out.replace(/<@([UW][A-Z0-9]+)>/g, (full, id: string) =>
-    userNameCache.has(id) ? `@${userNameCache.get(id)}` : full,
-  );
+  out = out.replace(/<@([UW][A-Z0-9]+)>/g, (full, id: string) => {
+    const key = scopedUserKey(id, env);
+    return userNameCache.has(key) ? `@${userNameCache.get(key)}` : full;
+  });
   return out;
 }
 
@@ -102,9 +111,10 @@ export async function postProcessCsv(
     if (userIdx >= 0) {
       for (let i = 1; i < rows.length; i++) {
         const id = rows[i][userIdx];
-        if (!id || userNameCache.has(id)) continue;
+        const key = id ? scopedUserKey(id, env) : "";
+        if (!id || userNameCache.has(key)) continue;
         const nm = (nameIdx >= 0 && rows[i][nameIdx]) || (realIdx >= 0 && rows[i][realIdx]) || "";
-        if (nm) userNameCache.set(id, nm);
+        if (nm) userNameCache.set(key, nm);
       }
     }
 

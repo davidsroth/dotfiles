@@ -427,7 +427,7 @@ export default async function slackMCPExtension(pi: ExtensionAPI): Promise<void>
     }),
     async execute(_toolCallId, rawParams) {
       const params = (rawParams ?? {}) as unknown as SearchBatchArgs & Record<string, unknown>;
-      return executeComposite("slack_search_messages_batch", params, (caller) => runSearchBatch(caller, params));
+      return executeComposite("slack_search_messages_batch", params, (caller, authEnv) => runSearchBatch(caller, params, authEnv));
     },
   });
 

@@ -3,11 +3,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const identityMocks = vi.hoisted(() => ({
   slackAuthTest: vi.fn(),
   resolveSlackToken: vi.fn(),
+  fetchUserName: vi.fn(),
 }));
 
 vi.mock("../slack-mcp/identity", () => identityMocks);
 
 import {
+  directChannelLabelCache,
   isMessageInWindow,
   parseSlackMessageCsv,
   parseSlackPermalink,
@@ -56,6 +58,7 @@ function callerFrom(
 }
 
 beforeEach(() => {
+  directChannelLabelCache.clear();
   vi.clearAllMocks();
   identityMocks.slackAuthTest.mockResolvedValue({
     ok: true,
@@ -65,6 +68,7 @@ beforeEach(() => {
     team_id: "T1",
   });
   identityMocks.resolveSlackToken.mockReturnValue({ token: "test-token" });
+  identityMocks.fetchUserName.mockResolvedValue(null);
 });
 
 afterEach(() => {
@@ -141,6 +145,32 @@ describe("runMyConversations", () => {
       _raw: true,
     });
     expect(secondArgs).toEqual({ ...firstArgs, cursor: "cursor-2" });
+  });
+
+  it("resolves a DM's participant user ID with a credential-scoped lookup", async () => {
+    identityMocks.fetchUserName.mockResolvedValueOnce("Alice");
+    const caller = callerFrom(() => ({
+      text: csv([{
+        msg: "1775988000.000000",
+        channel: "D123 (#UOTHER)",
+        user: "UME",
+      }]),
+      isError: false,
+    }));
+
+    const result = await runMyConversations(
+      caller,
+      { SLACK_MCP_XOXP_TOKEN: "workspace-token" },
+      {
+        start_time: "2026-04-12T00:00:00Z",
+        end_time: "2026-04-13T00:00:00Z",
+      },
+    );
+
+    expect(result.messages[0].channelLabel).toBe("@Alice");
+    expect(identityMocks.fetchUserName).toHaveBeenCalledWith("UOTHER", {
+      SLACK_MCP_XOXP_TOKEN: "workspace-token",
+    });
   });
 
   it("marks a cursor-capped result incomplete without following extra pages", async () => {
