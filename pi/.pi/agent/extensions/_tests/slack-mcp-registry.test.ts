@@ -69,7 +69,14 @@ function makeResolvedConfig(overrides: Partial<ResolvedConfig> = {}): ResolvedCo
     startupTimeoutMs: 60_000,
     requestTimeoutMs: 60_000,
     requestTimeoutMsByTool: {},
-    postProcess: { enabled: true, dropColumns: new Set(), maxTextLength: 2000, resolveMentions: true },
+    postProcess: {
+      enabled: true,
+      dropColumns: new Set(),
+      maxTextLength: 2000,
+      maxResponseChars: 50_000,
+      maxRows: 0,
+      resolveMentions: true,
+    },
     disabledTools: new Set(),
     ...overrides,
   };

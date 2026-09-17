@@ -8,6 +8,8 @@ import {
   DEFAULT_ARGS,
   DEFAULT_COMMAND,
   DEFAULT_DROP_COLUMNS,
+  DEFAULT_MAX_RESPONSE_CHARS,
+  DEFAULT_MAX_ROWS,
   DEFAULT_MAX_TEXT_LENGTH,
   DEFAULT_REQUEST_TIMEOUT_MS,
   DEFAULT_STARTUP_TIMEOUT_MS,
@@ -43,13 +45,22 @@ export function resolveConfig(cfg: SlackMCPConfig | null): ResolvedConfig {
 
 export function resolvePostProcess(pp?: PostProcessConfig | boolean): ResolvedPostProcess {
   if (pp === false) {
-    return { enabled: false, dropColumns: new Set(), maxTextLength: 0, resolveMentions: false };
+    return {
+      enabled: false,
+      dropColumns: new Set(),
+      maxTextLength: 0,
+      maxResponseChars: 0,
+      maxRows: 0,
+      resolveMentions: false,
+    };
   }
   const o = pp && typeof pp === "object" ? pp : {};
   return {
     enabled: o.enabled ?? true,
     dropColumns: new Set(o.dropColumns ?? DEFAULT_DROP_COLUMNS),
     maxTextLength: o.maxTextLength ?? DEFAULT_MAX_TEXT_LENGTH,
+    maxResponseChars: o.maxResponseChars ?? DEFAULT_MAX_RESPONSE_CHARS,
+    maxRows: o.maxRows ?? DEFAULT_MAX_ROWS,
     resolveMentions: o.resolveMentions ?? true,
   };
 }

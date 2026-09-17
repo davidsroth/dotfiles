@@ -21,6 +21,10 @@ export const DEFAULT_REQUEST_TIMEOUT_MS = 60_000;
 // CSV post-processing defaults (see PostProcessConfig).
 export const DEFAULT_DROP_COLUMNS = ["Permalink", "AttachmentIDs", "HasMedia", "BotName", "Cursor"];
 export const DEFAULT_MAX_TEXT_LENGTH = 2000;
+// Match Pi and pi-mcp-adapter's normal inline output ceiling. Unlike
+// maxTextLength, this is a whole-response budget applied on CSV row boundaries.
+export const DEFAULT_MAX_RESPONSE_CHARS = 50_000;
+export const DEFAULT_MAX_ROWS = 0;
 // Upstream tools whose output has a Text column worth truncating. We expose the
 // per-call `_maxTextLength` / `_raw` override args only on these (keeps schema
 // token overhead off tools where it does nothing, e.g. channels_list).

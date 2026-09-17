@@ -22,7 +22,8 @@
  *     },
  *     "postProcess": {                                   // optional: trim/clean CSV output (default on)
  *       "dropColumns": ["Permalink", "AttachmentIDs", "HasMedia", "BotName", "Cursor"],
- *       "maxTextLength": 2000,                           //   0 disables truncation
+ *       "maxTextLength": 2000,                           //   per message; 0 disables
+ *       "maxResponseChars": 50000,                       //   whole response; 0 disables
  *       "resolveMentions": true                          //   <@U…> -> @name
  *     },                                                 //   set "postProcess": false to disable entirely
  *     "disabledTools": ["usergroups_create", "users_search"]  // optional: skip these upstream tools
@@ -35,10 +36,10 @@
  * dropped field (e.g. Permalink) set a custom `dropColumns` list omitting it,
  * or set `"postProcess": false` for fully raw upstream output.
  *
- * Per-call overrides (no config edit needed): message-text tools
- * (conversations_history/replies/search_messages) accept `_maxTextLength`
- * (override truncation for one call; 0 = none) and `_raw` (true = fully raw
- * output for one call). These args are stripped before forwarding upstream.
+ * Per-call overrides (no config edit needed): message-text tools accept
+ * `_maxTextLength` (per-message cell), `_maxResponseChars` (whole response),
+ * `_maxRows`, `_includePermalink`, and `_raw`. Zero disables the corresponding
+ * numeric limit. These wrapper-only args are stripped before forwarding.
  *
  * `disabledTools` matches against upstream tool names (without `toolPrefix`).
  * Use this to trim system-prompt token weight by hiding tools you never call.
@@ -78,6 +79,7 @@ import { slackAuthTest } from "./identity";
 import type { StdioMCPClient } from "./mcp-client";
 import { augmentSchemaWithControls } from "./postprocess";
 import { acquireClient, acquireExistingRef, peekConnectedShared, releaseClient, sharedRefCount } from "./registry";
+import { normalizeUpstreamArgs, patchUpstreamSchema } from "./upstream-contract";
 import {
   enabledSlackTools,
   type StatusDiagnostics,
@@ -173,7 +175,13 @@ export default async function slackMCPExtension(pi: ExtensionAPI): Promise<void>
         description,
         // Pass the upstream JSON Schema through, augmented (for message-text
         // tools) with the wrapper's per-call override args.
-        parameters: Type.Unsafe(augmentSchemaWithControls(tool.inputSchema, tool.name, cfg.postProcess)),
+        parameters: Type.Unsafe(
+          augmentSchemaWithControls(
+            patchUpstreamSchema(tool.inputSchema, tool.name),
+            tool.name,
+            cfg.postProcess,
+          ),
+        ),
         async execute(_toolCallId, params) {
           // Re-check `client` each call: a /slack force-restart from another
           // session can drop our reference. The closure captures the outer
@@ -181,8 +189,10 @@ export default async function slackMCPExtension(pi: ExtensionAPI): Promise<void>
           if (!client || !client.isConnected) {
             return toolError(piName, "Not connected to Slack MCP. Run /slack to connect.");
           }
+          const normalized = normalizeUpstreamArgs(tool.name, (params ?? {}) as Record<string, unknown>);
+          if (!normalized.ok) return toolError(piName, normalized.error, { upstreamTool: tool.name });
           try {
-            const result = await client.callTool(tool.name, (params ?? {}) as Record<string, unknown>);
+            const result = await client.callTool(tool.name, normalized.args);
             return _upstreamToolResult(piName, result, { upstreamTool: tool.name });
           } catch (error) {
             const msg = error instanceof Error ? error.message : String(error);
@@ -344,7 +354,7 @@ export default async function slackMCPExtension(pi: ExtensionAPI): Promise<void>
     description: "Call an upstream Slack MCP tool by name. Useful when dynamic slack_* tools were just registered but are not exposed in the current tool schema yet.",
     parameters: Type.Object({
       tool: Type.String({
-        description: "Upstream Slack MCP tool name, with or without the configured prefix (for example: conversations_search_messages or slack_conversations_search_messages). If the tool schema in this session only exposes this field, you may append a JSON object after the name, e.g. 'slack_conversations_search_messages {\"search_query\":\"from:@me\"}'.",
+        description: "Upstream Slack MCP tool name, with or without the configured prefix (for example: conversations_search_messages or slack_conversations_search_messages). If the tool schema in this session only exposes this field, you may append a JSON object after the name, e.g. 'slack_conversations_search_messages {\"filter_users_from\":\"U123\"}'.",
       }),
       args: Type.Optional(Type.Record(Type.String(), Type.Any(), {
         description: "JSON arguments to pass to the upstream Slack MCP tool. Examples: {\"search_query\":\"weekly plan\"}, {\"channel_id\":\"#general\",\"limit\":\"20\"}, {\"channel_id\":\"#general\",\"thread_ts\":\"1234567890.123456\"}",
@@ -405,10 +415,14 @@ export default async function slackMCPExtension(pi: ExtensionAPI): Promise<void>
         );
       }
 
+      const args = rawArgs as Record<string, unknown>;
+      const normalized = normalizeUpstreamArgs(upstreamTool, args);
+      if (!normalized.ok) {
+        return toolError("slack_mcp_call", normalized.error, { upstreamTool, calledAs: rawTool, args });
+      }
       try {
-        const args = rawArgs as Record<string, unknown>;
-        const callResult = await client.callTool(upstreamTool, args);
-        return _upstreamToolResult("slack_mcp_call", callResult, { upstreamTool, calledAs: rawTool, args });
+        const callResult = await client.callTool(upstreamTool, normalized.args);
+        return _upstreamToolResult("slack_mcp_call", callResult, { upstreamTool, calledAs: rawTool, args: normalized.args });
       } catch (error) {
         const msg = error instanceof Error ? error.message : String(error);
         return toolError("slack_mcp_call", `Error calling ${upstreamTool}: ${msg}`, { upstreamTool, error: msg });

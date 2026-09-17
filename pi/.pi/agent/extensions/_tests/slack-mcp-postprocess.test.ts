@@ -65,6 +65,8 @@ function pp(over: Partial<ResolvedPostProcess> = {}): ResolvedPostProcess {
     enabled: true,
     dropColumns: new Set<string>(),
     maxTextLength: 0,
+    maxResponseChars: 0,
+    maxRows: 0,
     resolveMentions: false,
     ...over,
   };
@@ -332,6 +334,42 @@ describe("postProcessCsv", () => {
     });
   });
 
+  describe("whole-response budgets", () => {
+    it("omits whole rows and reports the omission under a character ceiling", async () => {
+      const rows = Array.from({ length: 12 }, (_, i) => `${i},${"x".repeat(80)}`).join("\n");
+      const result = await postProcessCsv(
+        `MsgID,Text\n${rows}\n`,
+        pp({ maxResponseChars: 350 }),
+        {},
+      );
+      expect(result.length).toBeLessThanOrEqual(350);
+      expect(result).toContain("response_truncated: true");
+      expect(result).toContain("omitted_rows:");
+    });
+
+    it("applies an explicit row limit and reports omitted rows", async () => {
+      const result = await postProcessCsv(
+        "MsgID,Text\n1,a\n2,b\n3,c\n",
+        pp({ maxRows: 2 }),
+        {},
+      );
+      expect(result).toContain("1,a");
+      expect(result).toContain("2,b");
+      expect(result).not.toContain("3,c");
+      expect(result).toContain("omitted_rows: 1");
+    });
+
+    it("makes a retained next cursor conspicuously incomplete", async () => {
+      const result = await postProcessCsv(
+        "MsgID,Text,Cursor\n1,a,next-page\n",
+        pp({ dropColumns: new Set(["Cursor"]) }),
+        {},
+      );
+      expect(result).toContain("next_cursor: next-page");
+      expect(result).toContain("WARNING: Results are incomplete");
+    });
+  });
+
   // --- serializeCSV quoting rules (tested indirectly) ----------------------
   describe("serializeCSV quoting rules (indirect round-trips)", () => {
     it("re-quotes a Text field containing a comma after column drop", async () => {
@@ -366,6 +404,9 @@ describe("postProcessCsv", () => {
       const result = augmentSchemaWithControls(schema, "conversations_history", pp({ enabled: true }));
       const props = result.properties as Record<string, unknown>;
       expect(props).toHaveProperty("_maxTextLength");
+      expect(props).toHaveProperty("_maxResponseChars");
+      expect(props).toHaveProperty("_maxRows");
+      expect(props).toHaveProperty("_includePermalink");
       expect(props).toHaveProperty("_raw");
       expect(props).toHaveProperty("channel");
       // Must be a new object

@@ -158,15 +158,32 @@ export class StdioMCPClient {
     const forwarded = { ...args };
     let raw = false;
     let maxTextOverride: number | undefined;
+    let maxResponseOverride: number | undefined;
+    let maxRowsOverride: number | undefined;
+    let includePermalink = false;
+    const nonNegativeNumber = (value: unknown): number | undefined => {
+      const n = typeof value === "number" ? value : typeof value === "string" ? Number(value) : Number.NaN;
+      return Number.isFinite(n) && n >= 0 ? n : undefined;
+    };
     if ("_raw" in forwarded) {
       raw = forwarded._raw === true || forwarded._raw === "true";
       delete forwarded._raw;
     }
     if ("_maxTextLength" in forwarded) {
-      const v = forwarded._maxTextLength;
-      const n = typeof v === "number" ? v : typeof v === "string" ? Number(v) : Number.NaN;
-      if (Number.isFinite(n) && n >= 0) maxTextOverride = n;
+      maxTextOverride = nonNegativeNumber(forwarded._maxTextLength);
       delete forwarded._maxTextLength;
+    }
+    if ("_maxResponseChars" in forwarded) {
+      maxResponseOverride = nonNegativeNumber(forwarded._maxResponseChars);
+      delete forwarded._maxResponseChars;
+    }
+    if ("_maxRows" in forwarded) {
+      maxRowsOverride = nonNegativeNumber(forwarded._maxRows);
+      delete forwarded._maxRows;
+    }
+    if ("_includePermalink" in forwarded) {
+      includePermalink = forwarded._includePermalink === true || forwarded._includePermalink === "true";
+      delete forwarded._includePermalink;
     }
 
     const timeoutMs = this.requestTimeoutMsByTool[name] ?? this.requestTimeoutMs;
@@ -185,10 +202,15 @@ export class StdioMCPClient {
     const isError = result.isError === true;
     // Upstream errors are already human-readable and must be preserved exactly.
     if (isError || raw || !this.postProcess.enabled) return { text, isError };
-    const pp =
-      maxTextOverride === undefined
-        ? this.postProcess
-        : { ...this.postProcess, maxTextLength: maxTextOverride };
+    const pp = {
+      ...this.postProcess,
+      ...(maxTextOverride === undefined ? {} : { maxTextLength: maxTextOverride }),
+      ...(maxResponseOverride === undefined ? {} : { maxResponseChars: maxResponseOverride }),
+      ...(maxRowsOverride === undefined ? {} : { maxRows: maxRowsOverride }),
+      ...(includePermalink
+        ? { dropColumns: new Set([...this.postProcess.dropColumns].filter((column) => column !== "Permalink")) }
+        : {}),
+    };
     return { text: await postProcessCsv(text, pp, this.authEnv), isError };
   }
 

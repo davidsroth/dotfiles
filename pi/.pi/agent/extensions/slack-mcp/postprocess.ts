@@ -139,12 +139,41 @@ export async function postProcessCsv(
       changed = true;
     }
 
-    if (!changed) return text; // nothing to do => keep upstream bytes verbatim
-
-    let out = serializeCSV(outRows);
-    if (cursorIdx >= 0 && dropIdx.has(cursorIdx) && nextCursor) {
-      out += `next_cursor: ${nextCursor}\n`;
+    // Apply whole-response limits on row boundaries. Unlike maxTextLength,
+    // these are actual output budgets. A local row omission cannot be resumed
+    // with Slack's cursor, so make it conspicuous and reversible.
+    let responseRows = outRows;
+    let omittedRows = 0;
+    if (pp.maxRows > 0 && responseRows.length - 1 > pp.maxRows) {
+      omittedRows = responseRows.length - 1 - pp.maxRows;
+      responseRows = [responseRows[0], ...responseRows.slice(1, pp.maxRows + 1)];
+      changed = true;
     }
+
+    const cursorFooter = cursorIdx >= 0 && dropIdx.has(cursorIdx) && nextCursor
+      ? `next_cursor: ${nextCursor}\nWARNING: Results are incomplete. Call again with identical filters and cursor='${nextCursor}'.\n`
+      : "";
+    const buildOutput = () => {
+      const truncationFooter = omittedRows > 0
+        ? `response_truncated: true; omitted_rows: ${omittedRows}; rerun with _maxResponseChars=0 and _maxRows=0 for all rows from this page.\n`
+        : "";
+      return `${serializeCSV(responseRows)}${cursorFooter}${truncationFooter}`;
+    };
+
+    let out = buildOutput();
+    if (pp.maxResponseChars > 0 && out.length > pp.maxResponseChars) {
+      while (responseRows.length > 1 && out.length > pp.maxResponseChars) {
+        responseRows = responseRows.slice(0, -1);
+        omittedRows++;
+        out = buildOutput();
+      }
+      changed = true;
+      // Pathological tiny budgets may not fit even the header and metadata.
+      // Honor the hard ceiling rather than returning an unexpectedly huge body.
+      if (out.length > pp.maxResponseChars) out = out.slice(0, pp.maxResponseChars);
+    }
+
+    if (!changed && !cursorFooter) return text; // preserve upstream bytes when possible
     return out;
   } catch {
     return text; // never let post-processing break a tool result
@@ -173,8 +202,25 @@ export function augmentSchemaWithControls(
         ...props,
         _maxTextLength: {
           type: "number",
+          minimum: 0,
           description:
-            `Override the Text-column truncation limit for THIS call only (chars; 0 = no truncation). Default is ${pp.maxTextLength}. Use 0 when you need the full untruncated message body (e.g. long bootstrap/instructions).`,
+            `Override the per-message Text-cell truncation limit for THIS call only (chars; 0 = no per-message truncation). Default is ${pp.maxTextLength}. This is NOT a whole-response budget.`,
+        },
+        _maxResponseChars: {
+          type: "number",
+          minimum: 0,
+          description:
+            `Hard limit for the final processed response (chars; 0 = unlimited). Default is ${pp.maxResponseChars}. Rows are omitted whole and reported explicitly.`,
+        },
+        _maxRows: {
+          type: "number",
+          minimum: 0,
+          description:
+            `Maximum data rows returned from this page (0 = unlimited). Default is ${pp.maxRows}. Omitted rows are reported explicitly.`,
+        },
+        _includePermalink: {
+          type: "boolean",
+          description: "Keep the Permalink column for this call even when the default post-processing configuration drops it.",
         },
         _raw: {
           type: "boolean",

@@ -44,8 +44,12 @@ export interface PostProcessConfig {
    * preserved as a `next_cursor: <value>` footer so pagination still works.
    */
   dropColumns?: string[];
-  /** Truncate the `Text` column to this many chars (0 = no truncation). Default 2000. */
+  /** Truncate each `Text` cell to this many chars (0 = no per-message truncation). Default 2000. */
   maxTextLength?: number;
+  /** Bound the final processed CSV response in characters (0 = unlimited). Default 50000. */
+  maxResponseChars?: number;
+  /** Bound returned data rows after processing (0 = unlimited). Default 0. */
+  maxRows?: number;
   /** Resolve `<@U…>` / `<#C…>` mentions to @name / #name inline. Default true. */
   resolveMentions?: boolean;
 }
@@ -54,6 +58,8 @@ export interface ResolvedPostProcess {
   enabled: boolean;
   dropColumns: Set<string>;
   maxTextLength: number;
+  maxResponseChars: number;
+  maxRows: number;
   resolveMentions: boolean;
 }
 

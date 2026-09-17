@@ -61,6 +61,8 @@ function makeCfg(overrides: Partial<ResolvedConfig> = {}): ResolvedConfig {
       enabled: true,
       dropColumns: new Set(["Permalink"]),
       maxTextLength: 2000,
+      maxResponseChars: 50_000,
+      maxRows: 0,
       resolveMentions: true,
     },
     disabledTools: new Set(),
@@ -618,8 +620,8 @@ describe("jsonrpc — server notification ignored", () => {
 // callTool behaviors
 // ===========================================================================
 
-describe("callTool — strips _raw and _maxTextLength from forwarded args", () => {
-  it("does not forward _raw or _maxTextLength in the JSON-RPC request", async () => {
+describe("callTool — strips wrapper controls from forwarded args", () => {
+  it("does not forward post-processing controls in the JSON-RPC request", async () => {
     const client = new StdioMCPClient();
     const child = makeFakeChild();
     await connectWithHandshake(client, child);
@@ -632,7 +634,14 @@ describe("callTool — strips _raw and _maxTextLength from forwarded args", () =
       return origWrite(...(args as Parameters<typeof origWrite>));
     }) as typeof child.stdin.write;
 
-    const p = client.callTool("my_tool", { _raw: true, _maxTextLength: 100, channel: "C123" });
+    const p = client.callTool("my_tool", {
+      _raw: true,
+      _maxTextLength: 100,
+      _maxResponseChars: 5000,
+      _maxRows: 20,
+      _includePermalink: true,
+      channel: "C123",
+    });
     await Promise.resolve();
     respond(child, { jsonrpc: "2.0", id: 3, result: { content: [{ type: "text", text: "x" }] } });
     await p;
@@ -644,6 +653,9 @@ describe("callTool — strips _raw and _maxTextLength from forwarded args", () =
     expect(parsed.params.arguments).toEqual({ channel: "C123" });
     expect(parsed.params.arguments._raw).toBeUndefined();
     expect(parsed.params.arguments._maxTextLength).toBeUndefined();
+    expect(parsed.params.arguments._maxResponseChars).toBeUndefined();
+    expect(parsed.params.arguments._maxRows).toBeUndefined();
+    expect(parsed.params.arguments._includePermalink).toBeUndefined();
   });
 });
 
@@ -698,7 +710,14 @@ describe("callTool — _maxTextLength override", () => {
     const client = new StdioMCPClient();
     const child = makeFakeChild();
     await connectWithHandshake(client, child, makeCfg({
-      postProcess: { enabled: true, dropColumns: new Set(), maxTextLength: 2000, resolveMentions: false },
+      postProcess: {
+        enabled: true,
+        dropColumns: new Set(),
+        maxTextLength: 2000,
+        maxResponseChars: 50_000,
+        maxRows: 0,
+        resolveMentions: false,
+      },
     }));
 
     const p = client.callTool("my_tool", { _maxTextLength: 0 });
@@ -709,6 +728,43 @@ describe("callTool — _maxTextLength override", () => {
     expect(postProcessCsv).toHaveBeenCalledWith(
       "csv",
       expect.objectContaining({ maxTextLength: 0 }),
+      expect.anything(),
+    );
+  });
+});
+
+describe("callTool — response controls", () => {
+  it("passes whole-response limits and permalink selection to post-processing", async () => {
+    vi.mocked(postProcessCsv).mockResolvedValue("pp-result");
+    const client = new StdioMCPClient();
+    const child = makeFakeChild();
+    await connectWithHandshake(client, child, makeCfg({
+      postProcess: {
+        enabled: true,
+        dropColumns: new Set(["Permalink", "Cursor"]),
+        maxTextLength: 2000,
+        maxResponseChars: 50_000,
+        maxRows: 0,
+        resolveMentions: false,
+      },
+    }));
+
+    const p = client.callTool("my_tool", {
+      _maxResponseChars: 4000,
+      _maxRows: 10,
+      _includePermalink: true,
+    });
+    await Promise.resolve();
+    respond(child, { jsonrpc: "2.0", id: 3, result: { content: [{ type: "text", text: "csv" }] } });
+    await p;
+
+    expect(postProcessCsv).toHaveBeenCalledWith(
+      "csv",
+      expect.objectContaining({
+        maxResponseChars: 4000,
+        maxRows: 10,
+        dropColumns: new Set(["Cursor"]),
+      }),
       expect.anything(),
     );
   });
