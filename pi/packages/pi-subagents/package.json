@@ -24,10 +24,10 @@
     "@earendil-works/pi-agent-core": ">=0.80.6",
     "@earendil-works/pi-ai": ">=0.80.6",
     "@earendil-works/pi-coding-agent": ">=0.80.6",
-    "@earendil-works/pi-tui": ">=0.80.6"
+    "@earendil-works/pi-tui": ">=0.80.6",
+    "@sinclair/typebox": "*"
   },
   "dependencies": {
-    "@sinclair/typebox": "^0.34.49",
     "croner": "^10.0.1",
     "nanoid": "^6.0.0"
   },
@@ -46,6 +46,7 @@
     "@earendil-works/pi-ai": "^0.80.10",
     "@earendil-works/pi-coding-agent": "^0.80.10",
     "@earendil-works/pi-tui": "^0.80.10",
+    "@sinclair/typebox": "^0.34.49",
     "@types/node": "^26.1.1",
     "typescript": "^7.0.2",
     "vitest": "^4.0.18"

@@ -22,7 +22,8 @@
     }
   ],
   "extensions": [
-    "!advisor.ts"
+    "!advisor.ts",
+    "-builtin:mcp"
   ],
   "skills": [
     "-skills/sunsama-token",
