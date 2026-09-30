@@ -27,7 +27,7 @@
     "patches/**/*"
   ],
   "scripts": {
-    "test": "tsx --test broker/client.test.ts broker/client-liveness.test.ts broker/extension.test.ts broker/framing.test.ts broker/lifecycle.test.ts broker/paths.test.ts broker/runtime-claim.test.ts broker/spawn.test.ts config.test.ts cwd.test.ts format-context.test.ts presence-name.test.ts reply-tracker.test.ts intercom.integration.test.ts test/agent-picker.test.ts test/inline-message.test.ts test/overlay-width.test.ts test/side-session.test.ts test/tmux.test.ts",
+    "test": "tsx --test broker/client.test.ts broker/client-liveness.test.ts broker/extension.test.ts broker/framing.test.ts broker/lifecycle.test.ts broker/paths.test.ts broker/runtime-claim.test.ts broker/spawn.test.ts config.test.ts cwd.test.ts format-context.test.ts presence-name.test.ts reply-tracker.test.ts intercom.integration.test.ts test/agent-picker.test.ts test/inline-message.test.ts test/overlay-width.test.ts test/side-session.test.ts test/side-session-sdk.test.ts test/tmux.test.ts",
     "typecheck": "npx -y -p typescript@5.7 tsc --noEmit"
   },
   "keywords": [

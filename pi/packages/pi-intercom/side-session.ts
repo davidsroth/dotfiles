@@ -82,6 +82,49 @@ function lastAssistantText(session: AgentSession): string {
   throw new Error("aside returned no assistant response");
 }
 
+/**
+ * Snapshot of the recipient's active branch used to seed the aside fork.
+ *
+ * Pi rebuilds every request's context from the session manager, so seeding
+ * only `agent.state.messages` on a fork with an empty session manager loses
+ * the recipient's history (Pi 0.99 drops it on every request; older hosts
+ * dropped it after the first tool call). The fork's SessionManager is
+ * therefore built from the branch entries. Hosts whose
+ * `SessionManager.inMemory` predates the `entries` parameter ignore it; for
+ * those, `legacySeed` carries the messages to seed into agent state instead.
+ *
+ * Taken synchronously, pinned to the current leaf, and deep-cloned so the fork
+ * never aliases or writes back to the recipient's entries.
+ */
+export interface AsideSnapshot {
+  sessionManager: SessionManager;
+  legacySeed?: AiMessage[];
+}
+
+export function snapshotRecipient(ctx: ExtensionContext): AsideSnapshot {
+  try {
+    const source = ctx.sessionManager;
+    const leafId = source.getLeafId();
+    const branch = leafId ? source.getBranch(leafId) : [];
+    const header = source.getHeader();
+    const entries = structuredClone(header ? [header, ...branch] : branch);
+    const inMemory = SessionManager.inMemory as (
+      cwd?: string,
+      options?: undefined,
+      entries?: unknown[],
+    ) => SessionManager;
+    const sessionManager = inMemory(ctx.cwd, undefined, entries);
+    const expected = buildSessionContext(structuredClone(branch), leafId).messages;
+    if (expected.length > 0 && sessionManager.buildSessionContext().messages.length === 0) {
+      return { sessionManager, legacySeed: expected as AiMessage[] };
+    }
+    return { sessionManager };
+  } catch {
+    // If the snapshot can't be built, answer from the question alone.
+    return { sessionManager: SessionManager.inMemory(ctx.cwd) };
+  }
+}
+
 export interface AnswerAsideOptions {
   timeoutMs?: number;
   /** Optional external cancellation (e.g. extension shutdown). */
@@ -103,10 +146,13 @@ export async function answerAside(
     throw new Error("no active model in the target session");
   }
 
+  // Snapshot before the first await so the fork reflects the recipient's
+  // context at the moment the aside arrived.
+  const snapshot = snapshotRecipient(ctx);
   const registry = ctx.modelRegistry as unknown as { runtime?: unknown };
   const sessionOptions: Record<string, unknown> = {
     cwd: ctx.cwd,
-    sessionManager: SessionManager.inMemory(ctx.cwd),
+    sessionManager: snapshot.sessionManager,
     model,
     tools: [...ASIDE_TOOLS],
     resourceLoader: createAsideResourceLoader(ctx),
@@ -136,17 +182,8 @@ export async function answerAside(
   };
 
   try {
-    // Capture the leaf before entries so a concurrently advancing main session
-    // cannot give buildSessionContext a leaf newer than the snapshot.
-    try {
-      const leafId = ctx.sessionManager.getLeafId();
-      const entries = ctx.sessionManager.getEntries();
-      const seed = buildSessionContext(entries, leafId).messages;
-      if (seed.length > 0) {
-        session.agent.state.messages = seed as AiMessage[] as typeof session.agent.state.messages;
-      }
-    } catch {
-      // If the snapshot can't be built, answer from the question alone.
+    if (snapshot.legacySeed) {
+      session.agent.state.messages = snapshot.legacySeed as typeof session.agent.state.messages;
     }
 
     if (options.signal) {
