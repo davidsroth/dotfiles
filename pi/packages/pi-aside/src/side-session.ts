@@ -1,5 +1,4 @@
 import {
-  buildSessionContext,
   createAgentSession,
   createExtensionRuntime,
   SessionManager,
@@ -53,10 +52,15 @@ export async function answerAside(ctx: ExtensionContext, question: string, optio
   options.signal.throwIfAborted();
   if (!ctx.model) throw new Error("No active model");
 
-  // Snapshot before the first await, pinned to the current finalized leaf.
-  const leaf = ctx.sessionManager.getLeafId();
-  const snapshot = structuredClone(buildSessionContext(ctx.sessionManager.getEntries(), leaf).messages);
-  const firstNewMessage = snapshot.length;
+  // Snapshot the active branch before the first await. Pi rebuilds model context
+  // from the session manager during prompting, so seeding agent.state alone loses
+  // the history (notably after a tool call).
+  const header = ctx.sessionManager.getHeader();
+  const snapshot = structuredClone(header
+    ? [header, ...ctx.sessionManager.getBranch()]
+    : ctx.sessionManager.getBranch());
+  const history = SessionManager.inMemory(ctx.cwd, undefined, snapshot);
+  const firstNewMessage = history.buildSessionContext().messages.length;
   // The extension facade does not yet expose a public ModelRuntime accessor.
   // Use the same bridge as intercom's aside; fail rather than rediscover auth.
   const runtime = (ctx.modelRegistry as unknown as { runtime?: ModelRuntime }).runtime;
@@ -83,7 +87,7 @@ export async function answerAside(ctx: ExtensionContext, question: string, optio
       modelRuntime: runtime,
       thinkingLevel: ctx.thinkingLevel,
       tools: ["read", "ls", "find", "grep"],
-      sessionManager: SessionManager.inMemory(ctx.cwd),
+      sessionManager: history,
       settingsManager: SettingsManager.inMemory({ compaction: { enabled: false }, retry: { enabled: false } }),
       resourceLoader: resourceLoader(ctx.getSystemPrompt()),
     }).then(({ session: created }) => {
@@ -98,7 +102,6 @@ export async function answerAside(ctx: ExtensionContext, question: string, optio
     });
     const child = await Promise.race([creating, aborted]);
     signal.throwIfAborted();
-    child.agent.state.messages = snapshot;
     let text = "";
     unsubscribe = child.subscribe((event) => {
       if (signal.aborted) return;

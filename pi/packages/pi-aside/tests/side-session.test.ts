@@ -33,14 +33,17 @@ function harness() {
     prompt: vi.fn(async () => { state.messages.push(message("Fresh answer")); }),
     abort: vi.fn(async () => {}), dispose: vi.fn(),
   };
-  create.mockResolvedValue({ session: child } as any);
+  create.mockImplementation(async (options) => {
+    state.messages = options!.sessionManager!.buildSessionContext().messages;
+    return { session: child } as any;
+  });
   const onUpdate = vi.fn();
   const controller = new AbortController();
   const ask = (timeoutMs?: number) => answerAside(ctx, "Side question", { signal: controller.signal, onUpdate, timeoutMs });
   return { parent, ctx, child, ask, controller, onUpdate, unsubscribe, emit: (event: any) => listener(event) };
 }
 
-beforeEach(() => create.mockReset());
+beforeEach(() => { create.mockReset(); });
 afterEach(() => vi.useRealTimers());
 
 describe("throwaway aside", () => {
@@ -54,6 +57,7 @@ describe("throwaway aside", () => {
     expect(options.modelRuntime).toBe((h.ctx.modelRegistry as any).runtime);
     expect(options.tools).toEqual(["read", "ls", "find", "grep"]);
     expect(options.sessionManager!.isPersisted()).toBe(false);
+    expect(options.sessionManager!.buildSessionContext().messages[0]).toMatchObject({ role: "user", content: [{ type: "text", text: "Main task" }] });
     expect(options.settingsManager!.getCompactionSettings().enabled).toBe(false);
     expect(options.settingsManager!.getRetrySettings().enabled).toBe(false);
     expect(options.resourceLoader!.getExtensions().extensions).toEqual([]);
@@ -77,11 +81,15 @@ describe("throwaway aside", () => {
     create.mockReturnValueOnce(pending.promise);
     const answer = h.ask();
     h.parent.appendMessage({ role: "user", content: "Advanced during creation", timestamp: 4 });
+    h.child.state.messages = create.mock.calls[0][0]!.sessionManager!.buildSessionContext().messages;
     pending.resolve({ session: h.child });
     await answer;
+    expect(JSON.stringify(create.mock.calls[0][0]!.sessionManager!.buildSessionContext().messages)).toContain("Earlier summary");
     expect(JSON.stringify(h.child.state.messages)).toContain("Earlier summary");
     expect(JSON.stringify(h.child.state.messages)).toContain("Retained");
     expect(JSON.stringify(h.child.state.messages)).not.toMatch(/Main task|Other branch|Advanced during creation/);
+    expect(create.mock.calls[0][0]!.sessionManager!.getBranch().some((entry) =>
+      JSON.stringify(entry).includes("Other branch"))).toBe(false);
     await h.ask();
     expect(JSON.stringify(h.child.state.messages)).toContain("Advanced during creation");
   });

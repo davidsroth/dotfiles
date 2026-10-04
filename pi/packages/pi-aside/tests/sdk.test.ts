@@ -21,13 +21,17 @@ it("runs a real SDK fork with a real read tool and a scripted provider, leaving 
     runtime.registerNativeProvider(faux.provider);
     const parent = SessionManager.inMemory(cwd);
     parent.appendMessage({ role: "user", content: "Main session sentinel", timestamp: 1 });
+    parent.appendMessage(fauxAssistantMessage("Earlier answer"));
+    parent.appendMessage({ role: "user", content: "Follow-up context", timestamp: 2 });
     const original = structuredClone(parent.getEntries());
     let requests = 0;
     faux.setResponses([
       (context, options) => {
         requests++;
         expect(context.tools?.map((tool) => tool.name).sort()).toEqual(["find", "grep", "ls", "read"]);
-        expect(context.messages[0]).toMatchObject({ role: "user", content: "Main session sentinel" });
+        expect(context.messages.slice(0, 3).map((message) => message.role)).toEqual(["user", "assistant", "user"]);
+        expect(JSON.stringify(context.messages.slice(0, 3))).toContain("Earlier answer");
+        expect(JSON.stringify(context.messages.slice(0, 3))).toContain("Follow-up context");
         expect(context.messages.at(-1)).toMatchObject({ role: "user", content: [{ type: "text", text: "Read example.txt" }] });
         expect(context.systemPrompt).toContain("one-off side question");
         expect(options?.reasoning).toBe("high");
@@ -35,6 +39,9 @@ it("runs a real SDK fork with a real read tool and a scripted provider, leaving 
       },
       (context) => {
         requests++;
+        expect(context.messages.slice(0, 3).map((message) => message.role)).toEqual(["user", "assistant", "user"]);
+        expect(JSON.stringify(context.messages.slice(0, 3))).toContain("Earlier answer");
+        expect(JSON.stringify(context.messages.slice(0, 3))).toContain("Follow-up context");
         const toolResult = context.messages.find((message) => message.role === "toolResult");
         expect(JSON.stringify(toolResult)).toContain("Read-only fixture");
         return fauxAssistantMessage("The fixture says: Read-only fixture.");
