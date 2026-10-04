@@ -14,6 +14,7 @@ Current packages (wired into Pi via `settings.base.json`):
 - `pi-plan-review`
 - `pi-session-recall` (bounded visible-text search and evidence-cited historical session queries)
 - `pi-codex-compaction` (vendored and hardened from `ogulcancelik/pi-extensions`; see `pi-codex-compaction/ORIGIN.md`)
+- `pi-goal` (vendored from `code-yeongyu/pi-goal`; see `pi-goal/VENDORED_FROM.md`)
 
 Previously this directory also held `rpiv-mono` (a third-party Pi pipeline
 monorepo, upstream: `juicesharp/rpiv-mono`, fork: `davidroth-distyl/rpiv-mono`).
