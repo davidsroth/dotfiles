@@ -1,11 +1,24 @@
 import { describe, expect, it, vi } from "vitest";
-import {
+import agentBrowserExtension, {
 	ensureAgentBrowserInstalled,
 	HERDR_BLOCKED_EVENT,
 	HERDR_INSTALL_BLOCKED_LABEL,
 } from "../agent-browser";
 
 const command = (code: number, stdout = "", stderr = "") => ({ code, stdout, stderr });
+
+describe("agent-browser tool guidance", () => {
+	it("distinguishes its headless session from the user's visible browser", () => {
+		const registerTool = vi.fn();
+		agentBrowserExtension({ registerTool, on: vi.fn() } as any);
+
+		const tool = registerTool.mock.calls[0]![0];
+		expect(tool.label).toBe("Headless Browser");
+		expect(tool.description).toContain("never opens or controls the user's visible browser");
+		expect(tool.description).toContain("Do not tell the user");
+		expect(tool.parameters.properties.command.description).toContain("private headless browser session");
+	});
+});
 
 describe("agent-browser Herdr state", () => {
 	it("reports only the interactive installation confirmation", async () => {

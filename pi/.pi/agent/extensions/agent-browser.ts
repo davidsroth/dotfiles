@@ -60,10 +60,11 @@ export async function confirmAgentBrowserInstall(pi: Pick<ExtensionAPI, "events"
 	}
 }
 
-const TOOL_DESCRIPTION = `Browser automation via agent-browser CLI.
+const TOOL_DESCRIPTION = `Agent-only browser automation via a private headless Chromium session.
+This tool never opens or controls the user's visible browser. Do not tell the user that a browser, tab, or page was opened for them. If the user asks to open a URL in their browser, use an OS/browser-opening tool instead. Use this tool only when you need to inspect or interact with a web page yourself.
 Workflow: open URL → snapshot -i (get @refs like @e1) → interact → re-snapshot after page changes.
 Commands:
-  open <url> - Navigate to URL
+  open <url> - Navigate the private headless session to URL
   snapshot -i - Interactive elements with @refs (re-snapshot after navigation)
   click <@ref> - Click element
   fill <@ref> <text> - Clear and type
@@ -126,11 +127,11 @@ export async function ensureAgentBrowserInstalled(pi: ExtensionAPI, ctx: any): P
 export default function agentBrowserExtension(pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "browser",
-		label: "Browser",
+		label: "Headless Browser",
 		description: TOOL_DESCRIPTION,
 		parameters: Type.Object({
 			command: Type.String({
-				description: "agent-browser command (without 'agent-browser' prefix)",
+				description: "Command for the agent's private headless browser session (without the 'agent-browser' prefix)",
 			}),
 		}),
 
