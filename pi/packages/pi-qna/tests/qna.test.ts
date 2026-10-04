@@ -28,9 +28,39 @@ vi.mock("node:fs");
 vi.mock("@earendil-works/pi-tui", () => ({
 	visibleWidth: (s: string) => s.length,
 	truncateToWidth: (s: string, w: number) => s.slice(0, w),
-	Editor: class {},
-	Key: {},
-	matchesKey: () => false,
+	Editor: class {
+		private text = "";
+		private paste = "";
+		disableSubmit = false;
+		constructor(_tui: unknown, _theme: unknown) {}
+		setText(text: string) {
+			this.text = text;
+			this.paste = "";
+		}
+		getText() {
+			return this.text;
+		}
+		getExpandedText() {
+			return this.text.replace("[paste #1 +11 lines]", this.paste);
+		}
+		handleInput(data: string) {
+			if (data.startsWith("\x1b[200~")) {
+				this.paste = data.slice(6, -6);
+				this.text += "[paste #1 +11 lines]";
+			} else {
+				this.text += data;
+			}
+		}
+		render() {
+			return [this.text];
+		}
+	},
+	Key: {
+		ctrl: (key: string) => `ctrl-${key}`,
+		shift: (key: string) => `shift-${key}`,
+		enter: "enter", escape: "escape", tab: "tab", up: "up", down: "down",
+	},
+	matchesKey: (data: string, key: string) => data === key,
 	BorderedLoader: class {},
 }));
 
@@ -125,6 +155,55 @@ describe("setHerdrBlocked", () => {
 		).rejects.toThrow("UI failed");
 		expect(emit.mock.calls.map(([, payload]) => payload.active)).toEqual([true, false]);
 		expect(emit.mock.calls[1]![1].id).toBe(emit.mock.calls[0]![1].id);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Card editor paste expansion
+// ---------------------------------------------------------------------------
+
+describe("runQnaCardUI bracketed paste", () => {
+	it("preserves long paste content across card navigation and in submitted answers", async () => {
+		const content = Array.from({ length: 11 }, (_, i) => `line ${i + 1}`).join("\n");
+		let card: { handleInput: (data: string) => void } | undefined;
+		const ctx = {
+			ui: {
+				setStatus: vi.fn(),
+				custom: vi.fn((factory) =>
+					new Promise((resolve) => {
+						card = factory(
+							{ requestRender: vi.fn() },
+							{ fg: (_color: string, s: string) => s },
+							{},
+							resolve,
+						);
+					}),
+				),
+			},
+		} as any;
+		const pi = { events: { emit: vi.fn() } } as any;
+		const result = runQnaCardUI(pi, ctx, { questions: ["First?", "Second?"] });
+		await vi.waitFor(() => expect(card).toBeDefined());
+		card!.handleInput("before ");
+		card!.handleInput(`\x1b[200~${content}\x1b[201~`);
+		card!.handleInput(" after");
+		card!.handleInput("tab");
+		card!.handleInput("shift-tab");
+		card!.handleInput("tab");
+		card!.handleInput("enter");
+		await expect(result).resolves.toEqual({
+			kind: "submit",
+			answers: [`before ${content} after`, ""],
+		});
+
+		// Cancelling must stash the content too, not just the display marker.
+		const cancelled = runQnaCardUI(pi, ctx, { questions: ["First?"] });
+		await vi.waitFor(() => expect(ctx.ui.custom).toHaveBeenCalledTimes(2));
+		card!.handleInput(`\x1b[200~${content}\x1b[201~`);
+		card!.handleInput("ctrl-c");
+		await expect(cancelled).resolves.toEqual({ kind: "cancel", stashed: true, typedCount: 1 });
+		expect(loadStash()?.answers).toEqual([content]);
+		_resetLastStash();
 	});
 });
 

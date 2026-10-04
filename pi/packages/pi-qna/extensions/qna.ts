@@ -415,7 +415,9 @@ export async function runQnaCardUI(
 		};
 
 		const saveCurrent = () => {
-			answers[index] = editor.getText();
+			// Large bracketed pastes are displayed as [paste #…] markers by Editor.
+			// Persist the original content before switching cards or submitting.
+			answers[index] = editor.getExpandedText();
 		};
 
 		const loadCurrent = () => {
