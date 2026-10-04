@@ -9,7 +9,7 @@
  *
  * Flow:
  *   1. `/qna` finds the last completed assistant message on the current branch
- *   2. Claude Haiku 4.5 extracts a JSON array of question strings (numbered,
+ *   2. GPT-6 Luna extracts a JSON array of question strings (numbered,
  *      bulleted, or inline questions are all flattened). Falls back to a
  *      regex sweep if JSON parse fails.
  *   3. The user is shown one card per question with an inline editor.
@@ -196,7 +196,7 @@ export function loadStash(): QnaStash | undefined {
 }
 
 const EXTRACTOR_MODEL_PROVIDER = "openai-codex";
-const EXTRACTOR_MODEL_ID = "gpt-5.6-luna";
+const EXTRACTOR_MODEL_ID = "gpt-6-luna";
 
 const SYSTEM_PROMPT = `You extract questions from a single message written by an AI assistant.
 
