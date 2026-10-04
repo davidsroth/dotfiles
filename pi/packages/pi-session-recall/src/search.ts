@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { createReadStream } from "node:fs";
-import { readdir, realpath } from "node:fs/promises";
+import { lstat, readdir, realpath } from "node:fs/promises";
 import { join } from "node:path";
 import { readTranscript, redactSecrets, type VisibleEntry, type VisibleRole } from "./transcript";
 import { validateSessionPath } from "./session-root";
@@ -155,6 +155,24 @@ async function nodeCandidates(query: string, root: string, signal?: AbortSignal)
 	return matches;
 }
 
+/** Bound transcript reads while choosing candidates globally by metadata, not walk order. */
+async function recentCandidates(root: string, signal?: AbortSignal): Promise<string[]> {
+	const newest: { path: string; mtimeMs: number }[] = [];
+	for await (const path of walkJsonl(root, signal)) {
+		if (signal?.aborted) throw abortError();
+		try {
+			const metadata = await lstat(path);
+			if (!metadata.isFile()) continue;
+			newest.push({ path, mtimeMs: metadata.mtimeMs });
+			newest.sort((a, b) => b.mtimeMs - a.mtimeMs || a.path.localeCompare(b.path));
+			if (newest.length > MAX_CANDIDATES + 1) newest.pop();
+		} catch {
+			// A session may disappear during discovery.
+		}
+	}
+	return newest.map(({ path }) => path);
+}
+
 function occurrences(haystack: string, needle: string): number {
 	const text = haystack.toLowerCase();
 	const query = needle.toLowerCase();
@@ -215,12 +233,13 @@ function visibleMatchCount(
 ): number {
 	if (role !== "both" && entry.role !== role) return 0;
 	if (!inDateRange(entry.timestamp, startDate, endDate, timezone)) return 0;
-	return occurrences(entry.text, query);
+	return query ? occurrences(entry.text, query) : 1;
 }
 
 export async function searchSessions(options: SessionSearchOptions): Promise<SessionSearchResult> {
 	const query = options.query.trim();
-	if (!query) throw new Error("query must not be empty");
+	const browsing = query.length === 0;
+	if (options.signal?.aborted) throw abortError();
 	if (query.length > 500) throw new Error("query must not exceed 500 characters");
 	const safeQuery = redactSecrets(query).text;
 	validateDate(options.startDate, "startDate");
@@ -239,7 +258,7 @@ export async function searchSessions(options: SessionSearchOptions): Promise<Ses
 	if (!Number.isInteger(limit) || limit < 1 || limit > 10) throw new Error("limit must be an integer from 1 to 10");
 
 	options.onProgress?.("Discovering candidate session files…");
-	let candidates = await rgCandidates(query, options.root, options.signal);
+	let candidates = browsing ? undefined : await rgCandidates(query, options.root, options.signal);
 	let backend: "rg" | "node" = "rg";
 	if (candidates === undefined) {
 		backend = "node";
@@ -252,7 +271,10 @@ export async function searchSessions(options: SessionSearchOptions): Promise<Ses
 		const abortFallback = () => fallbackController.abort();
 		options.signal?.addEventListener("abort", abortFallback, { once: true });
 		try {
-			candidates = await nodeCandidates(query, options.root, fallbackController.signal);
+			if (options.signal?.aborted) fallbackController.abort();
+			candidates = browsing
+				? await recentCandidates(options.root, fallbackController.signal)
+				: await nodeCandidates(query, options.root, fallbackController.signal);
 		} catch (error) {
 			if (timedOut) throw new Error(`Node candidate discovery timed out after ${SEARCH_TIMEOUT_MS}ms`);
 			throw error;
@@ -300,8 +322,11 @@ export async function searchSessions(options: SessionSearchOptions): Promise<Ses
 					);
 					if (count === 0) return;
 					matchCount += count;
-					if (entry.timestamp > latestMatchAt) latestMatchAt = entry.timestamp;
-					if (snippets.length < SNIPPETS_PER_SESSION) {
+					if (!latestMatchAt || (browsing
+						? Date.parse(entry.timestamp) > Date.parse(latestMatchAt)
+						: entry.timestamp > latestMatchAt)) latestMatchAt = entry.timestamp;
+					if (snippets.length < SNIPPETS_PER_SESSION || (browsing &&
+						Date.parse(entry.timestamp) >= Date.parse(snippets[snippets.length - 1].timestamp))) {
 						// Redact the complete entry before clipping. Clipping first can split a
 						// structured secret (for example a PEM block) before its closing marker.
 						const redacted = redactSecrets(entry.text);
@@ -313,6 +338,10 @@ export async function searchSessions(options: SessionSearchOptions): Promise<Ses
 							text: snippetAround(redacted.text, safeQuery),
 							redactionCount: redacted.count,
 						});
+						if (browsing) {
+							snippets.sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp));
+							if (snippets.length > SNIPPETS_PER_SESSION) redactionCount -= snippets.pop()!.redactionCount;
+						}
 					}
 				},
 			});
@@ -337,7 +366,9 @@ export async function searchSessions(options: SessionSearchOptions): Promise<Ses
 		}
 	}
 
-	matches.sort((a, b) => b.matchCount - a.matchCount || b.latestMatchAt.localeCompare(a.latestMatchAt));
+	matches.sort((a, b) => browsing
+		? Date.parse(b.latestMatchAt) - Date.parse(a.latestMatchAt) || a.path.localeCompare(b.path)
+		: b.matchCount - a.matchCount || b.latestMatchAt.localeCompare(a.latestMatchAt));
 	return {
 		matches: matches.slice(0, limit),
 		backend,
@@ -349,11 +380,16 @@ export async function searchSessions(options: SessionSearchOptions): Promise<Ses
 
 export function formatSearchResult(query: string, result: SessionSearchResult): string {
 	const safeQuery = redactSecrets(query).text;
+	const browsing = query.trim().length === 0;
+	const limits = result.candidateLimitReached
+		? browsing
+			? "\nBrowse inspected only the 500 most recently modified session files. Filters apply within that pool; older matching sessions may be omitted. Use a literal query to search beyond this recent-file pool."
+			: "\nCandidate discovery hit its 500-file safety cap; narrow the literal query or date/CWD filters."
+		: "";
 	if (result.matches.length === 0) {
-		const limitNote = result.candidateLimitReached
-			? " Candidate discovery hit its 500-file safety cap; narrow the literal query or date/CWD filters."
-			: "";
-		return `No past sessions contained the literal visible-text query ${JSON.stringify(safeQuery)}.${limitNote}`;
+		return (browsing
+			? "No past sessions had visible user/assistant messages matching the browse filters."
+			: `No past sessions contained the literal visible-text query ${JSON.stringify(safeQuery)}.`) + limits;
 	}
 	const sections = result.matches.map((match, index) => {
 		const title = match.sessionName ? ` — ${match.sessionName}` : "";
@@ -368,14 +404,14 @@ export function formatSearchResult(query: string, result: SessionSearchResult): 
 			`CWD: ${match.cwd}`,
 			`Path: ${match.path}`,
 			`SHA-256: ${match.hash}`,
-			`Visible matches: ${match.matchCount}; redactions: ${match.redactionCount}${match.sourceChanged ? "; warning: source changed during snapshot read" : ""}`,
+			`${browsing ? "Qualifying visible messages" : "Visible matches"}: ${match.matchCount}; redactions: ${match.redactionCount}${match.sourceChanged ? "; warning: source changed during snapshot read" : ""}`,
 			snippets,
 		].join("\n");
 	});
 	const caveat =
 		"Historical assistant statements are reports, not proof of current state. Verify any reported mutation against the live repository or service.";
-	const limits = result.candidateLimitReached
-		? "\nCandidate discovery hit its 500-file safety cap; narrow the literal query or date/CWD filters."
-		: "";
-	return `Found ${result.matches.length} past session(s) matching ${JSON.stringify(safeQuery)} in visible user/assistant text.\n\n${sections.join("\n\n")}\n\n${caveat}${limits}`;
+	const summary = browsing
+		? `Found ${result.matches.length} recent past session(s), newest qualifying visible message first.`
+		: `Found ${result.matches.length} past session(s) matching ${JSON.stringify(safeQuery)} in visible user/assistant text.`;
+	return `${summary}\n\n${sections.join("\n\n")}\n\n${caveat}${limits}`;
 }

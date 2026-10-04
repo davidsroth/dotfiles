@@ -2,7 +2,7 @@
 
 Privacy-bounded historical recall for [Pi](https://github.com/earendil-works/pi-mono). The package registers two tools:
 
-- `session_search`: literal search over structurally parsed, visible user/assistant text.
+- `session_search`: literal search or recent-session browsing over structurally parsed, visible user/assistant text.
 - `session_query`: branch-aware, evidence-cited synthesis of one selected session.
 
 This package complements the existing `review-pi-sessions` notes skill. Use that skill for date-bounded process review, current-state verification, and action reconciliation. Use these tools for ad hoc questions such as “where did we discuss X?” and “what did that session report?”
@@ -25,7 +25,7 @@ No index, cache, duplicate transcript corpus, or unredacted temporary file is cr
 
 ## Tool flow
 
-1. Call `session_search` with one distinctive literal token or exact phrase.
+1. Call `session_search` with one distinctive literal token or exact phrase, or `query: ""` to browse recent sessions.
 2. Choose a result using its snippets, CWD, session ID/name, timestamp, path, and source hash.
 3. Call `session_query` with that exact absolute path and a focused question of at most 1,000 characters. One leading `@` path sigil is accepted. Pass a matching `entryId` when the match may be on an alternate branch; recall selects the newest leaf whose ancestry contains that entry, so later answers on the branch are included.
 4. Treat the cited answer as historical evidence and verify present state separately when needed.
@@ -36,11 +36,23 @@ Both tools exclude the current session by default. `includeCurrent: true` opts i
 
 `session_search` accepts:
 
-- required `query` (case-insensitive fixed string, not regex or semantic search);
+- required `query` (case-insensitive fixed string, not regex or semantic search; empty or whitespace-only strings browse recent sessions);
 - exact session `cwd`;
 - inclusive `startDate` / `endDate` (`YYYY-MM-DD`) with an IANA `timezone`, applied to each matching message timestamp;
 - `role`: `user`, `assistant`, or `both`;
 - result `limit` from 1 to 10.
+
+### Browse recent sessions
+
+```json
+{"query":"","startDate":"2026-09-01","cwd":"/work/project","limit":5}
+```
+
+Empty-query browsing returns up to 10 sessions (default 10), ordered by their newest qualifying visible message, not message count. Each session includes its three latest qualifying message snippets, newest first, plus the same provenance and redaction as literal search. Counts refer to qualifying messages. Sessions without qualifying visible text are omitted. All date/timezone, exact CWD, role, and current-session filters still apply; there is no implicit date cutoff.
+
+Browse discovery walks file metadata without following symlinks and selects the **500 most recently modified session files** before reading transcripts. Discovery is cancellable and time-bounded. When capped, the result explicitly warns that filters and message-timestamp ordering apply only within that pool: older matching sessions may be omitted, and file modification time is only a candidate-selection heuristic. Use a nonempty literal query to search beyond the recent-file pool.
+
+### Literal search discovery
 
 Candidate discovery uses asynchronous `rg` with argv-safe fixed-string arguments, cancellation, and a timeout. A streaming Node scanner is used when `rg` is unavailable or fails. Discovery inspects at most 500 candidate files and reports whether that cap was reached in tool details and visible output. Every candidate is then parsed and matched again under the visible-text policy. Session JSONL and SHA-256 hashing are streamed from a stable initial-size file-descriptor snapshot, so aggregate histories over 25 MB remain searchable without full-file buffering. Individual malformed or over-8-million-character JSONL records are ignored. A visible warning is returned if the source changes during a query read.
 

@@ -41,8 +41,11 @@ describe("Pi extension integration", () => {
 		expect(tools.get("session_query").promptSnippet).toContain("historical Pi session branch");
 		expect(tools.get("session_search").parameters).toMatchObject({
 			additionalProperties: false,
-			properties: { limit: { maximum: 10 } },
+			required: ["query"],
+			properties: { query: { maxLength: 500 }, limit: { maximum: 10 } },
 		});
+		expect(tools.get("session_search").parameters.properties.query.minLength).toBeUndefined();
+		expect(tools.get("session_search").description).toContain('query: ""');
 		expect(tools.get("session_query").parameters).toMatchObject({
 			additionalProperties: false,
 			properties: { question: { maxLength: 1_000 } },
@@ -123,6 +126,9 @@ describe("Pi extension integration", () => {
 					},
 				},
 			),
-		).rejects.toThrow("query must not be empty");
+		).resolves.toMatchObject({
+			content: [{ type: "text", text: expect.stringContaining("Found 1 recent past session(s)") }],
+			details: { matchCount: 1, backend: "node", candidateLimitReached: false },
+		});
 	});
 });

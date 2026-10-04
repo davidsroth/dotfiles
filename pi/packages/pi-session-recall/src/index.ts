@@ -12,9 +12,8 @@ const ROLES = ["user", "assistant", "both"] as const;
 
 const SearchParams = Type.Object({
 	query: Type.String({
-		minLength: 1,
 		maxLength: 500,
-		description: "One case-insensitive literal token or exact phrase. This is fixed-string search, not regex or semantic search.",
+		description: "One case-insensitive literal token or exact phrase (not regex or semantic search). Pass an empty string to browse recent sessions, newest qualifying visible message first. Whitespace-only strings also browse.",
 	}),
 	cwd: Type.Optional(Type.String({ description: "Only sessions whose header CWD exactly equals this path." })),
 	startDate: Type.Optional(Type.String({ description: "Inclusive local date in YYYY-MM-DD form." })),
@@ -54,14 +53,18 @@ export default function sessionRecall(pi: ExtensionAPI): void {
 		description:
 			"Search past Pi sessions for a case-insensitive literal string in structurally parsed, visible user/assistant text only. " +
 			"Thinking, tool calls/results, images, custom/hidden messages, and summaries are never returned as evidence. " +
-			"Use one distinctive token or exact phrase per call, then session_query for a focused synthesis. Current session excluded by default.",
+			"Use one distinctive token or exact phrase per call, or query: \"\" to browse recent sessions with optional date/CWD/role filters. " +
+			"Browse returns newest qualifying visible messages first within the 500 most recently modified files. " +
+			"Then use session_query for a focused synthesis. Current session excluded by default.",
 		promptSnippet: "Search prior Pi sessions' visible user/assistant text with provenance",
 		promptGuidelines: [
 			"Use session_search and session_query only when the user explicitly asks to recall or search historical Pi sessions; never inspect session history proactively.",
 			"Treat session_search and session_query results as historical reports, not proof of current state; verify consequential claims against live sources.",
 		],
 		parameters: SearchParams,
-		renderCall: (params, theme) => new Text(theme.fg("toolTitle", `search sessions for ${JSON.stringify(params.query)}`), 0, 0),
+		renderCall: (params, theme) => new Text(theme.fg("toolTitle", params.query.trim()
+			? `search sessions for ${JSON.stringify(params.query)}`
+			: "browse recent sessions"), 0, 0),
 		renderResult: (result, _options, theme) => {
 			const text = result.content[0]?.type === "text" ? result.content[0].text : "";
 			const summary = text.split("\n", 1)[0] ?? "Session search complete";
