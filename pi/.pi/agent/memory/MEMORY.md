@@ -1,141 +1,123 @@
 # Long-term memory
 
-Portable, anonymized guidance suitable for a public dotfiles repository.
-Personal preferences, workplace context, authentication behavior, operational
-topology, and incident details belong in local memory instead.
+Portable, anonymized operating lessons for the public dotfiles repository.
+General style and environment defaults belong in agent instructions; private
+preferences, workplace context, and machine details belong in local memory.
 
-## Core operating principles
+## Outcomes and authorization
 
-- Prefer concise, practical, evidence-backed answers.
-- Prefer root-cause fixes and small, targeted changes.
-- Distinguish observed facts, inferences, and unverified claims.
-- Do not substitute an easier proxy for the requested outcome. Ask whether an
-  approach is right for the goal or merely more tractable.
-- Confirm before destructive actions or changes to shared resources.
+- Optimize for the requested user-visible outcome, not an easier technical
+  proxy. Prefer complete useful workflows and bounded real-world pilots over
+  metadata-only slices or extensive mock-only scaffolding.
+- Plan approval means proceed within that plan; do not ask for redundant
+  permission. Preserve separately gated actions and exclusions, especially
+  confidential disclosure, authoritative changes, and deployment.
+- Confirm destructive or disruptive changes to shared resources. Check for live
+  users before deleting worktrees, killing processes, or restarting services.
 
-### Plan approval means proceed
+## Concurrent work and handoffs
 
-When the user approves a plan, immediately begin the work authorized by that plan; do not ask for a redundant proceed confirmation. Preserve any separately gated actions or exclusions in the approved plan.
-
-### Ambitious, end-to-end delivery
-
-Prefer complete useful workflows and bounded real-world pilots over overly narrow metadata-only slices or extensive mock-only scaffolding. Keep safeguards around confidential disclosure, authoritative changes, and deployment, but do not turn every meaningful implementation step into a separately deferred release. Plan approvals should explicitly authorize the practical work needed for the intended outcome.
-
-## Concurrent work safety
-
-- Shared working trees may be edited by multiple sessions. Use a dedicated
-  worktree or `git add -p`; plain `git add <file>` can stage another session's
-  changes.
-- Re-read `git status`, recent log, reflog, and the actual diff before acting in
-  a resumed or long-lived session.
-- Verify handoffs and status reports against the current diff. Describe what
-  shipped, not what was attempted.
+- Shared working trees may have multiple writers. Use a dedicated worktree or
+  precise hunk staging; plain `git add <file>` can include another session's work.
+- Before acting after a pause, re-read current status, relevant log/reflog, and
+  the actual diff. Verify handoffs against live state; report what shipped, not
+  what was attempted.
 - Re-fetch and coordinate before rebasing or force-pushing a shared branch.
-- Check for live users before deleting worktrees, killing processes, or
-  restarting shared services.
+- Preserve cross-file intent during merges rather than choosing whichever side
+  looks like a structural superset. Search for conflict markers afterward.
 
 ## Verification discipline
 
-- Verify runtime-installed state, not only source code and tests. For database
-  or index changes, confirm that the intended schema objects actually exist.
-- Long-running processes do not pick up source edits automatically. Compare
-  process start time with code history before debugging code that may already
-  be fixed on disk.
-- After resolving conflicts, search for leftover conflict markers before
-  continuing or committing.
-- Do not infer architecture or data flow from file and directory names; read
-  the actual call path.
-- Never expose a secret while checking whether an environment variable is set.
-  Avoid concatenated `${VAR:+...}${VAR:-...}` expansions; use an explicit test:
-
-  ```bash
+- Verify installed/runtime state, not only source and tests: schema objects,
+  effective configuration, dependency origins, and the actual request-serving
+  process. Compare process start time with source changes before debugging code
+  the running process has not loaded.
+- Read actual call paths; do not infer architecture or data flow from names.
+- Separate measured results, supported inferences, and extrapolations. Do not
+  claim correctness, performance, or safety beyond what validation exercised.
+- Reconcile recommendations with prior attempts and reproduce current behavior
+  before reverting or re-fixing a bug.
+- Never expose secrets while checking environment state. Use an explicit test,
+  not concatenated parameter expansions that may reveal the value:
+  ```sh
   if [ -n "${VAR:-}" ]; then echo "set length=${#VAR}"; else echo unset; fi
   ```
 
 ### Protocol-stream ownership
 
-Give each protocol stream one serialized writer. Mixing asynchronous `process.stdout.write()` with raw `writeSync()` can interleave JSON records; pipe writes can also be short under backpressure. Use a dedicated channel with a backpressure-aware writer for independent producers. Test real OS pipes with concurrent large frames and slow readers—not just parsers fed complete synthetic frames. Separate channels also require explicit completion ordering when one channel carries reports needed before another can announce completion.
+Give each protocol stream one serialized writer. Mixing asynchronous writes
+with raw synchronous writes can interleave records; pipe writes can also be
+short under backpressure. Use a backpressure-aware writer and test real OS pipes
+with concurrent large frames and slow readers. Separate channels still need
+completion ordering when reports must arrive before completion is announced.
 
-### Avoid implicit dependency installation during qualification
+### Dependency qualification
 
-Package-manager run/exec wrappers can automatically reinstall dependencies when HOME or store settings differ, even when the requested action is code generation. With symlinked node_modules, that can delete a shared dependency target before a network-denied install fails. Invoke installed tool entrypoints directly for hermetic tests/builds/codegen; never run installation-capable wrappers against borrowed dependency links. After recovery, verify actual dependency links and executable bytes, not just an install command's success status.
+Installation-capable package-manager run/exec wrappers can reinstall dependencies
+when HOME or store settings change, even for code generation. With borrowed
+symlinked node_modules this can delete a shared target before a network-denied
+install fails. Invoke installed entrypoints directly for hermetic tests/builds;
+verify dependency links and executable bytes after recovery.
 
-## Delegation and subagents
+## Delegation and agent communication
 
-- Sweep and size the work surface before delegating. Parallel agents are useful
-  for broad, independent work; small edits are often cheaper in-session.
-- Delegate parallel breadth while retaining global coherence centrally.
-- Treat requested isolation as unverified until each agent's actual worktree,
-  branch, and path ownership are confirmed.
-- Verify load-bearing claims and inspect outputs rather than trusting agent
-  self-reports. Same-model advice is not independent evidence.
-- Resolve relative deadlines from the source message's timestamp, not from the
-  day the message is later processed.
+- Size the work before delegating. Use parallel agents for independent breadth;
+  keep global coherence centrally. Small edits are often cheaper in-session.
+- Verify actual worktree, branch, and path ownership before relying on isolation.
+- Inspect received outputs and load-bearing evidence. Same-model review is not
+  independent evidence; never claim a subagent result before receiving it.
+- Use `aside_subagent` for non-interrupting progress checks; use `steer_subagent`
+  to redirect a child or deliver a correction. An intercom acknowledgement does
+  not prove entry into the child's active conversation. Narration is not delivery.
+- Local agent coordination over intercom does not need user message-draft
+  approval. External communication remains subject to its approval tools.
+- Resolve relative deadlines from the source timestamp, not processing day.
 
-### Non-interrupting status checks
+## Git and frontend footguns
 
-When checking progress on a running subagent, use `aside_subagent` by default so the update does not interrupt or alter the agent’s work. Use `steer_subagent` only when intentionally redirecting the task.
+- During cherry-pick, `git checkout --theirs <file>` replaces the entire file,
+  not just conflicting hunks. Inspect the staged diff.
+- If a rebase creates an implausible conflict set, check for a shallow clone and
+  fetch the real merge base before resolving.
+- Avoid renaming branches with open PRs; update the PR title/description instead.
+- GitHub's PR object can lag pushed refs. Verify the refs API and retry the PR read.
+- React hooks must precede conditional returns; cherry-picks can move early
+  returns and make previously valid hooks conditional.
 
-### Subagent control-channel ownership
+### Isolated commit-snapshot validation
 
-Send task corrections to an `Agent` child with `steer_subagent`, and use `aside_subagent` for non-interrupting questions. An intercom delivery acknowledgement is not proof that a message entered the child's active model conversation; verify receipt before relying on a correction. Intercom replies can resolve explicit asks without making subsequent one-way sends a reliable steering channel.
+Pre-commit stashes tracked unstaged changes but leaves future untracked modules visible; full-project typechecks can therefore fail on a partial staged feature. Validate/hooks against an exact isolated staged-tree export rather than bypassing checks. If using `GIT_WORK_TREE` with a shared index, disable fsmonitor/untracked-cache for those commands and clear the index's fsmonitor state afterward: cached results from the alternate tree can otherwise hide real source edits from `status` and `add`.
 
-## Git and GitHub mechanics
 
-- Resolve merges by preserving cross-file intent, not by choosing whichever
-  side appears to be a structural superset.
-- During a cherry-pick, `git checkout --theirs <file>` replaces the whole file;
-  it is not a conflict-hunk-only operation. Inspect the staged diff afterward.
-- If a rebase produces an implausibly large conflict set, check whether the
-  repository is shallow and fetch the real merge base.
-- Avoid renaming branches with open pull requests; update the PR title and
-  description instead.
-- GitHub's PR object can lag the refs API briefly after a push. Use the refs API
-  for machine verification and retry human-readable PR queries.
-- React hooks must run before conditional returns. Cherry-picks that move early
-  returns can make previously valid hooks conditional.
+## Pi and package maintenance
 
-## Pi and dotfiles maintenance
+- Pi processes are named `pi`; do not look only for `node` when checking liveness.
+- Validate extension changes with typechecking and Pi's actual installed module
+  loader. Reload/restart long-running runtimes with appropriate authorization;
+  source edits alone do not activate changes.
+- Canonical cross-harness skills belong in a tracked source directory; runtime
+  directories should link to it. Keep package implementation detail in package
+  docs/tests rather than duplicating it in global memory.
 
-- Restart long-running Pi extensions and daemons after source changes.
-- Pi session processes are named `pi`; do not rely only on interpreter names
-  such as `node` when checking liveness.
-- Verify extension changes both with TypeScript and by loading the runtime
-  module graph through Pi's bundled loader.
-- Keep implementation-specific package behavior in package documentation,
-  source comments, and tests rather than duplicating it in global memory.
-- Cross-harness agent skills belong in the repository's canonical tracked skill
-  directory, with runtime directories linked to that source.
+## Shared-document prose
 
-## Communication and claim quality
+Write conclusions, evidence, decisions, trade-offs, risks, and open questions
+directly. Remove discovery-story prose, rhetorical self-dialogue, and simulated
+internal reasoning. Preserve concise rationale and traceable sources.
 
-- Separate measured results, supported inferences, and extrapolations.
-- Do not claim performance, correctness, or risk reduction beyond what the
-  validation actually exercised.
-- Reconcile recommendations with prior attempts and reproduce the current
-  behavior before reverting or re-fixing a bug.
-- Do not claim a subagent result until the result was actually received and
-  inspected.
+### Copy-ready text
+When giving the user text they should be able to copy, put it in backticks (use a fenced code block for a full message).
 
-### Document prose: remove chain-of-thought narration
-
-For shared documents, write the conclusion, evidence, decision, trade-offs, risks, and open questions directly. Remove internal-reasoning narration, discovery-story prose, rhetorical self-dialogue, and phrases such as “the design tell,” “why this shape is right,” “this dissolves the fork,” or “the strongest argument.” Preserve concise rationale and traceable evidence; do not expose or simulate the author’s chain of thought.
-
-### Inter-process coordination
-
-Do not request draft approval for pi intercom messages exchanged with other local agent sessions for ownership checks, conflict avoidance, status coordination, or similar inter-process communication. Reply directly and succinctly.
 
 ## Memory hygiene
 
-- Public/global memory contains only portable, anonymized rules that should
-  affect future behavior.
-- Local memory contains personal preferences, machine paths, workplace context,
-  authentication practices, operational topology, and sensitive incident
-  details.
-- Project memory contains durable architecture and workflow facts specific to
-  the current repository.
-- Daily memory and scratchpads contain ephemeral state and uncertain findings.
-- Keep a lesson only when it would prevent a real mistake or recurring footgun.
-- Prefer one canonical rule over repeated anecdotes. Preserve the behavioral
-  lesson and remove names, dates, metrics, and incident narration.
+- One canonical home per fact: public/global for portable anonymized lessons;
+  local for private preferences and machine/cross-repo context; project for
+  repository-specific decisions. Project location alone does not guarantee Git
+  tracking, syncing, or availability in another worktree.
+- Scratchpad holds unresolved work and candidate facts; daily/archive holds
+  dated history. Neither is proof of current external state.
+- Keep lessons only when they prevent real recurring mistakes. Consolidate
+  duplicates and point to maintained authorities instead of copying runbooks,
+  validation counts, or incident chronologies into active memory.
 - Never store credentials, tokens, private keys, or third-party personal data.
