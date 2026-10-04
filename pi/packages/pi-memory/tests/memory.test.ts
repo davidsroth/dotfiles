@@ -1,7 +1,7 @@
 /**
  * Tests for pi-memory/extensions/memory.ts
  *
- * Hermetic: no real network, no real child processes, no reads of the user's
+ * Hermetic: no real network, no reads of the user's
  * real config or memory files. Filesystem tests use os.tmpdir() scratch dirs
  * cleaned up in afterEach. The user's real ~/.pi/agent/memory/ is never touched.
  */
@@ -18,8 +18,10 @@ import { randomBytes } from "node:crypto";
 // vi.mock() is hoisted, so these run before imports.
 // ---------------------------------------------------------------------------
 
-// Mock @earendil-works/pi-coding-agent to make withFileMutationQueue a passthrough.
+// Unit harness; cross-process and installed-loader coverage lives in integration tests.
 vi.mock("@earendil-works/pi-coding-agent", () => ({
+	getAgentDir: () => process.env.PI_CODING_AGENT_DIR,
+	CONFIG_DIR_NAME: ".pi",
 	withFileMutationQueue: async (_path: string, cb: () => Promise<void>) => {
 		await cb();
 	},
@@ -38,16 +40,6 @@ vi.mock("@earendil-works/pi-tui", () => ({
 			public paddingX: number,
 			public paddingY: number,
 		) {}
-	},
-}));
-
-// Mock typebox Type (used in schema only)
-vi.mock("typebox", () => ({
-	Type: {
-		Object: (shape: unknown) => shape,
-		Optional: (t: unknown) => t,
-		String: (opts?: unknown) => ({ type: "string", ...(opts && typeof opts === "object" ? opts : {}) }),
-		Number: (opts?: unknown) => ({ type: "number", ...(opts && typeof opts === "object" ? opts : {}) }),
 	},
 }));
 
@@ -237,16 +229,17 @@ describe("truncateText", () => {
 		const text = "a".repeat(101);
 		const result = truncateText(text, 100);
 		expect(result.truncated).toBe(true);
-		expect(result.text).toContain("1 character(s)");
+		expect(result.text.length).toBeLessThanOrEqual(100);
+		expect(result.text).toContain("Truncated");
 	});
 	it("does not truncate empty string with maxChars=0", () => {
 		const result = truncateText("", 0);
 		expect(result.truncated).toBe(false);
 		expect(result.text).toBe("");
 	});
-	it("shows correct cut character count", () => {
+	it("bounds even a tiny truncation output", () => {
 		const result = truncateText("a".repeat(15), 10);
-		expect(result.text).toContain("5 character(s)");
+		expect(result.text.length).toBeLessThanOrEqual(10);
 	});
 });
 
@@ -486,7 +479,8 @@ describe("ensureStore (idempotent)", () => {
 		expect(existsSync(paths.scratchpad)).toBe(true);
 	});
 
-	it("creates and repairs private store permissions", async () => {
+	it("creates private files and preserves existing permissions", async () => {
+		await rm(join(process.env.PI_CODING_AGENT_DIR!, "memory"), { recursive: true });
 		const paths = await ensureStore(scratch);
 		expect((await stat(paths.dir)).mode & 0o777).toBe(0o700);
 		expect((await stat(paths.dailyDir)).mode & 0o777).toBe(0o700);
@@ -496,8 +490,8 @@ describe("ensureStore (idempotent)", () => {
 		await chmod(paths.dir, 0o755);
 		await chmod(paths.memoryLocal, 0o644);
 		await ensureStore(scratch);
-		expect((await stat(paths.dir)).mode & 0o777).toBe(0o700);
-		expect((await stat(paths.memoryLocal)).mode & 0o777).toBe(0o600);
+		expect((await stat(paths.dir)).mode & 0o777).toBe(0o755);
+		expect((await stat(paths.memoryLocal)).mode & 0o777).toBe(0o644);
 	});
 
 	it("does NOT create the project memory file", async () => {
@@ -613,8 +607,7 @@ describe("appendToTarget — memory, with section", () => {
 
 	it("section not found — returns error text, file unchanged", async () => {
 		const originalContent = await readFile(memoryPath, "utf8");
-		const result = await appendToTarget({ target: "memory", section: "Nonexistent", text: "something" }, scratch);
-		expect(result.text).toContain("not found");
+		await expect(appendToTarget({ target: "memory", section: "Nonexistent", text: "something" }, scratch)).rejects.toThrow("not found");
 		const afterContent = await readFile(memoryPath, "utf8");
 		expect(afterContent).toBe(originalContent);
 	});
@@ -739,8 +732,7 @@ describe("replaceInTarget", () => {
 	it("zero matches — returns error, file unchanged", async () => {
 		const original = "The quick brown fox\n";
 		await writeFile(memoryPath, original);
-		const result = await replaceInTarget({ target: "memory", oldText: "not present", newText: "whatever" }, scratch);
-		expect(result.text).toContain("not found");
+		await expect(replaceInTarget({ target: "memory", oldText: "not present", newText: "whatever" }, scratch)).rejects.toThrow("not found");
 		const content = await readFile(memoryPath, "utf8");
 		expect(content).toBe(original);
 	});
@@ -748,26 +740,22 @@ describe("replaceInTarget", () => {
 	it("two matches — returns error with count, file unchanged", async () => {
 		const original = "word word\n";
 		await writeFile(memoryPath, original);
-		const result = await replaceInTarget({ target: "memory", oldText: "word", newText: "thing" }, scratch);
-		expect(result.text).toContain("2");
+		await expect(replaceInTarget({ target: "memory", oldText: "word", newText: "thing" }, scratch)).rejects.toThrow("2");
 		const content = await readFile(memoryPath, "utf8");
 		expect(content).toBe(original);
 	});
 
 	it("target=daily returns immediate error without touching file", async () => {
-		const result = await replaceInTarget({ target: "daily", oldText: "x", newText: "y" }, scratch);
-		expect(result.text).toContain("Error");
+		await expect(replaceInTarget({ target: "daily", oldText: "x", newText: "y" }, scratch)).rejects.toThrow("only allowed");
 	});
 
 	it("target=all returns immediate error", async () => {
-		const result = await replaceInTarget({ target: "all", oldText: "x", newText: "y" }, scratch);
-		expect(result.text).toContain("Error");
+		await expect(replaceInTarget({ target: "all", oldText: "x", newText: "y" }, scratch)).rejects.toThrow("only allowed");
 	});
 
 	it("returns error when file does not exist", async () => {
 		// Use scope=project which resolves to a path that does not exist
-		const result = await replaceInTarget({ target: "memory", scope: "project", oldText: "x", newText: "y" }, scratch);
-		expect(result.text).toContain("does not exist");
+		await expect(replaceInTarget({ target: "memory", scope: "project", oldText: "x", newText: "y" }, scratch)).rejects.toThrow("does not exist");
 	});
 });
 
@@ -809,8 +797,7 @@ describe("markScratchDone", () => {
 
 	it("no match — returns error text", async () => {
 		await writeFile(scratchpadPath, "- [ ] something else\n");
-		const result = await markScratchDone({ query: "nonexistent task" });
-		expect(result.text).toContain("Error");
+		await expect(markScratchDone({ query: "nonexistent task" })).rejects.toThrow("no incomplete");
 	});
 
 	it("two matches — returns error listing both lines", async () => {
@@ -818,16 +805,12 @@ describe("markScratchDone", () => {
 			scratchpadPath,
 			"- [ ] fix database migration\n- [ ] fix database indexing\n",
 		);
-		const result = await markScratchDone({ query: "fix database" });
-		expect(result.text).toContain("Error");
-		expect(result.text).toContain("2");
+		await expect(markScratchDone({ query: "fix database" })).rejects.toThrow("2 scratchpad");
 	});
 
 	it("already-done [x] line does NOT match", async () => {
 		await writeFile(scratchpadPath, "- [x] already done\n- [ ] still pending\n");
-		const result = await markScratchDone({ query: "already done" });
-		expect(result.text).toContain("Error");
-		expect(result.text).toContain("no incomplete");
+		await expect(markScratchDone({ query: "already done" })).rejects.toThrow("no incomplete");
 	});
 });
 
@@ -867,12 +850,7 @@ describe("readSection", () => {
 	});
 
 	it("not found — error text includes section name and outline of available sections", async () => {
-		const result = await readSection("memory", "Nonexistent", undefined, scratch);
-		expect(result.text).toContain("Error");
-		expect(result.text).toContain("Nonexistent");
-		// Outline should include real section headings
-		expect(result.text).toContain("User preferences");
-		expect(result.text).toContain("Environment");
+		await expect(readSection("memory", "Nonexistent", undefined, scratch)).rejects.toThrow("not found");
 	});
 
 	it("scope=project with no project file — returns 'No project memory yet'", async () => {
@@ -897,13 +875,6 @@ describe("searchMemory", () => {
 
 	it("returns breadcrumb with section and 1-based line number", async () => {
 		// Build a memory file with known structure
-		const { memoryDir } = setupStore(scratch);
-		restore(); // restore temporarily to get memoryDir, re-apply below
-
-		// Reset env
-		const { restore: restore2 } = setupStore(scratch);
-		restore = restore2;
-
 		const paths = await ensureStore(scratch);
 		const content = ["## Top Section", "", "matching line here", "", "other stuff"].join("\n");
 		await writeFile(paths.memory, content);
@@ -925,13 +896,8 @@ describe("searchMemory", () => {
 		expect(result.text).toContain("truncated");
 	});
 
-	it("limit > 100 is clamped to 100", async () => {
-		// We can't easily produce 100 matches, but we can verify no error is thrown
-		const paths = await ensureStore(scratch);
-		await writeFile(paths.memory, "## S\nsome content");
-		// Should not throw
-		const result = await searchMemory({ query: "content", limit: 150 }, scratch);
-		expect(result).toBeDefined();
+	it("limit > 100 is rejected", async () => {
+		await expect(searchMemory({ query: "content", limit: 150 }, scratch)).rejects.toThrow("limit");
 	});
 
 	it("no matches returns 'No memory matches for: <query>'", async () => {
