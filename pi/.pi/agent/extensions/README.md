@@ -88,6 +88,16 @@ tracked module has not reached an existing runtime tree.
 
 ## Idle recaps
 
-`recap.ts` provides `/recap` and automatically generates an idle-session recap
-after 30 minutes. Both use the same notification renderer. Override the delay
-for testing or personal preference with `PI_RECAP_IDLE_MINUTES`.
+`recap.ts` provides `/recap` (now) and `/recap on|off|status`, and generates a
+recap automatically after 15 minutes of inactivity. The countdown starts when
+the agent settles, restarts on any keystroke, and is cancelled by a submitted
+prompt. An idle recap needs at least 2 new assistant turns since the previous
+one, so an untouched session is not re-recapped. Recaps are stored as a custom
+session entry, rendered inline, and never sent to the model; one that becomes
+stale while generating is discarded.
+
+Optional config in `~/.pi/agent/recap.json`: `enabled`, `idleMinutes`,
+`minNewTurns`, `model` (`"provider/model-id"`, default: session model),
+`maxTranscriptChars`, `maxOutputTokens`. `PI_RECAP_IDLE_MINUTES` overrides
+`idleMinutes`. The file is self-contained because the Windows bundle copies it
+alone.
