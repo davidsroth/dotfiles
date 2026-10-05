@@ -17,7 +17,7 @@ Current packages (wired into Pi via `settings.base.json`):
 - `pi-goal` (vendored from `code-yeongyu/pi-goal`; see `pi-goal/VENDORED_FROM.md`)
 
 Previously this directory also held `rpiv-mono` (a third-party Pi pipeline
-monorepo, upstream: `juicesharp/rpiv-mono`, fork: `davidroth-distyl/rpiv-mono`).
+monorepo, upstream: `juicesharp/rpiv-mono`, plus a personal fork).
 It is its own git repo and was never wired into the Pi config, so it now lives
 at `~/src/rpiv-mono` instead of nested untracked inside dotfiles.
 
