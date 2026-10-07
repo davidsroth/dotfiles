@@ -19,6 +19,10 @@ EXTENSIONS = (
     "bordered-editor.ts", "clear.ts", "cp.ts", "custom-footer.ts", "recap.ts",
     "resource-tokens.ts", "secret-guard.ts", "session-name.ts", "zz-send-rewind.ts",
 )
+# Packages whose canonical source is its own git repo rather than this tree. Their
+# checkout is located from the live settings' git: source (pi installs git packages
+# under <agent>/git/<host>/<path>), so private repo URLs stay out of this repo.
+EXTERNAL_PACKAGES = ("pi-intercom",)
 DISABLED = ("advisor.ts", "agent-browser.ts", "azure-foundry.ts", "openrouter.ts",
             "pi-notification.ts", "pi-status.ts", "name-header")
 SETTING_KEYS = (
@@ -52,25 +56,61 @@ def tracked_files(root):
     return [Path(p.decode()) for p in output.split(b"\0") if p]
 
 
-def build(destination, settings_path, pi_package_path, root=ROOT, templates=TEMPLATES):
+def package_target(agent, destination, name, rest):
+    # No tests, build output, project-local agent resources, or dev patches.
+    if any(p in {"node_modules", "dist", "test", "tests", ".pi", ".github", "patches"} for p in rest):
+        return None
+    if any(p.endswith((".test.ts", ".map")) for p in rest):
+        return None
+    base = agent / "packages" if name in PACKAGES else destination / "disabled/packages"
+    return base / name / Path(*rest)
+
+
+def external_package_roots(settings_path, agent_dir=None):
+    """Map EXTERNAL_PACKAGES to the git checkouts pi installed for their settings sources."""
+    agent_dir = agent_dir or settings_path.parent
+    roots = {}
+    for item in json.loads(settings_path.read_text()).get("packages", []):
+        spec = item if isinstance(item, str) else item.get("source", "")
+        if not spec.startswith("git:"):
+            continue
+        location = spec.removeprefix("git:").split("@", 2)
+        # git:git@host:owner/repo@ref  or  git:host/owner/repo@ref
+        if location[0] == "git" and len(location) > 1:
+            host, _, path = location[1].partition(":")
+        else:
+            host, _, path = location[0].partition("/")
+        path = path.removesuffix(".git")
+        name = path.rsplit("/", 1)[-1]
+        if name in EXTERNAL_PACKAGES:
+            roots[name] = agent_dir / "git" / host / path
+    return roots
+
+
+def build(destination, settings_path, pi_package_path, root=ROOT, templates=TEMPLATES, package_roots=None):
     agent = destination / "agent"
     agent.mkdir(parents=True)
+    package_roots = external_package_roots(settings_path) if package_roots is None else package_roots
+    missing = [n for n in EXTERNAL_PACKAGES if n in PACKAGES and not (package_roots.get(n) and (package_roots[n] / ".git").exists())]
+    if missing:
+        raise ValueError(f"No installed git checkout for external package(s): {', '.join(missing)}")
+    external_commits = {}
+    for name, package_root in sorted(package_roots.items()):
+        for rel in tracked_files(package_root):
+            target = package_target(agent, destination, name, rel.parts)
+            if target is not None:
+                copy_file(package_root / rel, target, package_root)
+        external_commits[name] = subprocess.check_output(
+            ["git", "-C", str(package_root), "rev-parse", "HEAD"], text=True).strip()
     files = tracked_files(root)
     for rel in files:
         parts = rel.parts
         target = None
         if len(parts) >= 4 and parts[:2] == ("pi", "packages"):
             name = parts[2]
-            if name not in (*PACKAGES, "pi-intercom-tailnet"):
+            if name in package_roots or name not in (*PACKAGES, "pi-intercom-tailnet"):
                 continue
-            # No tests, build output, project-local agent resources, or dev patches.
-            rest = parts[3:]
-            if any(p in {"node_modules", "dist", "test", "tests", ".pi", ".github", "patches"} for p in rest):
-                continue
-            if any(p.endswith((".test.ts", ".map")) for p in rest):
-                continue
-            base = agent / "packages" if name in PACKAGES else destination / "disabled/packages"
-            target = base / name / Path(*rest)
+            target = package_target(agent, destination, name, parts[3:])
         elif len(parts) >= 5 and parts[:4] == ("pi", ".pi", "agent", "extensions"):
             name = parts[4]
             if name in (*EXTENSIONS, "_shared"):
@@ -158,6 +198,7 @@ def build(destination, settings_path, pi_package_path, root=ROOT, templates=TEMP
         "npmPackages": web_specs, "localPackages": list(PACKAGES),
         "sourceCommit": subprocess.check_output(["git", "-C", str(root), "rev-parse", "HEAD"], text=True).strip(),
         "sourceIsWorkingTree": True,
+        "externalPackageCommits": external_commits,
         "mcpIncluded": False,
     }
     json_write(destination / "bundle.json", metadata)

@@ -3,6 +3,7 @@ import hashlib
 import importlib.util
 import json
 from pathlib import Path
+import subprocess
 import tempfile
 import unittest
 import zipfile
@@ -30,8 +31,19 @@ class WindowsBundleTests(unittest.TestCase):
         cls.pi = cls.base / "pi.json"
         bundle.json_write(cls.pi, {"name": "@earendil-works/pi-coding-agent", "version": "0.85.1",
                                    "bin": {"pi": "dist/bundle/cli.js"}})
+        # External packages come from their own git checkout, not this tree.
+        cls.intercom = cls.base / "git/example.test/owner/pi-intercom"
+        bundle.json_write(cls.intercom / "package.json", {"name": "pi-intercom", "pi": {"extensions": ["./index.ts"]}})
+        (cls.intercom / "index.ts").write_text("export default function () {}\n")
+        (cls.intercom / "index.test.ts").write_text("// excluded\n")
+        (cls.intercom / "untracked.ts").write_text("// not tracked\n")
+        git = ["git", "-C", str(cls.intercom), "-c", "user.name=t", "-c", "user.email=t@t"]
+        subprocess.run(["git", "init", "-q", str(cls.intercom)], check=True)
+        subprocess.run([*git, "add", "package.json", "index.ts", "index.test.ts"], check=True)
+        subprocess.run([*git, "commit", "-qm", "fixture"], check=True)
         cls.out = cls.base / "output"
-        cls.metadata = bundle.build(cls.out, cls.settings, cls.pi)
+        cls.metadata = bundle.build(cls.out, cls.settings, cls.pi,
+                                    package_roots={"pi-intercom": cls.intercom})
         bundle.write_checksums(cls.out)
         cls.agent = cls.out / "agent"
 
@@ -69,6 +81,21 @@ class WindowsBundleTests(unittest.TestCase):
             if manifest.get("dependencies"):
                 lock = json.loads((directory / "package-lock.json").read_text())
                 self.assertEqual(lock["packages"][""]["dependencies"], manifest["dependencies"])
+
+    def test_external_package_comes_from_its_git_checkout(self):
+        directory = self.agent / "packages/pi-intercom"
+        self.assertEqual({p.name for p in directory.iterdir()}, {"package.json", "index.ts"})
+        self.assertEqual(set(self.metadata["externalPackageCommits"]), {"pi-intercom"})
+
+    def test_external_roots_resolve_from_git_settings_sources(self):
+        settings = self.base / "agent/settings.json"
+        bundle.json_write(settings, {"packages": [
+            "git:git@github.com:Org/pi-intercom@v1.0.0",
+            "git:github.com/Org/pi-other@v2", "npm:pi-intercom@1.0.0"]})
+        self.assertEqual(bundle.external_package_roots(settings),
+                         {"pi-intercom": self.base / "agent/git/github.com/Org/pi-intercom"})
+        with self.assertRaises(ValueError):
+            bundle.build(self.base / "missing-out", self.settings, self.pi, package_roots={})
 
     def test_unsupported_extensions_are_not_discovered(self):
         self.assertEqual({p.name for p in (self.agent / "extensions").iterdir()},

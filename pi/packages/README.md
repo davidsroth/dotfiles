@@ -7,7 +7,6 @@ Current packages (wired into Pi via `settings.base.json`):
 - `pi-vim`
 - `pi-subagents`
 - `pi-aside` (local one-shot side questions; replaces the vendored BTW package)
-- `@davidroth/pi-intercom` (directory: `pi-intercom`)
 - `pi-intercom-tailnet`
 - `pi-memory`
 - `pi-qna`
