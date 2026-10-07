@@ -2,7 +2,7 @@
   "name": "pi-aside",
   "version": "0.1.0",
   "private": true,
-  "description": "One-shot read-only side questions in a panel above Pi's editor",
+  "description": "Read-only side conversations with an inset reply bar above Pi's editor",
   "type": "module",
   "license": "MIT",
   "scripts": {
