@@ -32,18 +32,24 @@ class WindowsBundleTests(unittest.TestCase):
         bundle.json_write(cls.pi, {"name": "@earendil-works/pi-coding-agent", "version": "0.85.1",
                                    "bin": {"pi": "dist/bundle/cli.js"}})
         # External packages come from their own git checkout, not this tree.
-        cls.intercom = cls.base / "git/example.test/owner/pi-intercom"
-        bundle.json_write(cls.intercom / "package.json", {"name": "pi-intercom", "pi": {"extensions": ["./index.ts"]}})
-        (cls.intercom / "index.ts").write_text("export default function () {}\n")
-        (cls.intercom / "index.test.ts").write_text("// excluded\n")
-        (cls.intercom / "untracked.ts").write_text("// not tracked\n")
-        git = ["git", "-C", str(cls.intercom), "-c", "user.name=t", "-c", "user.email=t@t"]
-        subprocess.run(["git", "init", "-q", str(cls.intercom)], check=True)
-        subprocess.run([*git, "add", "package.json", "index.ts", "index.test.ts"], check=True)
-        subprocess.run([*git, "commit", "-qm", "fixture"], check=True)
+        cls.roots = {}
+        for name in bundle.EXTERNAL_PACKAGES:
+            root = cls.base / "git/example.test/owner" / name
+            entry = "./extensions/miniplan/index.ts" if name == "pi-plan-review" else "./index.ts"
+            bundle.json_write(root / "package.json", {"name": name, "pi": {"extensions": [entry]}})
+            (root / entry).parent.mkdir(parents=True, exist_ok=True)
+            (root / entry).write_text("export default function () {}\n")
+            (root / "index.test.ts").write_text("// excluded\n")
+            (root / "untracked.ts").write_text("// not tracked\n")
+            git = ["git", "-C", str(root), "-c", "user.name=t", "-c", "user.email=t@t"]
+            subprocess.run(["git", "init", "-q", str(root)], check=True)
+            subprocess.run([*git, "add", "package.json", entry, "index.test.ts"], check=True)
+            subprocess.run([*git, "commit", "-qm", "fixture"], check=True)
+            cls.roots[name] = root
+        cls.intercom = cls.roots["pi-intercom"]
         cls.out = cls.base / "output"
         cls.metadata = bundle.build(cls.out, cls.settings, cls.pi,
-                                    package_roots={"pi-intercom": cls.intercom})
+                                    package_roots=cls.roots)
         bundle.write_checksums(cls.out)
         cls.agent = cls.out / "agent"
 
@@ -85,7 +91,7 @@ class WindowsBundleTests(unittest.TestCase):
     def test_external_package_comes_from_its_git_checkout(self):
         directory = self.agent / "packages/pi-intercom"
         self.assertEqual({p.name for p in directory.iterdir()}, {"package.json", "index.ts"})
-        self.assertEqual(set(self.metadata["externalPackageCommits"]), {"pi-intercom"})
+        self.assertEqual(set(self.metadata["externalPackageCommits"]), set(bundle.EXTERNAL_PACKAGES))
 
     def test_external_roots_resolve_from_git_settings_sources(self):
         settings = self.base / "agent/settings.json"

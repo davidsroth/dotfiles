@@ -22,7 +22,10 @@ EXTENSIONS = (
 # Packages whose canonical source is its own git repo rather than this tree. Their
 # checkout is located from the live settings' git: source (pi installs git packages
 # under <agent>/git/<host>/<path>), so private repo URLs stay out of this repo.
-EXTERNAL_PACKAGES = ("pi-intercom",)
+EXTERNAL_PACKAGES = (
+    "pi-vim", "pi-aside", "pi-intercom", "pi-qna",
+    "pi-plan-review", "pi-memory", "pi-session-recall",
+)
 DISABLED = ("advisor.ts", "agent-browser.ts", "azure-foundry.ts", "openrouter.ts",
             "pi-notification.ts", "pi-status.ts", "name-header")
 SETTING_KEYS = (

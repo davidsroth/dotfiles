@@ -4,16 +4,15 @@ This directory contains homespun Pi packages and intentionally vendored third-pa
 
 Current packages (wired into Pi via `settings.base.json`):
 
-- `pi-vim`
 - `pi-subagents`
-- `pi-aside` (local one-shot side questions; replaces the vendored BTW package)
 - `pi-intercom-tailnet`
-- `pi-memory`
-- `pi-qna`
-- `pi-plan-review`
-- `pi-session-recall` (bounded visible-text search and evidence-cited historical session queries)
 - `pi-codex-compaction` (vendored and hardened from `ogulcancelik/pi-extensions`; see `pi-codex-compaction/ORIGIN.md`)
 - `pi-goal` (vendored from `code-yeongyu/pi-goal`; see `pi-goal/VENDORED_FROM.md`)
+
+`pi-vim`, `pi-aside`, `pi-intercom`, `pi-qna`, `pi-plan-review`, `pi-memory`,
+`pi-session-recall`, and `pi-clm` now live in their own git repositories; their sources
+are listed in the untracked `~/.pi/agent/settings.local.json` under `extraPackages`.
+Their history up to the move remains in this repository's log.
 
 Previously this directory also held `rpiv-mono` (a third-party Pi pipeline
 monorepo, upstream: `juicesharp/rpiv-mono`, plus a personal fork).
@@ -59,7 +58,4 @@ Recommended workflow:
 ## Notes
 
 - `pi-subagents` is the most active/complex vendored package and is the most likely to need compatibility updates as Pi evolves
-- `pi-aside` is a minimal local replacement for the former vendored BTW plugin
-- `pi-qna` and `pi-plan-review` are local packages extracted from this dotfiles config for easier sharing with coworkers
-- `pi-session-recall` complements (and does not replace or modify) the notes repository's `review-pi-sessions` skill
 - Relative package loading assumes the stowed Pi config layout used by this repo
