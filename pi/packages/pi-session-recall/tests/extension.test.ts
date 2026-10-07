@@ -50,6 +50,7 @@ describe("Pi extension integration", () => {
 			additionalProperties: false,
 			properties: { question: { maxLength: 1_000 } },
 		});
+		expect(tools.get("session_query").parameters.properties.includeEdits).toMatchObject({ type: "boolean" });
 
 		const result = await tools.get("session_search").execute(
 			"call-1",

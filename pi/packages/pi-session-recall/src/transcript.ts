@@ -29,10 +29,33 @@ export interface VisibleEntry {
 	text: string;
 }
 
+/**
+ * A `context_edit` entry: a later, branch-relative replacement or omission of a message in the
+ * model-visible context. The raw target message is never modified; the latest edit per target on a
+ * branch wins.
+ */
+export interface ContextEditEvent {
+	id: string;
+	parentId: string | null;
+	timestamp: string;
+	targetId: string;
+	kind: "replace" | "omit";
+	/** Secret-masked, clipped text blocks of the replacement (absent for omissions). */
+	replacementText?: string;
+	/** Image/tool-call/other non-text blocks in the replacement (counted, not included). */
+	nonTextBlocks: number;
+	redactionCount: number;
+	/** Role of the target message (user, assistant, toolResult, …), when the target exists. */
+	targetRole?: string;
+	targetToolName?: string;
+}
+
 export interface ParsedTranscript {
 	header: SessionHeader;
 	entries: ParsedEntry[];
 	visibleEntries: VisibleEntry[];
+	/** Every parsed context_edit in file order (all branches). */
+	contextEdits: ContextEditEvent[];
 	sessionName?: string;
 	hash: string;
 	malformedLines: number;
@@ -43,6 +66,8 @@ export interface ParsedTranscript {
 }
 
 const MAX_JSONL_LINE_CHARS = 8 * 1024 * 1024;
+const MAX_EDIT_TEXT_CHARS = 1_000;
+const MAX_TOTAL_EDIT_TEXT_CHARS = 200_000;
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
 	typeof value === "object" && value !== null && !Array.isArray(value);
@@ -80,6 +105,10 @@ interface TranscriptAccumulator {
 	header?: SessionHeader;
 	entries: ParsedEntry[];
 	visibleEntries: VisibleEntry[];
+	contextEdits: ContextEditEvent[];
+	/** Role (and tool name) of every message entry, used to classify edit targets. */
+	messageInfo: Map<string, { role: string; toolName?: string }>;
+	editTextChars: number;
 	sessionName?: string;
 	malformedLines: number;
 	retainEntries: boolean;
@@ -91,6 +120,9 @@ function createAccumulator(options: Pick<ReadTranscriptOptions, "retainEntries" 
 	return {
 		entries: [],
 		visibleEntries: [],
+		contextEdits: [],
+		messageInfo: new Map(),
+		editTextChars: 0,
 		malformedLines: 0,
 		retainEntries: options.retainEntries !== false,
 		retainVisibleEntries: options.retainVisibleEntries !== false,
@@ -139,6 +171,19 @@ function consumeLine(state: TranscriptAccumulator, rawLine: string): void {
 	};
 	if (state.retainEntries) state.entries.push(entry);
 	if (entry.type === "session_info" && entry.name) state.sessionName = entry.name;
+	if (entry.type === "message" && entry.id && isRecord(value.message) && typeof value.message.role === "string") {
+		const toolName = value.message.toolName;
+		state.messageInfo.set(entry.id, {
+			role: value.message.role,
+			...(typeof toolName === "string" ? { toolName } : {}),
+		});
+	}
+	if (entry.type === "context_edit") {
+		const edit = contextEdit(state, entry, value);
+		if (edit) state.contextEdits.push(edit);
+		else state.malformedLines++;
+		return;
+	}
 	const visible = visibleMessage(entry, value.message);
 	if (visible) {
 		state.onVisibleEntry?.(visible);
@@ -146,15 +191,58 @@ function consumeLine(state: TranscriptAccumulator, rawLine: string): void {
 	}
 }
 
+function contextEdit(
+	state: TranscriptAccumulator,
+	entry: ParsedEntry,
+	value: Record<string, unknown>,
+): ContextEditEvent | undefined {
+	if (!entry.id || !entry.timestamp || typeof value.targetId !== "string") return undefined;
+	const base = {
+		id: entry.id,
+		parentId: entry.parentId ?? null,
+		timestamp: entry.timestamp,
+		targetId: value.targetId,
+		nonTextBlocks: 0,
+		redactionCount: 0,
+	};
+	if (value.replacement === null) return { ...base, kind: "omit" };
+	if (!isRecord(value.replacement)) return undefined;
+	const content = value.replacement.content;
+	const blocks = typeof content === "string" ? [{ type: "text", text: content }] : Array.isArray(content) ? content : undefined;
+	if (!blocks) return undefined;
+	const texts: string[] = [];
+	let nonTextBlocks = 0;
+	for (const block of blocks) {
+		if (isRecord(block) && block.type === "text" && typeof block.text === "string") texts.push(block.text);
+		else nonTextBlocks++;
+	}
+	const joined = texts.join("\n");
+	// Redact the complete text before clipping so truncation cannot split a structured secret.
+	const redacted = redactSecrets(joined);
+	const remaining = Math.max(0, MAX_TOTAL_EDIT_TEXT_CHARS - state.editTextChars);
+	const limit = Math.min(MAX_EDIT_TEXT_CHARS, remaining);
+	let text = redacted.text;
+	if (text.length > limit) text = limit > 0 ? `${text.slice(0, limit)}… [edit text truncated]` : "[edit text omitted: size cap]";
+	state.editTextChars += Math.min(redacted.text.length, limit);
+	return { ...base, kind: "replace", replacementText: text, nonTextBlocks, redactionCount: redacted.count };
+}
+
 function finishTranscript(
 	state: TranscriptAccumulator,
 	metadata: Pick<ParsedTranscript, "hash" | "sourceChanged" | "initialSize" | "bytesRead">,
 ): ParsedTranscript {
 	if (!state.header) throw new Error("Session header is missing or invalid");
+	for (const edit of state.contextEdits) {
+		const target = state.messageInfo.get(edit.targetId);
+		if (!target) continue;
+		edit.targetRole = target.role;
+		if (target.toolName) edit.targetToolName = target.toolName;
+	}
 	return {
 		header: state.header,
 		entries: state.entries,
 		visibleEntries: state.visibleEntries,
+		contextEdits: state.contextEdits,
 		sessionName: state.sessionName,
 		malformedLines: state.malformedLines,
 		...metadata,
@@ -337,4 +425,24 @@ export function selectBranch(transcript: ParsedTranscript, anchorId?: string): P
 export function visibleEntriesOnBranch(transcript: ParsedTranscript, anchorId?: string): VisibleEntry[] {
 	const branchIds = new Set(selectBranch(transcript, anchorId).flatMap((entry) => (entry.id ? [entry.id] : [])));
 	return transcript.visibleEntries.filter((entry) => branchIds.has(entry.id));
+}
+
+export interface BranchContextEdit extends ContextEditEvent {
+	/** False when a later edit on the same branch targets the same message (latest wins). */
+	effective: boolean;
+}
+
+/** Context edits whose own entry lies on the given branch, in file order, with latest-wins marking. */
+export function editsOnBranch(transcript: ParsedTranscript, branch: ParsedEntry[]): BranchContextEdit[] {
+	const branchIds = new Set(branch.flatMap((entry) => (entry.id ? [entry.id] : [])));
+	const onBranch = transcript.contextEdits.filter((edit) => branchIds.has(edit.id));
+	const latest = new Map<string, string>();
+	for (const edit of onBranch) latest.set(edit.targetId, edit.id);
+	return onBranch.map((edit) => ({ ...edit, effective: latest.get(edit.targetId) === edit.id }));
+}
+
+/** Compact UTC timestamp for edit markers, e.g. 2026-10-07T02:14:05Z. */
+export function shortTimestamp(timestamp: string): string {
+	const parsed = Date.parse(timestamp);
+	return Number.isNaN(parsed) ? timestamp : new Date(parsed).toISOString().replace(/\.\d{3}Z$/, "Z");
 }

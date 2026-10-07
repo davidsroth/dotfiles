@@ -29,6 +29,7 @@ const QueryParams = Type.Object({
 	question: Type.String({ minLength: 1, maxLength: 1000, description: "Focused question to answer from this session's visible evidence." }),
 	entryId: Type.Optional(Type.String({ description: "Entry anchor returned by search; selects the newest branch containing this entry, including later descendants." })),
 	includeCurrent: Type.Optional(Type.Boolean({ description: "Allow querying the current session. Defaults to false." })),
+	includeEdits: Type.Optional(Type.Boolean({ description: "Include context-edit records (where the model later replaced or removed messages, including tool results, from its own context) as citable evidence. Use for questions like \"what did the model trim or drop?\". Defaults to false." })),
 }, { additionalProperties: false });
 
 const resultText = (text: string, details: unknown, usage?: Usage) => ({
@@ -52,7 +53,8 @@ export default function sessionRecall(pi: ExtensionAPI): void {
 		label: "Session Search",
 		description:
 			"Search past Pi sessions for a case-insensitive literal string in structurally parsed, visible user/assistant text only. " +
-			"Thinking, tool calls/results, images, custom/hidden messages, and summaries are never returned as evidence. " +
+			"Thinking, tool calls/results, images, custom/hidden messages, and summaries are not returned as evidence. " +
+			"Snippets show original text and are marked when the model later edited or removed that message from its context. " +
 			"Use one distinctive token or exact phrase per call, or query: \"\" to browse recent sessions with optional date/CWD/role filters. " +
 			"Browse returns newest qualifying visible messages first within the 500 most recently modified files. " +
 			"Then use session_query for a focused synthesis. Current session excluded by default.",
@@ -98,6 +100,7 @@ export default function sessionRecall(pi: ExtensionAPI): void {
 		description:
 			"Ask a focused question about one session path returned by session_search. Validates the path under Pi's effective session root, " +
 			"selects the active branch or newest leaf branch containing an entry anchor, redacts visible user/assistant text, and asks a no-tools nested model to answer with evidence-ID citations. " +
+			"Edited messages are annotated; includeEdits=true also supplies the branch's context-edit records (replacement text, including for tool results). " +
 			"Historical assistant claims remain reports and require live verification. Current session excluded by default.",
 		promptSnippet: "Answer a focused question from one selected historical Pi session branch",
 		parameters: QueryParams,
@@ -116,6 +119,7 @@ export default function sessionRecall(pi: ExtensionAPI): void {
 				question: params.question,
 				entryId: params.entryId,
 				includeCurrent: params.includeCurrent,
+				includeEdits: params.includeEdits,
 				root,
 				currentSessionPath,
 				agentDir,
@@ -134,6 +138,7 @@ export default function sessionRecall(pi: ExtensionAPI): void {
 				model: result.model,
 				usage: result.usage,
 				warnings: result.warnings,
+				contextEdits: result.contextEdits,
 			}, result.usage);
 		},
 	});

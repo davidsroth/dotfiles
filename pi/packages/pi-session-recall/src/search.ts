@@ -2,7 +2,15 @@ import { spawn } from "node:child_process";
 import { createReadStream } from "node:fs";
 import { lstat, readdir, realpath } from "node:fs/promises";
 import { join } from "node:path";
-import { readTranscript, redactSecrets, type VisibleEntry, type VisibleRole } from "./transcript";
+import {
+	readTranscript,
+	redactSecrets,
+	selectBranch,
+	shortTimestamp,
+	type ParsedTranscript,
+	type VisibleEntry,
+	type VisibleRole,
+} from "./transcript";
 import { validateSessionPath } from "./session-root";
 
 const MAX_CANDIDATES = 500;
@@ -32,6 +40,25 @@ export interface SearchSnippet {
 	role: VisibleRole;
 	text: string;
 	redactionCount: number;
+	/** Latest context edit targeting this message, if the model later replaced/removed it. */
+	edit?: SnippetEdit;
+}
+
+export interface SnippetEdit {
+	kind: "replace" | "omit";
+	timestamp: string;
+	/** Number of edits targeting this message across all branches. */
+	count: number;
+	/** True when the latest edit is not on the session's newest branch. */
+	offBranch: boolean;
+}
+
+export interface SessionEditSummary {
+	total: number;
+	replaced: number;
+	omitted: number;
+	/** Edits whose target is a user or assistant message. */
+	onMessages: number;
 }
 
 export interface SessionSearchMatch {
@@ -46,6 +73,7 @@ export interface SessionSearchMatch {
 	redactionCount: number;
 	sourceChanged: boolean;
 	snippets: SearchSnippet[];
+	contextEdits?: SessionEditSummary;
 }
 
 export interface SessionSearchResult {
@@ -54,6 +82,48 @@ export interface SessionSearchResult {
 	candidateCount: number;
 	skippedFiles: number;
 	candidateLimitReached: boolean;
+}
+
+/** Attach edit markers to snippets and summarize a session's context edits. */
+export function annotateEdits(transcript: ParsedTranscript, snippets: SearchSnippet[]): SessionEditSummary | undefined {
+	const edits = transcript.contextEdits;
+	if (edits.length === 0) return undefined;
+	const byTarget = new Map<string, typeof edits>();
+	for (const edit of edits) byTarget.set(edit.targetId, [...(byTarget.get(edit.targetId) ?? []), edit]);
+	let newestBranch: Set<string> | undefined;
+	const onNewestBranch = (id: string): boolean => {
+		if (!newestBranch) {
+			try {
+				newestBranch = new Set(selectBranch(transcript).flatMap((entry) => (entry.id ? [entry.id] : [])));
+			} catch {
+				newestBranch = new Set();
+			}
+		}
+		return newestBranch.has(id);
+	};
+	for (const snippet of snippets) {
+		const targeted = byTarget.get(snippet.entryId);
+		if (!targeted) continue;
+		const latest = targeted[targeted.length - 1];
+		snippet.edit = {
+			kind: latest.kind,
+			timestamp: latest.timestamp,
+			count: targeted.length,
+			offBranch: transcript.entries.length > 0 && !onNewestBranch(latest.id),
+		};
+	}
+	return {
+		total: edits.length,
+		replaced: edits.filter((edit) => edit.kind === "replace").length,
+		omitted: edits.filter((edit) => edit.kind === "omit").length,
+		onMessages: edits.filter((edit) => edit.targetRole === "user" || edit.targetRole === "assistant").length,
+	};
+}
+
+export function formatSnippetEdit(edit: SnippetEdit): string {
+	const what = edit.kind === "omit" ? "removed from context" : "context-edited: replaced";
+	const extra = [edit.count > 1 ? `${edit.count} edits` : "", edit.offBranch ? "other branch" : ""].filter(Boolean);
+	return ` · ${what} ${shortTimestamp(edit.timestamp)}${extra.length ? ` (${extra.join(", ")})` : ""}`;
 }
 
 const abortError = (): Error => Object.assign(new Error("Session search was cancelled"), { name: "AbortError" });
@@ -309,7 +379,9 @@ export async function searchSessions(options: SessionSearchOptions): Promise<Ses
 			let latestMatchAt = "";
 			const transcript = await readTranscript(validated.path, {
 				signal: options.signal,
-				retainEntries: false,
+				// Entry metadata (no content) is kept so edit markers can be checked against the
+				// newest branch.
+				retainEntries: true,
 				retainVisibleEntries: false,
 				onVisibleEntry: (entry) => {
 					const count = visibleMatchCount(
@@ -347,6 +419,7 @@ export async function searchSessions(options: SessionSearchOptions): Promise<Ses
 			});
 			if (options.cwd !== undefined && transcript.header.cwd !== options.cwd) continue;
 			if (matchCount === 0) continue;
+			const contextEdits = annotateEdits(transcript, snippets);
 			matches.push({
 				sessionId: transcript.header.id,
 				sessionName: transcript.sessionName,
@@ -359,6 +432,7 @@ export async function searchSessions(options: SessionSearchOptions): Promise<Ses
 				redactionCount,
 				sourceChanged: transcript.sourceChanged,
 				snippets,
+				...(contextEdits ? { contextEdits } : {}),
 			});
 		} catch (error) {
 			if (options.signal?.aborted || (error as Error).name === "AbortError") throw error;
@@ -396,7 +470,7 @@ export function formatSearchResult(query: string, result: SessionSearchResult): 
 		const snippets = match.snippets
 			.map(
 				(snippet) =>
-					`- [${snippet.role}] ${snippet.timestamp} entry=${snippet.entryId}\n  ${snippet.text}`,
+					`- [${snippet.role}] ${snippet.timestamp} entry=${snippet.entryId}${snippet.edit ? formatSnippetEdit(snippet.edit) : ""}\n  ${snippet.text}`,
 			)
 			.join("\n");
 		return [
@@ -405,6 +479,9 @@ export function formatSearchResult(query: string, result: SessionSearchResult): 
 			`Path: ${match.path}`,
 			`SHA-256: ${match.hash}`,
 			`${browsing ? "Qualifying visible messages" : "Visible matches"}: ${match.matchCount}; redactions: ${match.redactionCount}${match.sourceChanged ? "; warning: source changed during snapshot read" : ""}`,
+			...(match.contextEdits
+				? [`Context edits: ${match.contextEdits.total} (${match.contextEdits.replaced} replaced, ${match.contextEdits.omitted} removed; ${match.contextEdits.onMessages} on user/assistant messages). Snippets show original text; use session_query with includeEdits=true for edit details.`]
+				: []),
 			snippets,
 		].join("\n");
 	});
