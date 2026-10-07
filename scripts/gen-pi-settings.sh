@@ -3,6 +3,8 @@
 #   1. existing live settings.json   (preserve pi's runtime writes, e.g. lastChangelogVersion)
 #   2. settings.base.json            (tracked global settings: theme, packages, ...)
 #   3. settings.local.json           (per-machine overrides: provider/model; gitignored)
+# settings.local.json may also set "extraPackages": an array appended to the
+# merged "packages" (arrays otherwise replace), for machine-only or private sources.
 # Later sources win per-key, so base/local override stale runtime values while
 # runtime-only keys (not present in base/local) are preserved across regens.
 #
@@ -80,6 +82,12 @@ if command -v jq >/dev/null 2>&1; then
         )
       else .
       end
+    | if (.extraPackages | type) == "array" then
+        .packages = (reduce .extraPackages[] as $p ((.packages // []);
+          if any(.[]; . == $p) then . else . + [$p] end))
+      else .
+      end
+    | del(.extraPackages)
   ' \
     "$existing" \
     "$BASE" \
@@ -131,6 +139,13 @@ if isinstance(packages, list):
             package["source"] = os.path.join(repo_root, package["source"][len(prefix):])
         rewritten_packages.append(package)
     settings["packages"] = rewritten_packages
+extra = settings.pop("extraPackages", None)
+if isinstance(extra, list):
+    merged = list(settings.get("packages") or [])
+    for package in extra:
+        if package not in merged:
+            merged.append(package)
+    settings["packages"] = merged
 
 with open(destination, "w", encoding="utf-8") as handle:
     json.dump(settings, handle, indent=2)
