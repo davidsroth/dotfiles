@@ -21,6 +21,7 @@ class PiDoctorPackagePathsTest(unittest.TestCase):
         scripts = self.root / "scripts"
         scripts.mkdir(parents=True)
         shutil.copy2(DOCTOR, scripts / DOCTOR.name)
+        shutil.copytree(REPO_ROOT / "scripts" / "lib", scripts / "lib")
         shutil.copy2(GENERATOR, scripts / GENERATOR.name)
         self.home = Path(self.tempdir.name) / "home"
         self.agent = self.home / ".pi" / "agent"

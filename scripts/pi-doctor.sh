@@ -4,6 +4,8 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=SCRIPTDIR/lib/pi-sdk.sh
+source "$SCRIPT_DIR/lib/pi-sdk.sh"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 PI_AGENT="$HOME/.pi/agent"
 
@@ -306,17 +308,11 @@ check_toolchain() {
     FAIL "TOOLCHAIN: neither jq nor python3 is available for settings generation"
   fi
 
-  local npm_global_root pi_sdk_path
-  npm_global_root="$(npm root -g 2>/dev/null || echo '')"
-  if [[ -n "$npm_global_root" ]]; then
-    pi_sdk_path="$npm_global_root/@earendil-works/pi-coding-agent"
-    if [[ -d "$pi_sdk_path" ]]; then
-      PASS "TOOLCHAIN: pi SDK found at $pi_sdk_path"
-    else
-      WARN "TOOLCHAIN: pi SDK not found at $pi_sdk_path — pi-check (typecheck) may not work"
-    fi
+  local pi_sdk_path
+  if pi_sdk_path="$(pi_sdk_dir)"; then
+    PASS "TOOLCHAIN: pi SDK found at $pi_sdk_path"
   else
-    WARN "TOOLCHAIN: could not determine npm global root; pi SDK check skipped"
+    WARN "TOOLCHAIN: pi SDK not found (managed install, PATH, or npm global) — pi-check may not work"
   fi
 }
 

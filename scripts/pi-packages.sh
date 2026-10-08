@@ -6,6 +6,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 SETTINGS="$REPO_ROOT/pi/.pi/agent/settings.base.json"
 EXTENSIONS="$REPO_ROOT/pi/.pi/agent/extensions"
+# shellcheck source=SCRIPTDIR/lib/pi-sdk.sh
+source "$SCRIPT_DIR/lib/pi-sdk.sh"
 
 usage() {
   echo "Usage: $0 {list|verify|runtime-links|install-runtime|install-dev|typecheck|load|test|check}" >&2
@@ -138,9 +140,10 @@ run_script() {
 }
 
 verify_loads() {
-  local sdk_root jiti_path
-  sdk_root="$(npm root -g)/@earendil-works/pi-coding-agent"
-  jiti_path="$sdk_root/node_modules/jiti/lib/jiti.mjs"
+  local sdk_root jiti_dir jiti_path
+  sdk_root="$(pi_sdk_dir)" || { echo "Installed pi SDK not found (see scripts/lib/pi-sdk.sh)" >&2; return 1; }
+  jiti_dir="$(pi_sdk_dep "$sdk_root" jiti)" || { echo "Pi's bundled jiti not found beside $sdk_root" >&2; return 1; }
+  jiti_path="$jiti_dir/lib/jiti.mjs"
   [[ -f "$jiti_path" ]] || { echo "Pi's bundled jiti not found: $jiti_path" >&2; return 1; }
   node --input-type=module - -- "$jiti_path" ${packages[@]+"${packages[@]}"} <<'NODE'
 import fs from "node:fs";

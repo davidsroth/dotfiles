@@ -23,29 +23,10 @@ if [[ ! -d "$EXT" ]]; then
 fi
 
 # --- Resolve the installed pi SDK package directory -------------------------
-resolve_pi_pkg() {
-  local cli
-  if command -v pi >/dev/null 2>&1; then
-    cli="$(command -v pi)"
-    # Follow symlinks to the real cli.js, then strip /dist/...
-    cli="$(realpath "$cli" 2>/dev/null || readlink -f "$cli" 2>/dev/null || echo "$cli")"
-    local pkg="${cli%/dist/*}"
-    if [[ -f "$pkg/package.json" ]]; then
-      echo "$pkg"
-      return 0
-    fi
-  fi
-  # Fallback: npm global root
-  local groot
-  groot="$(npm root -g 2>/dev/null || true)"
-  if [[ -n "$groot" && -d "$groot/@earendil-works/pi-coding-agent" ]]; then
-    echo "$groot/@earendil-works/pi-coding-agent"
-    return 0
-  fi
-  return 1
-}
+# shellcheck source=SCRIPTDIR/lib/pi-sdk.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/pi-sdk.sh"
 
-if ! PI_PKG="$(resolve_pi_pkg)"; then
+if ! PI_PKG="$(pi_sdk_dir)"; then
   echo "pi-check: could not locate the installed @earendil-works/pi-coding-agent." >&2
   echo "          Install pi (so it is on PATH) and retry." >&2
   exit 1
@@ -76,11 +57,20 @@ link() { # link <target> <linkpath>
   fi
 }
 
-link "$PI_PKG"                                              "$SCOPE/pi-coding-agent"
-link "$PI_PKG/node_modules/@earendil-works/pi-tui"         "$SCOPE/pi-tui"
-link "$PI_PKG/node_modules/@earendil-works/pi-ai"          "$SCOPE/pi-ai"
-link "$PI_PKG/node_modules/@earendil-works/pi-agent-core"  "$SCOPE/pi-agent-core"
-link "$PI_PKG/node_modules/typebox"                        "$NM/typebox"
+link_dep() { # link_dep <package-name> <linkpath> — nested or hoisted beside the SDK
+  local target
+  if target="$(pi_sdk_dep "$PI_PKG" "$1")"; then
+    ln -sfn "$target" "$2"
+  else
+    echo "pi-check: warning: missing SDK dep $1 (skipping)" >&2
+  fi
+}
+
+link "$PI_PKG"                            "$SCOPE/pi-coding-agent"
+link_dep "@earendil-works/pi-tui"         "$SCOPE/pi-tui"
+link_dep "@earendil-works/pi-ai"          "$SCOPE/pi-ai"
+link_dep "@earendil-works/pi-agent-core"  "$SCOPE/pi-agent-core"
+link_dep "typebox"                        "$NM/typebox"
 
 # --- Typecheck --------------------------------------------------------------
 # --links-only: stop after the farm is built (used by `just pi-test`, which

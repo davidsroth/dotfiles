@@ -17,6 +17,7 @@ class PiPackagesTest(unittest.TestCase):
         self.root = Path(self.tempdir.name) / "repo"
         (self.root / "scripts").mkdir(parents=True)
         shutil.copy2(RUNNER, self.root / "scripts" / RUNNER.name)
+        shutil.copytree(REPO_ROOT / "scripts" / "lib", self.root / "scripts" / "lib")
         (self.root / "pi" / ".pi" / "agent" / "extensions").mkdir(parents=True)
         self.write_json("pi/.pi/agent/extensions/package.json", {"name": "extensions"})
         self.write_json("pi/.pi/agent/extensions/package-lock.json", {"lockfileVersion": 3})
