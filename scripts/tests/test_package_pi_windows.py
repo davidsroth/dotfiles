@@ -108,7 +108,7 @@ class WindowsBundleTests(unittest.TestCase):
                          set(bundle.EXTENSIONS) | {"_shared"})
         plan = json.loads((self.agent / "packages/pi-plan-review/package.json").read_text())
         self.assertEqual(plan["pi"]["extensions"], ["./extensions/miniplan/index.ts"])
-        self.assertTrue((self.out / "disabled/packages/pi-intercom-tailnet/index.ts").exists())
+        self.assertFalse((self.out / "disabled/packages").exists())
 
     def test_windows_instructions_and_secret_guard(self):
         instructions = (self.agent / "AGENTS.md").read_text()

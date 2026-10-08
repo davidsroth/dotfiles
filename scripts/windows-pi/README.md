@@ -60,7 +60,7 @@ PATH; an existing `pi` command may start a different version.
 Intercom is opt-in because Windows policy may disable VBScript even when
 `wscript.exe` exists. This installer checks presence, not policy. Its Windows
 transport uses named pipes; tmux switching is unavailable. Leave it disabled if
-not needed. Tailnet intercom is a separate, disabled Unix-oriented integration.
+not needed.
 
 ### Existing installation / recovery
 
@@ -110,8 +110,8 @@ omit that package entirely.
 
 ## Deliberate differences and limitations
 
-- `disabled/` contains reference source only, outside Pi discovery: Tailnet
-  intercom, Mac notifications, dashboard/calendar widget, tmux status heartbeat,
+- `disabled/` contains reference source only, outside Pi discovery: Mac
+  notifications, dashboard/calendar widget, tmux status heartbeat,
   agent-browser wrapper, and non-default provider/advisor extensions. Do not copy
   these into `agent/extensions` without addressing platform assumptions.
 - Browser **plan review and `/markup` are enabled**. `submit_draft` is disabled

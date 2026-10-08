@@ -11,9 +11,7 @@
     {
       "source": "npm:pi-web-access@0.13.0",
       "skills": []
-    },
-    "../../dotfiles/pi/packages/pi-codex-compaction",
-    "../../dotfiles/pi/packages/pi-goal"
+    }
   ],
   "extensions": [
     "!advisor.ts",

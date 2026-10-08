@@ -111,7 +111,7 @@ def build(destination, settings_path, pi_package_path, root=ROOT, templates=TEMP
         target = None
         if len(parts) >= 4 and parts[:2] == ("pi", "packages"):
             name = parts[2]
-            if name in package_roots or name not in (*PACKAGES, "pi-intercom-tailnet"):
+            if name in package_roots or name not in PACKAGES:
                 continue
             target = package_target(agent, destination, name, parts[3:])
         elif len(parts) >= 5 and parts[:4] == ("pi", ".pi", "agent", "extensions"):

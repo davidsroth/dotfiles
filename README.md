@@ -180,7 +180,7 @@ just pi-settings
 
 Git hooks (`post-merge` and `post-checkout`) call the same script automatically after a `git pull`, so settings stay current without manual intervention. `core.hooksPath` is pinned to the canonical checkout's absolute `.githooks` path; linked and ephemeral worktrees skip global settings regeneration, and Pi subagent worktree creation disables repository hooks entirely.
 
-The relative local package specs in `settings.base.json` (for example `../../dotfiles/pi/packages/pi-goal`) are portable source values. Packages published as their own git repos are not in the base file; list their `git:` sources in the untracked `settings.local.json` under `extraPackages`, which the generator appends to `packages` in order. The generator rewrites local specs in the live file; do not hand-edit generated paths in `~/.pi/agent/settings.json`. As defense in depth, invoking the current generator from another worktree resolves package paths from the checkout that owns the live stowed `settings.base.json`.
+The relative local package specs in `settings.base.json` (for example `../../dotfiles/pi/packages/pi-subagents`) are portable source values. Packages published as their own git repos are not in the base file; list their `git:` sources in the untracked `settings.local.json` under `extraPackages`, which the generator appends to `packages` in order. The generator rewrites local specs in the live file; do not hand-edit generated paths in `~/.pi/agent/settings.json`. As defense in depth, invoking the current generator from another worktree resolves package paths from the checkout that owns the live stowed `settings.base.json`.
 
 ### Fresh-machine steps `install.sh` does NOT do
 
