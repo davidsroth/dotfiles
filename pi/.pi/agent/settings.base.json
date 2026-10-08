@@ -6,7 +6,6 @@
   },
   "quietStartup": true,
   "packages": [
-    "../../dotfiles/pi/packages/pi-subagents",
     "npm:pi-mcp-adapter@2.26.0",
     {
       "source": "npm:pi-web-access@0.13.0",

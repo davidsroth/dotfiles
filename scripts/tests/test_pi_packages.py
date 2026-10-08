@@ -55,6 +55,12 @@ class PiPackagesTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("2 local packages", result.stdout)
 
+    def test_verify_accepts_zero_local_packages(self):
+        self.configure(package_specs=["npm:pi-mcp-adapter@2.26.0"])
+        result = self.run_runner("verify")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("(0 local packages)", result.stdout)
+
     def test_verify_accepts_object_sources_and_npm_specs(self):
         self.configure(
             "one",

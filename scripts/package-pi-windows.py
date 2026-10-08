@@ -23,7 +23,7 @@ EXTENSIONS = (
 # checkout is located from the live settings' git: source (pi installs git packages
 # under <agent>/git/<host>/<path>), so private repo URLs stay out of this repo.
 EXTERNAL_PACKAGES = (
-    "pi-vim", "pi-aside", "pi-intercom", "pi-qna",
+    "pi-vim", "pi-subagents", "pi-aside", "pi-intercom", "pi-qna",
     "pi-plan-review", "pi-memory", "pi-session-recall",
 )
 DISABLED = ("advisor.ts", "agent-browser.ts", "azure-foundry.ts", "openrouter.ts",

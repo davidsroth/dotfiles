@@ -2,17 +2,17 @@
 
 This directory contains homespun Pi packages and intentionally vendored third-party packages.
 
-Current packages (wired into Pi via `settings.base.json`):
+No local packages are currently wired into Pi. `pi-subagents` (fork of `tintinweb/pi-subagents`),
+`pi-vim`, `pi-aside`, `pi-intercom` (fork of `nicobailon/pi-intercom`), `pi-qna`, `pi-plan-review`,
+`pi-memory`, `pi-session-recall`, `pi-clm`, `pi-codex-compaction` (vendored from
+`ogulcancelik/pi-extensions`), and `pi-goal` (vendored from `code-yeongyu/pi-goal`) live in their
+own git repositories; their sources are listed in the untracked
+`~/.pi/agent/settings.local.json` under `extraPackages`. Their history up to the move remains in
+this repository's log. `pi-intercom-tailnet` (disabled experiment) was removed; its source is in
+history before that change.
 
-- `pi-subagents`
-
-`pi-vim`, `pi-aside`, `pi-intercom`, `pi-qna`, `pi-plan-review`, `pi-memory`,
-`pi-session-recall`, `pi-clm`, `pi-codex-compaction` (vendored from
-`ogulcancelik/pi-extensions`), and `pi-goal` (vendored from `code-yeongyu/pi-goal`) now live in
-their own git repositories; their sources
-are listed in the untracked `~/.pi/agent/settings.local.json` under `extraPackages`.
-Their history up to the move remains in this repository's log. `pi-intercom-tailnet` (disabled
-experiment) was removed; its source is in history before this change.
+A new local package can still be added here and listed in `settings.base.json`; `just pi-check`
+verifies, typechecks, and load-tests any that are configured.
 
 Previously this directory also held `rpiv-mono` (a third-party Pi pipeline
 monorepo, upstream: `juicesharp/rpiv-mono`, plus a personal fork).

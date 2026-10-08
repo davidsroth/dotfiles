@@ -82,7 +82,7 @@ while IFS= read -r -d '' source && IFS= read -r -d '' package; do
   package_sources+=("$source")
   packages+=("$package")
 done < "$package_specs"
-[[ ${#packages[@]} -gt 0 ]] || { echo "No local Pi packages configured" >&2; exit 1; }
+# Zero local packages is valid (all published separately); hand-written extensions are still checked.
 
 has_script() {
   node -e 'const p=require(process.argv[1]); process.exit(p.scripts?.[process.argv[2]] ? 0 : 1)' "$1/package.json" "$2"
@@ -94,7 +94,7 @@ has_runtime_dependencies() {
 
 verify_inventory() {
   local index package source
-  for index in "${!packages[@]}"; do
+  for index in ${packages[@]+"${!packages[@]}"}; do
     package="${packages[$index]}"
     source="${package_sources[$index]}"
     [[ -f "$package/package.json" ]] || {
@@ -113,9 +113,10 @@ verify_inventory() {
 
   local discovered discovered_dir configured=false
   for discovered in "$REPO_ROOT"/pi/packages/*/package.json; do
+    [[ -e "$discovered" ]] || continue
     discovered_dir="$(cd "$(dirname "$discovered")" && pwd -P)"
     configured=false
-    for package in "${packages[@]}"; do
+    for package in ${packages[@]+"${packages[@]}"}; do
       [[ "$discovered_dir" == "$package" ]] && configured=true && break
     done
     [[ "$configured" == true ]] || { echo "Unconfigured Pi package directory: $discovered_dir" >&2; return 1; }
@@ -124,7 +125,7 @@ verify_inventory() {
 
 run_script() {
   local script="$1" index package source
-  for index in "${!packages[@]}"; do
+  for index in ${packages[@]+"${!packages[@]}"}; do
     package="${packages[$index]}"
     source="${package_sources[$index]}"
     if has_script "$package" "$script"; then
@@ -141,7 +142,7 @@ verify_loads() {
   sdk_root="$(npm root -g)/@earendil-works/pi-coding-agent"
   jiti_path="$sdk_root/node_modules/jiti/lib/jiti.mjs"
   [[ -f "$jiti_path" ]] || { echo "Pi's bundled jiti not found: $jiti_path" >&2; return 1; }
-  node --input-type=module - -- "$jiti_path" "${packages[@]}" <<'NODE'
+  node --input-type=module - -- "$jiti_path" ${packages[@]+"${packages[@]}"} <<'NODE'
 import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -163,7 +164,7 @@ NODE
 action="${1:-}"
 case "$action" in
   list)
-    printf '%s\n' "$EXTENSIONS" "${packages[@]}"
+    printf '%s\n' "$EXTENSIONS" ${packages[@]+"${packages[@]}"}
     ;;
   verify)
     verify_inventory
@@ -174,7 +175,7 @@ case "$action" in
     ;;
   install-runtime)
     verify_inventory
-    for package in "${packages[@]}"; do
+    for package in ${packages[@]+"${packages[@]}"}; do
       if has_runtime_dependencies "$package"; then
         echo "==> $(basename "$package"): installing locked runtime dependencies"
         (cd "$package" && npm ci --omit=dev --legacy-peer-deps --ignore-scripts --no-audit --no-fund)
@@ -185,7 +186,7 @@ case "$action" in
     verify_inventory
     echo "==> extensions: installing locked development dependencies"
     (cd "$EXTENSIONS" && npm ci --legacy-peer-deps --ignore-scripts --no-audit --no-fund)
-    for package in "${packages[@]}"; do
+    for package in ${packages[@]+"${packages[@]}"}; do
       echo "==> $(basename "$package"): installing locked development dependencies"
       (cd "$package" && npm ci --legacy-peer-deps --ignore-scripts --no-audit --no-fund)
     done
