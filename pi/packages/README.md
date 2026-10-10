@@ -5,9 +5,9 @@ This directory contains homespun Pi packages and intentionally vendored third-pa
 No local packages are currently wired into Pi. `pi-subagents` (fork of `tintinweb/pi-subagents`),
 `pi-vim`, `pi-aside`, `pi-intercom` (fork of `nicobailon/pi-intercom`), `pi-qna`, `pi-plan-review`,
 `pi-memory`, `pi-session-recall`, `pi-clm`, `pi-codex-compaction` (vendored from
-`ogulcancelik/pi-extensions`), and `pi-goal` (vendored from `code-yeongyu/pi-goal`) live in their
-own git repositories; their sources are listed in the untracked
-`~/.pi/agent/settings.local.json` under `extraPackages`. Their history up to the move remains in
+`ogulcancelik/pi-extensions`), and `pi-goal` (vendored from `code-yeongyu/pi-goal`) live together
+in one separate git repository, installed as a single Pi package; its source is listed in the
+untracked `~/.pi/agent/settings.local.json` under `extraPackages`. Their history up to the move remains in
 this repository's log. `pi-intercom-tailnet` (disabled experiment) was removed; its source is in
 history before that change.
 
