@@ -120,6 +120,12 @@ focus-screen-cw:
   mod: mod1
   key: n
 
+# Focus the third screen. Moved off the mod1 (Option+R) default so pi's
+# Option+R markup shortcut reaches the terminal.
+focus-screen-3:
+  mod: mod3
+  key: r
+
 # Move the currently focused window onto the next screen in the list going counter-clockwise.
 swap-screen-ccw:
   mod: mod2
