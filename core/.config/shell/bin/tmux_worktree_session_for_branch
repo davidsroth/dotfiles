@@ -15,18 +15,30 @@ if ! git rev-parse --git-dir >/dev/null 2>&1; then
   exit 1
 fi
 
-# Repo info
-git_root="$(git rev-parse --show-toplevel)"
-repo_name="$(basename "$git_root")"
-parent_dir="$(dirname "$git_root")"
-worktree_dir="$parent_dir/${repo_name}-${branch//\//-}"
+source "$HOME/.config/shell/worktree-paths.sh" || exit 1
+git check-ref-format --branch "$branch" >/dev/null || exit 1
+worktree_repo_info || exit 1
+repo_name="${reply[2]}"
+leaf="${branch//\//-}"
+worktree_validate_leaf "$leaf" || exit 1
 
-# Try to create the worktree (branch already exists)
-if ! wt_out=$(git worktree add "$worktree_dir" "$branch" 2>&1); then
-  if printf "%s" "$wt_out" | grep -qiE "already exists|worktree .* is already registered|Another worktree is already|file exists"; then
-    : # proceed if it already exists
-  else
-    printf "Error: Failed to create worktree\n%s\n" "$wt_out" >&2
+# Reuse registered legacy paths as well as the organized layout. Never infer
+# success from an 'already exists' error and then open an unrelated directory.
+if worktree_dir="$(worktree_for_branch "$branch")"; then
+  expected_common="$(git rev-parse --path-format=absolute --git-common-dir)"
+  registered_root="$(git -C "$worktree_dir" rev-parse --show-toplevel 2>/dev/null)"
+  registered_common="$(git -C "$worktree_dir" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)"
+  registered_branch="$(git -C "$worktree_dir" symbolic-ref --quiet HEAD 2>/dev/null)"
+  if [[ "$registered_root" != "$worktree_dir" || "$registered_common" != "$expected_common" || "$registered_branch" != "refs/heads/$branch" ]]; then
+    printf 'Error: Registered worktree is missing or invalid: %s\n' "$worktree_dir" >&2
+    exit 1
+  fi
+else
+  worktree_dir="${reply[3]}/$repo_name/$leaf"
+  worktree_refuse_collision "$worktree_dir" || exit 1
+  mkdir -p "${worktree_dir:h}" || exit 1
+  if ! wt_out=$(git worktree add "$worktree_dir" "$branch" 2>&1); then
+    printf 'Error: Failed to create worktree\n%s\n' "$wt_out" >&2
     exit 1
   fi
 fi

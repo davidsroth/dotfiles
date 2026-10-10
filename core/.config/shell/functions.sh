@@ -551,11 +551,15 @@ tmux_worktree_session() {
     # Generate branch name based on current date and time
     local branch="work/$(date +%Y%m%d-%H%M%S)"
 
-    # Get the current repository root and name
-    local git_root="$(git rev-parse --show-toplevel)"
-    local repo_name="$(basename "$git_root")"
-    local parent_dir="$(dirname "$git_root")"
-    local worktree_dir="$parent_dir/${repo_name}-${branch//\//-}"
+    source "$HOME/.config/shell/worktree-paths.sh" || return
+    local -a reply
+    worktree_repo_info || return
+    local repo_name="${reply[2]}"
+    local leaf="${branch//\//-}"
+    worktree_validate_leaf "$leaf" || return
+    local worktree_dir="${reply[3]}/$repo_name/$leaf"
+    worktree_refuse_collision "$worktree_dir" || return
+    mkdir -p "${worktree_dir:h}" || return
 
     # Try to create the worktree and capture any error output
     local wt_out
@@ -617,21 +621,15 @@ tmux_rename_worktree() {
         return 1
     fi
     
-    # Get current worktree info
-    local current_dir="$(pwd)"
+    source "$HOME/.config/shell/worktree-paths.sh" || return
+    worktree_validate_leaf "$new_name" || return
+    local -a reply
+    worktree_repo_info || return
     local git_root="$(git rev-parse --show-toplevel)"
-    
-    # Get main worktree path (first entry in worktree list)
-    local main_worktree="$(git worktree list --porcelain | grep '^worktree' | head -1 | cut -d' ' -f2)"
-    
-    # Get repo name from main worktree
-    local repo_name="$(basename "$main_worktree")"
-    
-    # Validate repo name
-    if [[ -z "$repo_name" ]]; then
-        echo "Error: Could not determine repository name"
-        return 1
-    fi
+    local main_worktree="${reply[1]}"
+    local repo_name="${reply[2]}"
+    local rel_path="$(git rev-parse --show-prefix)"
+    rel_path="${rel_path%/}"
     
     # Check if we're in the main worktree
     if [[ "$git_root" == "$main_worktree" ]]; then
@@ -639,16 +637,11 @@ tmux_rename_worktree() {
         return 1
     fi
     
-    # Generate new worktree path
-    local parent_dir="$(dirname "$git_root")"
-    local new_worktree_dir="$parent_dir/${repo_name}-${new_name}"
-    
-    # Check if target directory already exists
-    if [[ -d "$new_worktree_dir" ]]; then
-        echo "Error: Directory $new_worktree_dir already exists"
-        return 1
-    fi
-    
+    # Keep renames in the canonical repository's organized bucket.
+    local new_worktree_dir="${reply[3]}/$repo_name/$new_name"
+    worktree_refuse_collision "$new_worktree_dir" || return
+    mkdir -p "${new_worktree_dir:h}" || return
+
     # Move the worktree
     if ! git worktree move "$git_root" "$new_worktree_dir" 2>/dev/null; then
         echo "Error: Failed to move worktree"
@@ -665,8 +658,8 @@ tmux_rename_worktree() {
         tmux rename-session -t "$current_session" "$new_session_name" 2>/dev/null
     fi
     
-    # Change to new directory
-    cd "$new_worktree_dir"
+    # Preserve the caller's matching project subdirectory.
+    cd "$new_worktree_dir${rel_path:+/$rel_path}"
 }
 
 # Clean up the current git worktree and tmux session.

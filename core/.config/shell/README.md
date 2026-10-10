@@ -6,6 +6,7 @@ Modular shell config (XDG Base Directory). Sourced from `.zshrc`.
 
 - `aliases.sh` — command aliases
 - `functions.sh` — shell functions
+- `worktree-paths.sh` — shared zsh worktree layout and registration helpers
 - `bin/` — user scripts on $PATH (incl. `claude-status-hook`, a Claude Code
   hook that writes `~/.cache/claude-status/` heartbeats for the tmux
   session picker; wired up in `~/.claude/settings.json`)
@@ -17,6 +18,25 @@ Core command replacements (`ls → eza`, `cat → bat`, `vim → nvim`), git sho
 
 ### Functions
 Date/time, temp-file management, logging, file ops, dev utilities, navigation, git, system info, cleanup.
+
+## Git worktrees
+
+Persistent worktrees created by tmux's `Prefix W` and Lazygit's branch `W` use
+`<main-checkout-parent>/worktrees/<canonical-repo>/<task>`. Branch slashes become
+hyphens. Creation from a linked checkout uses the same canonical repository
+bucket, not that checkout's basename. An absolute `GIT_WORKTREE_ROOT` overrides
+the root directory. Conventional `repo/main` checkouts use `repo` as their label.
+
+The existing-branch helper opens its actual registered worktree, including old
+sibling paths. `Prefix R` moves a linked checkout into the organized bucket and
+preserves the current subdirectory. Session names remain repository-qualified.
+Destinations are never overwritten; task names must start with a letter/digit
+and contain only letters, digits, dots, underscores or hyphens.
+
+Relocation is not cleanup. Before moving or removing an existing worktree, check
+active users/processes, ignored files, environment paths, shared symlinks,
+submodules and container mounts. Clean Git status alone is insufficient. Agent
+isolation worktrees in temporary directories are independent of this layout.
 
 ## Daily Logging Workflow
 
