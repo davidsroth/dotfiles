@@ -117,8 +117,9 @@ alias j='z' # zoxide jump
 
 # Claude Code
 alias claudec='claude --continue'
-# pi shortcut
+# pi shortcuts
 alias p='pi'
+alias plm='pi --clm'
 # OpenCode shortcut
 alias oc='opencode'
 # Gemini CLI
