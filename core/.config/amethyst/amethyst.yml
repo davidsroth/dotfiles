@@ -120,11 +120,29 @@ focus-screen-cw:
   mod: mod1
   key: n
 
-# Focus the third screen. Moved off the mod1 (Option+R) default so pi's
-# Option+R markup shortcut reaches the terminal.
+# Focus screen N. Amethyst's defaults (mod1 + w/e/r/q/g) put these on plain
+# Option, swallowing Alt chords before terminal apps (e.g. pi's Option+R
+# markup shortcut) see them. Commenting an entry out does not disable it --
+# Amethyst falls back to the default -- so rebind to mod3 + number instead.
+focus-screen-1:
+  mod: mod3
+  key: "1"
+
+focus-screen-2:
+  mod: mod3
+  key: "2"
+
 focus-screen-3:
   mod: mod3
-  key: r
+  key: "3"
+
+focus-screen-4:
+  mod: mod3
+  key: "4"
+
+focus-screen-5:
+  mod: mod3
+  key: "5"
 
 # Move the currently focused window onto the next screen in the list going counter-clockwise.
 swap-screen-ccw:
