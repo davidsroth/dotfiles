@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { buildNotificationCopy, shouldSendDesktopNotification } from "../pi-notification";
+import {
+  buildNotificationCopy,
+  isBackgroundAgentNudgeRun,
+  isInteractiveSession,
+  shouldSendDesktopNotification,
+} from "../pi-notification";
 
 const values = {
   project: "secret-project",
@@ -8,6 +13,37 @@ const values = {
   duration: "12s",
   assistantText: "Sensitive response details",
 };
+
+describe("pi notification background agents", () => {
+  it("notifies only from the interactive TUI", () => {
+    expect(isInteractiveSession({ mode: "tui", hasUI: true })).toBe(true);
+    expect(isInteractiveSession({ mode: "print", hasUI: false })).toBe(false); // in-process subagent
+    expect(isInteractiveSession({ mode: "rpc", hasUI: true })).toBe(false); // agent-host plate/librarian
+    expect(isInteractiveSession({ mode: "json", hasUI: false })).toBe(false);
+    // Older runtimes without ctx.mode fall back to hasUI.
+    expect(isInteractiveSession({ hasUI: false })).toBe(false);
+    expect(isInteractiveSession({ hasUI: true })).toBe(true);
+    expect(isInteractiveSession(undefined)).toBe(true);
+  });
+
+  const nudge = { role: "custom", customType: "subagent-notification", content: "done" };
+  const assistant = { role: "assistant", content: [{ type: "text", text: "ok" }] };
+  const toolResult = { role: "toolResult", content: [] };
+  const user = { role: "user", content: "hi" };
+
+  it("detects parent runs started only by completion follow-ups", () => {
+    expect(isBackgroundAgentNudgeRun([nudge, assistant])).toBe(true);
+    expect(isBackgroundAgentNudgeRun([nudge, nudge, assistant, toolResult, assistant])).toBe(true);
+  });
+
+  it("still notifies for user prompts and other triggers", () => {
+    expect(isBackgroundAgentNudgeRun([user, assistant])).toBe(false);
+    expect(isBackgroundAgentNudgeRun([user, assistant, nudge, assistant])).toBe(false);
+    expect(isBackgroundAgentNudgeRun([{ role: "custom", customType: "intercom_message" }, assistant])).toBe(false);
+    expect(isBackgroundAgentNudgeRun([assistant])).toBe(false);
+    expect(isBackgroundAgentNudgeRun(undefined)).toBe(false);
+  });
+});
 
 describe("pi notification privacy", () => {
   it("defers completion notifications to Herdr inside a Herdr pane", () => {

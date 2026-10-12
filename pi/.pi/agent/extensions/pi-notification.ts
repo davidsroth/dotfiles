@@ -5,6 +5,9 @@
  *
  * Selected events: agent_end (pi finished a turn, waiting for input)
  *
+ * Skipped: non-TUI sessions (in-process subagents, RPC-hosted agents) and parent
+ * runs triggered only by background-agent completion follow-ups.
+ *
  * Privacy-preserving default banner: title "Pi", response duration, and
  * "Ready for input". Set PI_NOTIFICATION_INCLUDE_CONTEXT=1 to include project,
  * branch/session, and tmux location; set PI_NOTIFICATION_INCLUDE_PREVIEW=1 to
@@ -119,6 +122,36 @@ function percentEncode(s: string): string {
 
 const envEnabled = (value: string | undefined): boolean => value === "1" || value === "true";
 
+/**
+ * Only the user's interactive TUI should notify. In-process subagents
+ * (pi-subagents, aside) run in "print" mode; daemon-hosted agents such as
+ * agent-host's plate/librarian run in "rpc" mode, which still reports
+ * hasUI=true, so mode is the reliable gate (same as herdr-agent-state).
+ */
+export function isInteractiveSession(ctx: { mode?: string; hasUI?: boolean } | undefined): boolean {
+  if (typeof ctx?.mode === "string") return ctx.mode === "tui";
+  return ctx?.hasUI !== false;
+}
+
+/**
+ * True when a run was started only by pi-subagents completion follow-ups
+ * (customType "subagent-notification") with no user prompt. Those turns are the
+ * parent absorbing a finished background agent, not the user's work finishing.
+ */
+export function isBackgroundAgentNudgeRun(messages: unknown): boolean {
+  if (!Array.isArray(messages)) return false;
+  let sawNudge = false;
+  for (const m of messages as any[]) {
+    if (!m || m.role === "assistant" || m.role === "toolResult") continue;
+    if (m.role === "custom" && m.customType === "subagent-notification") {
+      sawNudge = true;
+      continue;
+    }
+    return false;
+  }
+  return sawNudge;
+}
+
 /** Herdr owns completion notifications for agents running in one of its panes. */
 export function shouldSendDesktopNotification(env: NodeJS.ProcessEnv = process.env): boolean {
   return env.HERDR_ENV !== "1";
@@ -193,7 +226,11 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.on("agent_end", async (event, ctx) => {
-    if (!shouldSendDesktopNotification()) {
+    if (
+      !shouldSendDesktopNotification() ||
+      !isInteractiveSession(ctx as any) ||
+      isBackgroundAgentNudgeRun((event as any)?.messages)
+    ) {
       turnStartedAt = 0;
       return;
     }
