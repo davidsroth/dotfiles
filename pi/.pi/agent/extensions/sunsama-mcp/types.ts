@@ -18,6 +18,12 @@ export interface SunsamaMCPConfig {
   requestTimeoutMsByTool?: Record<string, number>;
   /** Upstream tool names (without toolPrefix) to skip when registering with pi. */
   disabledTools?: string[];
+  /**
+   * Upstream tool names declared to the model as their own pi tools. Every other enabled
+   * tool stays callable through tasks_mcp_call (listed in its description). ["*"] declares all.
+   * Default: DEFAULT_DIRECT_TOOLS.
+   */
+  directTools?: string[];
   /** Claude Code MCP server to import Authorization from when no pi config/env is set. Default "tasks". */
   claudeMcpServerName?: string;
 }
@@ -31,6 +37,8 @@ export interface ResolvedConfig {
   requestTimeoutMs: number;
   requestTimeoutMsByTool: Record<string, number>;
   disabledTools: Set<string>;
+  /** "all" = every enabled tool is declared directly. */
+  directTools: Set<string> | "all";
   authSource: "env" | "pi-config" | "claude-code" | "missing";
 }
 

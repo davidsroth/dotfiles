@@ -21,6 +21,41 @@ export interface StatusDiagnostics {
   activeToolNames?: string[];
 }
 
+export function isDirectTool(cfg: ResolvedConfig, name: string): boolean {
+  return cfg.directTools === "all" || cfg.directTools.has(name);
+}
+
+/**
+ * Drop per-provider `integration` link schemas (a `oneOf` over 14 services, ~8k tokens on
+ * create_task alone) from a directly declared tool. `integrationUrl` remains and Sunsama
+ * resolves links from it; the full schema stays available via tasks_mcp_call describe.
+ */
+export function slimSchema(schema: unknown): unknown {
+  if (Array.isArray(schema)) return schema.map(slimSchema);
+  if (!schema || typeof schema !== "object") return schema;
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(schema as Record<string, unknown>)) {
+    if (key === "properties" && value && typeof value === "object") {
+      const props: Record<string, unknown> = {};
+      for (const [name, prop] of Object.entries(value as Record<string, unknown>)) {
+        if (name === "integration" && prop && typeof prop === "object" && "oneOf" in (prop as object)) continue;
+        props[name] = slimSchema(prop);
+      }
+      out[key] = props;
+    } else out[key] = slimSchema(value);
+  }
+  if (Array.isArray(out.required)) out.required = (out.required as string[]).filter((name) => !out.properties || name in (out.properties as object));
+  return out;
+}
+
+/** One line per tool, for tasks_mcp_call's description. */
+export function toolCatalog(tools: MCPTool[], prefix: string): string {
+  return tools.map((tool) => {
+    const first = (tool.description ?? "").split(/(?<=\.)\s/)[0].replace(/\s+/g, " ").trim();
+    return `${prefix}${tool.name}: ${first.length > 110 ? `${first.slice(0, 107)}...` : first}`;
+  }).join("\n");
+}
+
 export function enabledTools(client: HttpMCPClient | null, cfg: ResolvedConfig): MCPTool[] {
   return (client?.getTools() ?? []).filter((tool) => !cfg.disabledTools.has(tool.name));
 }

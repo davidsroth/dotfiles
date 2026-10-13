@@ -24,7 +24,7 @@ import { Type } from "typebox";
 import { CONFIG_FILE } from "./constants";
 import { hasAuth, loadConfig, resolveConfig } from "./config";
 import { HttpMCPClient } from "./http-client";
-import { enabledTools, statusText, toolError, toolResult, type StatusDiagnostics } from "./tool-helpers";
+import { enabledTools, isDirectTool, slimSchema, statusText, toolCatalog, toolError, toolResult, type StatusDiagnostics } from "./tool-helpers";
 import type { NotifyFn, NotifyLevel, ResolvedConfig } from "./types";
 
 export default async function sunsamaMCPExtension(pi: ExtensionAPI): Promise<void> {
@@ -71,13 +71,14 @@ export default async function sunsamaMCPExtension(pi: ExtensionAPI): Promise<voi
     for (const tool of client.getTools()) {
       if (cfg.disabledTools.has(tool.name)) continue;
       enabledCount++;
+      if (!isDirectTool(cfg, tool.name)) continue; // callable via tasks_mcp_call
       const piName = `${cfg.toolPrefix}${tool.name}`;
       if (known.has(piName) || registeredToolNames.has(piName)) continue;
       pi.registerTool({
         name: piName,
         label: `Sunsama: ${tool.name.replace(/_/g, " ")}`,
         description: tool.description ? `[Sunsama MCP] ${tool.description}` : `[Sunsama MCP] Tool: ${tool.name}`,
-        parameters: Type.Unsafe(tool.inputSchema),
+        parameters: Type.Unsafe(slimSchema(tool.inputSchema) as Record<string, unknown>),
         async execute(_toolCallId, params, signal) {
           if (!client?.isConnected) return toolError(piName, "Not connected to Sunsama MCP. Run /tasks to connect.");
           try {
@@ -166,53 +167,6 @@ export default async function sunsamaMCPExtension(pi: ExtensionAPI): Promise<voi
     },
   });
 
-  pi.registerTool({
-    name: "tasks_mcp_call",
-    label: "Sunsama MCP Call",
-    description: "Call an upstream Sunsama MCP tool by name. Useful when dynamic tasks_* tools were just registered but are not exposed in the current tool schema yet.",
-    parameters: Type.Object({
-      tool: Type.String({ description: "Upstream Sunsama MCP tool name, with or without the configured prefix (for example: create_task or tasks_create_task). You may append inline JSON args after the name, e.g. 'search_tasks {\"searchTerm\":\"demo\"}'." }),
-      args: Type.Optional(Type.Record(Type.String(), Type.Any(), { description: "JSON arguments to pass to the upstream Sunsama MCP tool." })),
-    }),
-    async execute(_toolCallId, params, signal) {
-      const p = params as { tool?: unknown; args?: unknown; arguments?: unknown };
-      let rawTool = String(p.tool ?? "").trim();
-      if (!rawTool) return toolError("tasks_mcp_call", "Missing required 'tool' parameter.");
-      let rawArgs = p.args ?? p.arguments ?? {};
-      const inlineJson = rawTool.match(/^(\S+)\s+({[\s\S]*})$/);
-      if (inlineJson && (rawArgs === undefined || (typeof rawArgs === "object" && rawArgs !== null && Object.keys(rawArgs as Record<string, unknown>).length === 0))) {
-        rawTool = inlineJson[1];
-        try { rawArgs = JSON.parse(inlineJson[2]) as Record<string, unknown>; }
-        catch (error) { return toolError("tasks_mcp_call", `Invalid inline JSON args after tool name: ${(error as Error).message}`); }
-      }
-      if (typeof rawArgs === "string") {
-        try { rawArgs = rawArgs.trim() ? JSON.parse(rawArgs) : {}; }
-        catch (error) { return toolError("tasks_mcp_call", `Invalid JSON in args string: ${(error as Error).message}`); }
-      }
-      if (typeof rawArgs !== "object" || rawArgs === null || Array.isArray(rawArgs)) return toolError("tasks_mcp_call", "args must be a JSON object.");
-
-      const connected = client?.isConnected ? { ok: true as const, tools: 0 } : await doConnect(notify);
-      if (!connected.ok) return toolError("tasks_mcp_call", connected.error);
-      if (!client?.isConnected) return toolError("tasks_mcp_call", "Not connected to Sunsama MCP.");
-
-      const upstreamTool = rawTool.startsWith(cfg.toolPrefix) ? rawTool.slice(cfg.toolPrefix.length) : rawTool;
-      if (cfg.disabledTools.has(upstreamTool)) return toolError("tasks_mcp_call", `Sunsama tool '${cfg.toolPrefix}${upstreamTool}' is disabled by ${CONFIG_FILE}.`, { upstreamTool });
-      if (!client.getTools().some((tool) => tool.name === upstreamTool)) {
-        const available = enabledTools(client, cfg).map((tool) => `${cfg.toolPrefix}${tool.name}`);
-        return toolError("tasks_mcp_call", `Unknown Sunsama MCP tool '${rawTool}'. Enabled tools: ${available.join(", ") || "(none)"}`, { upstreamTool, available });
-      }
-
-      try {
-        const args = rawArgs as Record<string, unknown>;
-        const result = await client.callTool(upstreamTool, args, signal);
-        const details = { upstreamTool, calledAs: rawTool, args, raw: result.raw };
-        return result.isError ? toolError("tasks_mcp_call", result.text || `Sunsama tool ${upstreamTool} returned an error.`, details) : toolResult("tasks_mcp_call", result.text || "", details);
-      } catch (error) {
-        const msg = error instanceof Error ? error.message : String(error);
-        return toolError("tasks_mcp_call", `Error calling ${upstreamTool}: ${msg}`, { upstreamTool, error: msg });
-      }
-    },
-  });
 
   pi.registerTool({
     name: "tasks_mcp_status",
@@ -241,4 +195,66 @@ export default async function sunsamaMCPExtension(pi: ExtensionAPI): Promise<voi
     const result = await doConnect(notify);
     if (!result.ok) console.warn(`[sunsama-mcp] autoConnect failed: ${result.error}`);
   }
+
+  /** Lists the enabled tools that are not declared directly, so the model knows what it can call. */
+  function callDescription(): string {
+    const deferred = enabledTools(client, cfg).filter((tool) => !isDirectTool(cfg, tool.name));
+    const head = "Call any Sunsama MCP tool by name, including the ones not declared as their own tools. Pass describe=true to get a tool's full input schema first.";
+    if (!deferred.length) return `${head} (Connect first, or the catalog is not known yet; an unknown name returns the list of enabled tools.)`;
+    return `${head} Tools available only through this call:\n${toolCatalog(deferred, cfg.toolPrefix)}`;
+  }
+
+  // Registered after autoConnect so its description carries the current catalog.
+  pi.registerTool({
+    name: "tasks_mcp_call",
+    label: "Sunsama MCP Call",
+    description: callDescription(),
+    parameters: Type.Object({
+      tool: Type.String({ description: "Upstream Sunsama MCP tool name, with or without the configured prefix (for example: create_task or tasks_create_task). You may append inline JSON args after the name, e.g. 'search_tasks {\"searchTerm\":\"demo\"}'." }),
+      args: Type.Optional(Type.Record(Type.String(), Type.Any(), { description: "JSON arguments to pass to the upstream Sunsama MCP tool." })),
+      describe: Type.Optional(Type.Boolean({ description: "Return the tool's description and full input schema instead of calling it." })),
+    }),
+    async execute(_toolCallId, params, signal) {
+      const p = params as { tool?: unknown; args?: unknown; arguments?: unknown; describe?: unknown };
+      let rawTool = String(p.tool ?? "").trim();
+      if (!rawTool) return toolError("tasks_mcp_call", "Missing required 'tool' parameter.");
+      let rawArgs = p.args ?? p.arguments ?? {};
+      const inlineJson = rawTool.match(/^(\S+)\s+({[\s\S]*})$/);
+      if (inlineJson && (rawArgs === undefined || (typeof rawArgs === "object" && rawArgs !== null && Object.keys(rawArgs as Record<string, unknown>).length === 0))) {
+        rawTool = inlineJson[1];
+        try { rawArgs = JSON.parse(inlineJson[2]) as Record<string, unknown>; }
+        catch (error) { return toolError("tasks_mcp_call", `Invalid inline JSON args after tool name: ${(error as Error).message}`); }
+      }
+      if (typeof rawArgs === "string") {
+        try { rawArgs = rawArgs.trim() ? JSON.parse(rawArgs) : {}; }
+        catch (error) { return toolError("tasks_mcp_call", `Invalid JSON in args string: ${(error as Error).message}`); }
+      }
+      if (typeof rawArgs !== "object" || rawArgs === null || Array.isArray(rawArgs)) return toolError("tasks_mcp_call", "args must be a JSON object.");
+
+      const connected = client?.isConnected ? { ok: true as const, tools: 0 } : await doConnect(notify);
+      if (!connected.ok) return toolError("tasks_mcp_call", connected.error);
+      if (!client?.isConnected) return toolError("tasks_mcp_call", "Not connected to Sunsama MCP.");
+
+      const upstreamTool = rawTool.startsWith(cfg.toolPrefix) ? rawTool.slice(cfg.toolPrefix.length) : rawTool;
+      if (cfg.disabledTools.has(upstreamTool)) return toolError("tasks_mcp_call", `Sunsama tool '${cfg.toolPrefix}${upstreamTool}' is disabled by ${CONFIG_FILE}.`, { upstreamTool });
+      if (!client.getTools().some((tool) => tool.name === upstreamTool)) {
+        const available = enabledTools(client, cfg).map((tool) => `${cfg.toolPrefix}${tool.name}`);
+        return toolError("tasks_mcp_call", `Unknown Sunsama MCP tool '${rawTool}'. Enabled tools: ${available.join(", ") || "(none)"}`, { upstreamTool, available });
+      }
+
+      if (p.describe === true) {
+        const tool = client.getTools().find((candidate) => candidate.name === upstreamTool)!;
+        return toolResult("tasks_mcp_call", JSON.stringify({ name: `${cfg.toolPrefix}${tool.name}`, description: tool.description, inputSchema: tool.inputSchema }), { upstreamTool, describe: true });
+      }
+      try {
+        const args = rawArgs as Record<string, unknown>;
+        const result = await client.callTool(upstreamTool, args, signal);
+        const details = { upstreamTool, calledAs: rawTool, args, raw: result.raw };
+        return result.isError ? toolError("tasks_mcp_call", result.text || `Sunsama tool ${upstreamTool} returned an error.`, details) : toolResult("tasks_mcp_call", result.text || "", details);
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        return toolError("tasks_mcp_call", `Error calling ${upstreamTool}: ${msg}`, { upstreamTool, error: msg });
+      }
+    },
+  });
 }

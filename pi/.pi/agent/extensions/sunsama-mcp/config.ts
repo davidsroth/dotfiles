@@ -10,8 +10,7 @@ import {
   DEFAULT_REQUEST_TIMEOUT_MS,
   DEFAULT_STARTUP_TIMEOUT_MS,
   DEFAULT_TOOL_PREFIX,
-  DEFAULT_URL,
-} from "./constants";
+  DEFAULT_URL, DEFAULT_DIRECT_TOOLS } from "./constants";
 import type { ResolvedConfig, SunsamaMCPConfig } from "./types";
 
 function readJson(path: string): unknown {
@@ -82,6 +81,7 @@ export function resolveConfig(raw: SunsamaMCPConfig | undefined): ResolvedConfig
     requestTimeoutMs: cfg.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS,
     requestTimeoutMsByTool: cfg.requestTimeoutMsByTool ?? {},
     disabledTools: new Set(cfg.disabledTools ?? []),
+    directTools: (cfg.directTools ?? DEFAULT_DIRECT_TOOLS).includes("*") ? "all" : new Set(cfg.directTools ?? DEFAULT_DIRECT_TOOLS),
     authSource: auth.source,
   };
 }
