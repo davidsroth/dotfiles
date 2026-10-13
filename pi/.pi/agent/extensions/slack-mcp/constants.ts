@@ -44,6 +44,11 @@ export const TOOL_DESCRIPTION_NOTES: Record<string, string> = {
     "answers often don't @-mention the asker, and in DMs/mpDMs replies are usually " +
     "top-level (un-threaded) messages. Prefer slack_open_message for a permalink or " +
     "conversations_history for manual follow-up.",
+  conversations_add_message:
+    "Posts AS THE USER and is visible to others immediately. Never call this " +
+    "without explicit same-turn user authorization AND an APPROVED submit_draft " +
+    "review of the exact payload. Post the approved text verbatim; resolve the " +
+    "target channel/thread first and confirm it matches what the user approved.",
   conversations_replies:
     "DM/mpDM caveat: ordinary replies are usually top-level, not threaded, so this " +
     "tool often returns only the referenced message. Prefer slack_open_message or " +
