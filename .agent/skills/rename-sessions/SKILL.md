@@ -42,7 +42,8 @@ restart) to pick up `session-remote`. Don't fall back to editing session files.
      file, e.g. `tail -c 20000 <file>`, and focus on recent user messages.
    - Don't read whole large transcripts.
    - Don't use intercom `ask`/`aside` just to learn a name, since that spends
-     the other session's model. Only do it if the user wants it.
+     the other session's model. If the user wants the sessions asked, use the
+     `rename-sessions-by-aside` skill.
 4. **Name.** 2–5 words in sentence case that describe the current task, not
    the tools. Add the repo or project when it disambiguates, e.g.
    `Phoenix release prep`, `Dotfiles session-rename skill`,
