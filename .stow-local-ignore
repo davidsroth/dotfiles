@@ -49,7 +49,7 @@ Brewfile.lock.json
 ^/\.config/(gcloud|gws|sunsama|op|raycast|aetna-claims|tuxedo)$
 # Herdr mixes tracked config/plugins with logs, sockets, and session state.
 # Allow only the canonical config, helper scripts, and tracked local plugins.
-^/\.config/herdr/(?!config\.toml$|bin$|bin/(workspace-picker|pane-join|pane-break|herdr-safe-stop)\.sh$|plugins$|plugins/(agent-indexes|non-idle-agent|session-guard)$|plugins/agent-indexes/(herdr-plugin\.toml|refresh\.py)$|plugins/non-idle-agent/(herdr-plugin\.toml|switch\.py)$|plugins/session-guard/(herdr-plugin\.toml|session_guard\.py)$).*
+^/\.config/herdr/(?!config\.toml$|bin$|bin/(workspace-picker|pane-join|pane-break|herdr-safe-stop|pi-tab)\.sh$|plugins$|plugins/(agent-indexes|non-idle-agent|session-guard)$|plugins/agent-indexes/(herdr-plugin\.toml|refresh\.py)$|plugins/non-idle-agent/(herdr-plugin\.toml|switch\.py)$|plugins/session-guard/(herdr-plugin\.toml|session_guard\.py)$).*
 ^/\.config/gh/(config|hosts)\.yml$
 ^/\.config/gh-dash/(config|config\.local)\.yml$
 ^/\.config/espanso/(config|match)/local\.yml$

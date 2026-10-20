@@ -33,12 +33,12 @@ previous_workspace = ["prefix+(", "cmd+shift+[", "alt+{"]
 next_workspace = ["prefix+)", "cmd+shift+]", "alt+}"]
 
 # Cycle the sidebar's agent rows without opening the picker, or jump directly
-# to agents 1-9 with Alt+number. The alt+[ / alt+] bindings only work because
-# WezTerm sends them as CSI u (ESC [ 91;3u / ESC [ 93;3u) when herdr is
-# focused. Herdr 0.9.3+ also disambiguates legacy ESC [ / ESC ] by timing,
+# to agents 1-9 with Alt+number. prefix+p opens a new pi tab instead (below).
+# The alt+[ / alt+] bindings only work because WezTerm sends them as CSI u
+# (ESC [ 91;3u / ESC [ 93;3u) when herdr is focused. Herdr 0.9.3+ also disambiguates legacy ESC [ / ESC ] by timing,
 # but CSI u stays unambiguous when keys arrive in quick succession.
-previous_agent = ["prefix+p", "alt+["]
-next_agent = ["prefix+n", "alt+]"]
+previous_agent = "alt+["
+next_agent = "alt+]"
 focus_agent = "alt+1..9"
 
 # Windows map to Herdr tabs. tmux's M-[ / M-] are taken by agent cycling
@@ -132,6 +132,13 @@ type = "popup"
 command = "$HOME/.config/herdr/bin/workspace-picker.sh"
 width = "60%"
 height = "50%"
+
+# prefix+p: new tab running pi, in the focused pane's directory.
+[[keys.command]]
+key = "prefix+p"
+type = "shell"
+command = "$HOME/.config/herdr/bin/pi-tab.sh"
+description = "new pi tab"
 
 # tmux prefix+g: lazygit popup (type = "pane" is a temporary zoomed pane).
 [[keys.command]]
