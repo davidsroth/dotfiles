@@ -11,7 +11,7 @@ import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
-const fixture = path.join(repo, "core/.config/herdr/patches/herdr-agent-state-v8.ts");
+const fixture = path.join(repo, "core/.config/herdr/patches/herdr-agent-state-v9.ts");
 const patcher = path.join(repo, "core/.config/herdr/bin/apply-herdr-pi-state-patch.py");
 const registryKey = Symbol.for("pi-subagents:activity-registry");
 

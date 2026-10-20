@@ -32,7 +32,7 @@ herdr-setup:
   bash "$repo/scripts/require-herdr-version.sh"
   "$herdr_bin" plugin link "$root/non-idle-agent" --enabled >/dev/null
   "$herdr_bin" plugin link "$root/session-guard" --enabled >/dev/null
-  # Do not modify the managed integration unless its exact v8 fixture passes.
+  # Do not modify the managed integration unless its exact v9 fixture passes.
   python3 "$herdr_root/tests/test_herdr_pi_state_patcher.py"
   python3 "$herdr_root/tests/test_non_idle_agent.py"
   python3 "$herdr_root/bin/apply-herdr-pi-state-patch.py"

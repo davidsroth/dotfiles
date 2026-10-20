@@ -1,9 +1,10 @@
 # Herdr Pi integration patch
 
-`herdr-pi-state-v8.patch` is a reviewed patch for Herdr's managed Pi integration
-version 8. `herdr-agent-state-v8.ts` is the exact unpatched upstream/installed
-fixture used to derive and test it (SHA-256
-`9b1c41cd72520fc2abe5f2a2aec995c12a926cce844df472c7fd5fcae4f4dbfa`).
+`herdr-pi-state-v9.patch` is a reviewed patch for Herdr's managed Pi integration
+version 9 (Herdr 0.9.x). `herdr-agent-state-v9.ts` is the exact unpatched
+upstream fixture used to derive and test it (SHA-256
+`2c5272d732b475bbf91a027203b1f98d25fe43d2c1402530a442b288aeaca1e4`, from the
+`v0.9.5` tag).
 
 Apply it only with `../bin/apply-herdr-pi-state-patch.py` (normally through
 `just herdr-setup`). Running `herdr integration install pi` manually overwrites
@@ -14,9 +15,9 @@ the required remediation for a stock, mismatched, or absent integration.
 
 The patcher checks the managed header and the complete source fingerprint
 before creating a timestamped local backup and replacing anything. It also
-recognizes prior reviewed patched fingerprints for a one-time migration: it backs
-up that exact file, then builds the replacement
-from this unpatched fixture and the current reviewed patch. `--check` reports
+recognizes prior reviewed patched fingerprints (the v8 outputs in
+`../tests/fixtures/`) for a one-time migration: it backs up that exact file, then
+builds the replacement from this unpatched fixture and the current reviewed patch. `--check` reports
 that migration as required and directs the user to `just herdr-setup`. Any
 other changed Herdr integration fails closed; do not edit its installed copy or
 relax the fingerprint. Refresh this fixture and patch only after reviewing the

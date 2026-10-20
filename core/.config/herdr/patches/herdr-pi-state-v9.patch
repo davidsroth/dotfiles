@@ -1,14 +1,6 @@
 --- herdr-agent-state.ts
 +++ herdr-agent-state.ts
-@@ -6,6 +6,7 @@
- // @ts-nocheck
- 
- import net from "node:net";
-+import path from "node:path";
- 
- const HERDR_ENV = process.env.HERDR_ENV;
- const socketPath = process.env.HERDR_SOCKET_PATH;
-@@ -172,23 +173,72 @@
+@@ -176,23 +176,72 @@
    }
  }
  
@@ -53,7 +45,7 @@
 +  }
 +}
 +
-+// PATCHED_BY_DOTFILES_HERDR_PI_STATE_V8
++// PATCHED_BY_DOTFILES_HERDR_PI_STATE_V9
  export default function (pi) {
    if (!enabled()) {
      return;
@@ -86,7 +78,7 @@
        return { state: "working" as const, message: undefined };
      }
      return { state: "idle" as const, message: undefined };
-@@ -204,24 +254,72 @@
+@@ -208,24 +257,72 @@
      queueState(next.state, next.message);
    }
  
@@ -167,7 +159,7 @@
    pi.on("session_start", async (event, ctx) => {
      // TUI only: RPC/JSON/print modes are headless (no PTY herdr can display),
      // and RPC still reports hasUI=true, so mode is the reliable gate.
-@@ -230,12 +328,69 @@
+@@ -234,12 +331,69 @@
      }
      rootSession = true;
      updateSessionRef(ctx);
@@ -237,7 +229,7 @@
    pi.on("agent_start", (_event, ctx) => {
      if (!rootSession) {
        return;
-@@ -252,6 +407,10 @@
+@@ -256,6 +410,10 @@
      }
  
      agentActive = false;

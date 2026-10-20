@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Apply the reviewed Herdr Pi v8 state patch without touching unknown files."""
+"""Apply the reviewed Herdr Pi v9 state patch without touching unknown files."""
 
 from __future__ import annotations
 
@@ -15,22 +15,26 @@ import tempfile
 from datetime import UTC, datetime
 
 
-BASE_SHA256 = "9b1c41cd72520fc2abe5f2a2aec995c12a926cce844df472c7fd5fcae4f4dbfa"
-# Previous reviewed outputs remain migratable after a patch refresh.
+INTEGRATION_VERSION = 9
+BASE_SHA256 = "2c5272d732b475bbf91a027203b1f98d25fe43d2c1402530a442b288aeaca1e4"
+# Previous reviewed outputs remain migratable after a patch refresh. All of
+# these are patched v8 integrations; their header still says version 8.
 LEGACY_PATCHED_SHA256S = {
+    "60ad43a34ead8fc01919d5bf4f021e92ce64667ba14c303d7ea3665bc7f7e583",
     "74244056a82a5bc3b217c28940a1f6a43922e72922d0301065f4925d1cdeb8a0",
     "68c8d03b7498595c5b32e97ad8093fa41b786326fb3d703fcfe05c0a68618ac5",
     "ae57feb1322d8d5b6d6d08c9b7a476c952cd5db3b4a82b1d69039b0360ad2959",
 }
-PATCHED_SHA256 = "60ad43a34ead8fc01919d5bf4f021e92ce64667ba14c303d7ea3665bc7f7e583"
+PATCHED_SHA256 = "925dccf54258625398c036fb71ec06577d44c158dfc6659502f7926d74a72c6d"
 PATCHES_DIR = Path(__file__).resolve().parents[1] / "patches"
-FIXTURE_PATH = PATCHES_DIR / "herdr-agent-state-v8.ts"
+FIXTURE_PATH = PATCHES_DIR / f"herdr-agent-state-v{INTEGRATION_VERSION}.ts"
+PATCH_PATH = PATCHES_DIR / f"herdr-pi-state-v{INTEGRATION_VERSION}.patch"
 REQUIRED_HEADER = (
     "// installed by herdr",
     "// managed by herdr; reinstalling or updating the integration overwrites this file.",
     "// HERDR_INTEGRATION_ID=pi",
-    "// HERDR_INTEGRATION_VERSION=8",
 )
+VERSION_LINE = f"// HERDR_INTEGRATION_VERSION={INTEGRATION_VERSION}"
 
 
 def sha256(path: Path) -> str:
@@ -42,12 +46,14 @@ def default_target() -> Path:
     return agent_dir / "extensions" / "herdr-agent-state.ts"
 
 
-def verify_header(text: str, target: Path) -> None:
-    missing = [line for line in REQUIRED_HEADER if line not in text]
+def verify_header(text: str, target: Path, *, require_version: bool) -> None:
+    required = REQUIRED_HEADER + ((VERSION_LINE,) if require_version else ())
+    missing = [line for line in required if line not in text]
     if missing:
         raise ValueError(
-            f"{target} is not Herdr's managed Pi integration v8 (missing {missing[0]!r}). "
-            "If Herdr reinstalled it, run 'just herdr-setup'; otherwise review the integration and refresh the tracked patch."
+            f"{target} is not Herdr's managed Pi integration v{INTEGRATION_VERSION} (missing {missing[0]!r}). "
+            "Run 'herdr integration install pi' with a current Herdr, then 'just herdr-setup'; "
+            "if Herdr already installed a newer version, review it and refresh the tracked patch."
         )
 
 
@@ -60,8 +66,10 @@ def patch_status(target: Path) -> str:
         )
 
     original = target.read_text(encoding="utf-8")
-    verify_header(original, target)
     fingerprint = sha256(target)
+    # Legacy patched files are exact known bytes from an older integration
+    # version, so only their common header is required.
+    verify_header(original, target, require_version=fingerprint not in LEGACY_PATCHED_SHA256S)
     if fingerprint == PATCHED_SHA256:
         return "installed"
     if fingerprint == BASE_SHA256:
@@ -69,7 +77,7 @@ def patch_status(target: Path) -> str:
     if fingerprint in LEGACY_PATCHED_SHA256S:
         return "legacy"
     raise ValueError(
-        f"{target} does not match the reviewed Herdr Pi v8 patch ({fingerprint}). "
+        f"{target} does not match the reviewed Herdr Pi v{INTEGRATION_VERSION} patch ({fingerprint}). "
         "If it was overwritten, run 'just herdr-setup'; otherwise review the integration and refresh "
         "the tracked patch before retrying."
     )
@@ -82,11 +90,11 @@ def check_patch(target: Path) -> str:
         return "installed"
     if status == "legacy":
         raise ValueError(
-            f"{target} has the exact legacy Herdr Pi v8 patch; migration required. "
+            f"{target} has an exact legacy Herdr Pi patch; migration to v{INTEGRATION_VERSION} required. "
             "Run 'just herdr-setup'."
         )
     raise ValueError(
-        f"{target} is the stock Herdr Pi v8 integration. "
+        f"{target} is the stock Herdr Pi v{INTEGRATION_VERSION} integration. "
         "'herdr integration install pi' overwrites this patch; run 'just herdr-setup'."
     )
 
@@ -95,7 +103,8 @@ def build_patched_target(temporary: Path, patch_file: Path) -> None:
     """Build the reviewed target from the tracked stock fixture, never an installed patch."""
     if sha256(FIXTURE_PATH) != BASE_SHA256:
         raise ValueError(
-            "The tracked Herdr Pi v8 fixture failed its expected fingerprint; refusing to modify the managed integration."
+            f"The tracked Herdr Pi v{INTEGRATION_VERSION} fixture failed its expected fingerprint; "
+            "refusing to modify the managed integration."
         )
 
     result = subprocess.run(
@@ -143,7 +152,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--target", type=Path, default=default_target(), help="managed Herdr Pi integration to patch")
     parser.add_argument("--check", action="store_true", help="verify the exact patched integration without modifying it")
     args = parser.parse_args(argv)
-    patch_file = Path(__file__).resolve().parents[1] / "patches" / "herdr-pi-state-v8.patch"
+    patch_file = PATCH_PATH
     try:
         target = args.target.expanduser()
         result = check_patch(target) if args.check else apply_patch(target, patch_file)

@@ -246,7 +246,7 @@ check_herdr_pi_patch() {
   local output status=0
   output="$(python3 "$patcher" --check 2>&1)" || status=$?
   if [[ "$status" == 0 ]]; then
-    PASS "HERDR PI PATCH: exact reviewed v8 patch is installed"
+    PASS "HERDR PI PATCH: exact reviewed v9 patch is installed"
   else
     FAIL "HERDR PI PATCH: ${output//$'\n'/ }"
   fi
