@@ -7,7 +7,7 @@ import { copyFileSync, mkdtempSync, rmSync } from "node:fs";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
-import test from "node:test";
+import test, { mock } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
@@ -86,6 +86,7 @@ test("patched Herdr Pi integration preserves its authority while aggregating roo
       registry: { getActiveSubagents: (sessionId: string) => sessionId === "root-session" ? snapshot : [] },
     };
 
+    mock.timers.enable({ apis: ["setInterval"] });
     const integration = await import(`${pathToFileURL(target).href}?test=${Date.now()}`);
     const pi = new FakePi() as FakePi & { getSessionName: () => string };
     pi.getSessionName = () => sessionName;
@@ -279,12 +280,36 @@ test("patched Herdr Pi integration preserves its authority while aggregating roo
       "idle after compaction",
     );
 
+    // Herdr drops pane metadata on a live handoff while Pi keeps running, so
+    // the summary is re-sent at each turn start and periodically.
+    const summaryReports = () => requests.filter((request) => request.method === "pane.report_metadata").length;
+    const summariesBeforeTurn = summaryReports();
+    await pi.emitLifecycle("agent_start", {}, ctx);
+    await waitFor(() => summaryReports() === summariesBeforeTurn + 1, "summary re-sent at turn start");
+    await pi.emitLifecycle("agent_settled", {}, ctx);
+
+    const summariesBeforeTick = summaryReports();
+    mock.timers.tick(30_000);
+    await waitFor(() => summaryReports() === summariesBeforeTick + 1, "periodic summary refresh");
+    const refreshed = requests.filter((request) => request.method === "pane.report_metadata").at(-1);
+    assert.deepEqual(refreshed.params.tokens, { summary: "Renamed session" });
+    assert.equal(refreshed.params.applies_to_source, "herdr:pi");
+
+    // Shutdown stops the refresh so a reloaded instance does not leave a
+    // stale timer reporting an old name.
+    await pi.emitLifecycle("session_shutdown", { reason: "reload" }, ctx);
+    const summariesAfterShutdown = summaryReports();
+    mock.timers.tick(90_000);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(summaryReports(), summariesAfterShutdown, "no refresh after session_shutdown");
+
     const sequences = requests.map((request) => request.params.seq).filter((seq) => typeof seq === "number");
     assert.ok(sequences.every((seq, index) => index === 0 || seq > sequences[index - 1]), "reports retain one increasing sequence");
     assert.ok(requests.filter((request) => request.method === "pane.report_agent").every((request) => (
       request.params.source === "herdr:pi" && request.params.agent_session_path === "/tmp/root-session.jsonl"
     )), "all state reports retain the managed session reference and source");
   } finally {
+    mock.timers.reset();
     server.close();
     globalThis[registryKey] = priorRegistry;
     for (const [name, value] of Object.entries(previousEnv)) {

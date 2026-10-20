@@ -14,12 +14,14 @@ REPO_ROOT = Path(__file__).resolve().parents[4]
 PATCHER_PATH = REPO_ROOT / "core/.config/herdr/bin/apply-herdr-pi-state-patch.py"
 FIXTURE_PATH = REPO_ROOT / "core/.config/herdr/patches/herdr-agent-state-v9.ts"
 FIXTURES_DIR = REPO_ROOT / "core/.config/herdr/tests/fixtures"
-# Exact reviewed outputs of earlier patch revisions, all on integration v8.
+# Exact reviewed outputs of earlier patch revisions.
 LEGACY_FIXTURE_PATHS = (
     FIXTURES_DIR / "herdr-agent-state-v8.legacy-patched.ts",
     FIXTURES_DIR / "herdr-agent-state-v8.patched.ts",
+    FIXTURES_DIR / "herdr-agent-state-v9.r1-patched.ts",
 )
-LEGACY_FIXTURE_PATH = LEGACY_FIXTURE_PATHS[-1]
+# The v8 output exercises the version-header exemption for legacy files.
+LEGACY_FIXTURE_PATH = LEGACY_FIXTURE_PATHS[1]
 PATCH_PATH = REPO_ROOT / "core/.config/herdr/patches/herdr-pi-state-v9.patch"
 SPEC = importlib.util.spec_from_file_location("herdr_pi_state_patcher", PATCHER_PATH)
 assert SPEC and SPEC.loader
@@ -48,7 +50,7 @@ class HerdrPiStatePatcherTest(unittest.TestCase):
         for source in LEGACY_FIXTURE_PATHS:
             with self.subTest(source=source.name):
                 self.assertIn(patcher.sha256(source), patcher.LEGACY_PATCHED_SHA256S)
-                self.assertIn("// HERDR_INTEGRATION_VERSION=8", source.read_text())
+                self.assertIn("PATCHED_BY_DOTFILES_HERDR_PI_STATE", source.read_text())
 
     def test_applies_once_then_is_idempotent(self):
         with tempfile.TemporaryDirectory() as tmp:

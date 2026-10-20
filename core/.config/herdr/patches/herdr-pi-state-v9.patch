@@ -1,6 +1,6 @@
 --- herdr-agent-state.ts
 +++ herdr-agent-state.ts
-@@ -176,23 +176,72 @@
+@@ -176,23 +176,76 @@
    }
  }
  
@@ -45,6 +45,8 @@
 +  }
 +}
 +
++const SUMMARY_REFRESH_MS = 30_000;
++
 +// PATCHED_BY_DOTFILES_HERDR_PI_STATE_V9
  export default function (pi) {
    if (!enabled()) {
@@ -62,6 +64,8 @@
    let lastState: AgentState | undefined;
    let lastMessage: string | undefined;
    let rootSession = false;
++  let summaryCwd: string | undefined;
++  let summaryRefreshTimer: ReturnType<typeof setInterval> | undefined;
  
 +  function blockedMessage(): string | undefined {
 +    return [...blockers.values()].at(-1);
@@ -78,7 +82,7 @@
        return { state: "working" as const, message: undefined };
      }
      return { state: "idle" as const, message: undefined };
-@@ -208,24 +257,72 @@
+@@ -208,24 +261,72 @@
      queueState(next.state, next.message);
    }
  
@@ -159,22 +163,44 @@
    pi.on("session_start", async (event, ctx) => {
      // TUI only: RPC/JSON/print modes are headless (no PTY herdr can display),
      // and RPC still reports hasUI=true, so mode is the reliable gate.
-@@ -234,12 +331,69 @@
+@@ -234,18 +335,98 @@
      }
      rootSession = true;
      updateSessionRef(ctx);
 +    // A reload can replace this extension after subagents already started.
 +    reconcileSubagents();
      await reportSession(event?.reason);
-+    await reportSessionSummary(ctx);
++    summaryCwd = typeof ctx?.cwd === "string" ? ctx.cwd : undefined;
++    await reportSessionSummary();
++    startSummaryRefresh();
      // A reload can replace this extension mid-run without emitting another agent_start.
      agentActive = ctx?.isIdle?.() === false;
      publishState(true);
    });
  
-+  function reportSessionSummary(ctx: any): Promise<void> {
++  // Herdr drops pane metadata tokens on a live handoff while Pi keeps running,
++  // so session_start never fires again. Re-send the summary periodically; an
++  // unchanged token is a server-side no-op (no revision bump or event).
++  function startSummaryRefresh(): void {
++    stopSummaryRefresh();
++    summaryRefreshTimer = setInterval(() => {
++      if (rootSession) void reportSessionSummary();
++    }, SUMMARY_REFRESH_MS);
++    summaryRefreshTimer?.unref?.();
++  }
++
++  function stopSummaryRefresh(): void {
++    if (summaryRefreshTimer !== undefined) clearInterval(summaryRefreshTimer);
++    summaryRefreshTimer = undefined;
++  }
++
++  pi.on("session_shutdown", () => {
++    stopSummaryRefresh();
++  });
++
++  function reportSessionSummary(): Promise<void> {
 +    const sessionName = pi.getSessionName?.()?.trim();
-+    const cwdName = typeof ctx?.cwd === "string" ? path.basename(ctx.cwd) : "";
++    const cwdName = summaryCwd ? path.basename(summaryCwd) : "";
 +    const summary = sessionName || cwdName;
 +    return sendRequest({
 +      id: `${source}:metadata:${Date.now()}:${Math.random().toString(36).slice(2)}`,
@@ -201,9 +227,9 @@
 +    }
 +  }
 +
-+  pi.on("session_info_changed", (_event, ctx) => {
++  pi.on("session_info_changed", () => {
 +    if (!rootSession) return;
-+    void reportSessionSummary(ctx);
++    void reportSessionSummary();
 +  });
 +
 +  pi.on("before_agent_start", (_event, ctx) => {
@@ -229,7 +255,14 @@
    pi.on("agent_start", (_event, ctx) => {
      if (!rootSession) {
        return;
-@@ -256,6 +410,10 @@
+     }
+     updateSessionRef(ctx);
+     void reportSession();
++    void reportSessionSummary();
+     agentActive = true;
+     publishState();
+   });
+@@ -256,6 +437,10 @@
      }
  
      agentActive = false;

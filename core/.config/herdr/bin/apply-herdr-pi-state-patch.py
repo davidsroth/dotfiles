@@ -17,15 +17,16 @@ from datetime import UTC, datetime
 
 INTEGRATION_VERSION = 9
 BASE_SHA256 = "2c5272d732b475bbf91a027203b1f98d25fe43d2c1402530a442b288aeaca1e4"
-# Previous reviewed outputs remain migratable after a patch refresh. All of
-# these are patched v8 integrations; their header still says version 8.
+# Previous reviewed outputs remain migratable after a patch refresh. Some are
+# patched v8 integrations whose header still says version 8.
 LEGACY_PATCHED_SHA256S = {
+    "925dccf54258625398c036fb71ec06577d44c158dfc6659502f7926d74a72c6d",
     "60ad43a34ead8fc01919d5bf4f021e92ce64667ba14c303d7ea3665bc7f7e583",
     "74244056a82a5bc3b217c28940a1f6a43922e72922d0301065f4925d1cdeb8a0",
     "68c8d03b7498595c5b32e97ad8093fa41b786326fb3d703fcfe05c0a68618ac5",
     "ae57feb1322d8d5b6d6d08c9b7a476c952cd5db3b4a82b1d69039b0360ad2959",
 }
-PATCHED_SHA256 = "925dccf54258625398c036fb71ec06577d44c158dfc6659502f7926d74a72c6d"
+PATCHED_SHA256 = "497c04b1f60b9e2c810f7665c3c13a2576d071cce511a1e41230a609c3e6ac1e"
 PATCHES_DIR = Path(__file__).resolve().parents[1] / "patches"
 FIXTURE_PATH = PATCHES_DIR / f"herdr-agent-state-v{INTEGRATION_VERSION}.ts"
 PATCH_PATH = PATCHES_DIR / f"herdr-pi-state-v{INTEGRATION_VERSION}.patch"

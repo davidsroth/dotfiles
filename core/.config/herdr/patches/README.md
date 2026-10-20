@@ -15,7 +15,7 @@ the required remediation for a stock, mismatched, or absent integration.
 
 The patcher checks the managed header and the complete source fingerprint
 before creating a timestamped local backup and replacing anything. It also
-recognizes prior reviewed patched fingerprints (the v8 outputs in
+recognizes prior reviewed patched fingerprints (the outputs in
 `../tests/fixtures/`) for a one-time migration: it backs up that exact file, then
 builds the replacement from this unpatched fixture and the current reviewed patch. `--check` reports
 that migration as required and directs the user to `just herdr-setup`. Any
