@@ -4,7 +4,7 @@ Portable, anonymized operating lessons for the public dotfiles repository.
 General style and environment defaults belong in agent instructions; private
 preferences, workplace context, and machine details belong in local memory.
 
-## Outcomes and authorization
+## Outcomes and authorization (added 2026-10-04)
 
 - Optimize for the requested user-visible outcome, not an easier technical
   proxy. Prefer complete useful workflows and bounded real-world pilots over
@@ -15,7 +15,7 @@ preferences, workplace context, and machine details belong in local memory.
 - Confirm destructive or disruptive changes to shared resources. Check for live
   users before deleting worktrees, killing processes, or restarting services.
 
-## Concurrent work and handoffs
+## Concurrent work and handoffs (added 2026-10-04)
 
 - Shared working trees may have multiple writers. Use a dedicated worktree or
   precise hunk staging; plain `git add <file>` can include another session's work.
@@ -26,7 +26,7 @@ preferences, workplace context, and machine details belong in local memory.
 - Preserve cross-file intent during merges rather than choosing whichever side
   looks like a structural superset. Search for conflict markers afterward.
 
-## Verification discipline
+## Verification discipline (added ≤2026-05-29)
 
 - Verify installed/runtime state, not only source and tests: schema objects,
   effective configuration, dependency origins, and the actual request-serving
@@ -43,7 +43,7 @@ preferences, workplace context, and machine details belong in local memory.
   if [ -n "${VAR:-}" ]; then echo "set length=${#VAR}"; else echo unset; fi
   ```
 
-### Protocol-stream ownership
+### Protocol-stream ownership (added 2026-09-07)
 
 Give each protocol stream one serialized writer. Mixing asynchronous writes
 with raw synchronous writes can interleave records; pipe writes can also be
@@ -51,7 +51,7 @@ short under backpressure. Use a backpressure-aware writer and test real OS pipes
 with concurrent large frames and slow readers. Separate channels still need
 completion ordering when reports must arrive before completion is announced.
 
-### Dependency qualification
+### Dependency qualification (added 2026-10-04)
 
 Installation-capable package-manager run/exec wrappers can reinstall dependencies
 when HOME or store settings change, even for code generation. With borrowed
@@ -59,7 +59,7 @@ symlinked node_modules this can delete a shared target before a network-denied
 install fails. Invoke installed entrypoints directly for hermetic tests/builds;
 verify dependency links and executable bytes after recovery.
 
-## Delegation and agent communication
+## Delegation and agent communication (added 2026-10-04)
 
 - Size the work before delegating. Use parallel agents for independent breadth;
   keep global coherence centrally. Small edits are often cheaper in-session.
@@ -73,7 +73,7 @@ verify dependency links and executable bytes after recovery.
   approval. External communication remains subject to its approval tools.
 - Resolve relative deadlines from the source timestamp, not processing day.
 
-## Git and frontend footguns
+## Git and frontend footguns (added 2026-10-04)
 
 - During cherry-pick, `git checkout --theirs <file>` replaces the entire file,
   not just conflicting hunks. Inspect the staged diff.
@@ -84,12 +84,12 @@ verify dependency links and executable bytes after recovery.
 - React hooks must precede conditional returns; cherry-picks can move early
   returns and make previously valid hooks conditional.
 
-### Isolated commit-snapshot validation
+### Isolated commit-snapshot validation (added 2026-09-24)
 
 Pre-commit stashes tracked unstaged changes but leaves future untracked modules visible; full-project typechecks can therefore fail on a partial staged feature. Validate/hooks against an exact isolated staged-tree export rather than bypassing checks. If using `GIT_WORK_TREE` with a shared index, disable fsmonitor/untracked-cache for those commands and clear the index's fsmonitor state afterward: cached results from the alternate tree can otherwise hide real source edits from `status` and `add`.
 
 
-## Pi and package maintenance
+## Pi and package maintenance (added 2026-10-04)
 
 - Pi processes are named `pi`; do not look only for `node` when checking liveness.
 - Validate extension changes with typechecking and Pi's actual installed module
@@ -99,17 +99,17 @@ Pre-commit stashes tracked unstaged changes but leaves future untracked modules 
   directories should link to it. Keep package implementation detail in package
   docs/tests rather than duplicating it in global memory.
 
-## Shared-document prose
+## Shared-document prose (added 2026-10-04)
 
 Write conclusions, evidence, decisions, trade-offs, risks, and open questions
 directly. Remove discovery-story prose, rhetorical self-dialogue, and simulated
 internal reasoning. Preserve concise rationale and traceable sources.
 
-### Copy-ready text
+### Copy-ready text (added 2026-09-25)
 When giving the user text they should be able to copy, put it in backticks (use a fenced code block for a full message).
 
 
-## Memory hygiene
+## Memory hygiene (added 2026-07-13)
 
 - One canonical home per fact: public/global for portable anonymized lessons;
   local for private preferences and machine/cross-repo context; project for
