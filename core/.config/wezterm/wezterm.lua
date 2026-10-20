@@ -98,10 +98,10 @@ config.mouse_bindings = {
 -- Leader key configuration for advanced operations
 config.leader = { key = "a", mods = "CTRL", timeout_milliseconds = 1000 }
 
--- Cmd bracket chords drive Herdr, which needs a different encoding than
--- everything else: Herdr's parser treats Alt+[ / Alt+] (ESC [ and ESC ]) as
--- CSI/OSC introducers and swallows them, and only accepts CSI u with the super
--- modifier. 91 and 93 are '[' and ']'; modifier 9 = super(8) + 1, and 10 adds
+-- Bracket chords drive Herdr with CSI u, which is unambiguous: legacy Alt+[ /
+-- Alt+] (ESC [ and ESC ]) collide with the CSI/OSC introducers (Herdr 0.9.3+
+-- only separates them by timing), and Cmd has no legacy encoding at all.
+-- 91 and 93 are '[' and ']'; modifier 9 = super(8) + 1, and 10 adds
 -- shift(1). Outside Herdr the original action still applies.
 local function herdr_or(csi_u, fallback)
 	return wezterm.action_callback(function(window, pane)
@@ -276,10 +276,8 @@ config.keys = {
 	},
 
 	-- Switch tmux windows / Herdr tabs with Cmd+[ / Cmd+].
-	-- tmux binds M-[ and M-] (keybindings.conf), but Herdr cannot: Alt+[ and
-	-- Alt+] encode to ESC [ and ESC ], the CSI and OSC introducers, which
-	-- Herdr's input parser swallows. Herdr does accept the CSI u super
-	-- encoding, so pick the encoding from the pane's foreground process.
+	-- tmux binds M-[ and M-] (keybindings.conf); Herdr gets the CSI u super
+	-- encoding instead (see herdr_or), picked from the pane's foreground process.
 	{ key = "[", mods = "CMD", action = switch_prev_tab },
 	{ key = "]", mods = "CMD", action = switch_next_tab },
 	{ key = "[", mods = "CMD|SHIFT", action = switch_prev_workspace },

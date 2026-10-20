@@ -28,6 +28,8 @@ class HerdrSetupPreflightTest(unittest.TestCase):
             )
             herdr.chmod(herdr.stat().st_mode | stat.S_IXUSR)
             env = os.environ.copy()
+            # Inside a Herdr pane this points at the real binary, bypassing the stub.
+            env.pop("HERDR_BIN_PATH", None)
             env["PATH"] = f"{bin_dir}{os.pathsep}{env['PATH']}"
             return subprocess.run(
                 ["bash", str(PREFLIGHT)],
@@ -39,16 +41,17 @@ class HerdrSetupPreflightTest(unittest.TestCase):
             )
 
     def test_accepts_minimum_version_and_preview_builds(self):
-        for version in ("herdr 0.8.0", "herdr 0.8.0-preview.2026-08-04"):
+        for version in ("herdr 0.9.2", "herdr 0.9.5", "herdr 0.10.0", "herdr 1.0.0", "herdr 0.9.2-preview.2026-09-29"):
             with self.subTest(version=version):
                 result = self.run_preflight(version)
                 self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_rejects_unsupported_version(self):
-        result = self.run_preflight("herdr 0.7.9")
-
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("0.8.0 or newer is required", result.stderr)
+        for version in ("herdr 0.9.1", "herdr 0.8.2-preview.2026-08-19", "herdr 0.7.9"):
+            with self.subTest(version=version):
+                result = self.run_preflight(version)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("0.9.2 or newer is required", result.stderr)
 
     @unittest.skipUnless(shutil.which("just"), "just is not installed")
     def test_setup_rejects_unsupported_version_before_linking_plugins(self):
@@ -69,6 +72,7 @@ class HerdrSetupPreflightTest(unittest.TestCase):
             )
             herdr.chmod(herdr.stat().st_mode | stat.S_IXUSR)
             env = os.environ.copy()
+            env.pop("HERDR_BIN_PATH", None)
             env.update(
                 {
                     "PATH": f"{bin_dir}{os.pathsep}{env['PATH']}",
@@ -85,7 +89,7 @@ class HerdrSetupPreflightTest(unittest.TestCase):
             )
 
             self.assertNotEqual(result.returncode, 0)
-            self.assertIn("0.8.0 or newer is required", result.stderr)
+            self.assertIn("0.9.2 or newer is required", result.stderr)
             self.assertFalse(call_log.exists(), call_log.read_text() if call_log.exists() else "")
 
     def test_rejects_unparseable_version_safely(self):

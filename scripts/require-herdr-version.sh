@@ -2,7 +2,8 @@
 # Refuse setup before it can link plugins unsupported by the installed Herdr.
 set -euo pipefail
 
-readonly MIN_HERDR_VERSION="0.8.0"
+readonly MIN_HERDR_VERSION="0.9.2"
+readonly MIN_MAJOR=0 MIN_MINOR=9 MIN_PATCH=2
 herdr_bin="${HERDR_BIN_PATH:-herdr}"
 
 if ! command -v "$herdr_bin" >/dev/null 2>&1; then
@@ -20,9 +21,9 @@ if [[ ! "$version_output" =~ ([0-9]+)\.([0-9]+)\.([0-9]+) ]]; then
   exit 1
 fi
 
-major="${BASH_REMATCH[1]}"
-minor="${BASH_REMATCH[2]}"
-if ((10#$major == 0 && 10#$minor < 8)); then
+found=$((10#${BASH_REMATCH[1]} * 1000000 + 10#${BASH_REMATCH[2]} * 1000 + 10#${BASH_REMATCH[3]}))
+required=$((MIN_MAJOR * 1000000 + MIN_MINOR * 1000 + MIN_PATCH))
+if ((found < required)); then
   echo "herdr: $MIN_HERDR_VERSION or newer is required (found ${BASH_REMATCH[0]})" >&2
   echo "Upgrade Herdr before running 'just herdr-setup'; no plugins were linked." >&2
   exit 1

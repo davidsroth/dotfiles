@@ -1,5 +1,5 @@
-# Herdr keymap adapted from ~/.config/tmux. Requires Herdr 0.8.0 or newer
-# because it uses the local non-idle-agent plugin. Herdr supports one key after
+# Herdr keymap adapted from ~/.config/tmux. Requires Herdr 0.9.2 or newer
+# (keys.clear_pane, local plugins). Herdr supports one key after
 # the prefix, so tmux key tables such as prefix+c+p cannot be reproduced.
 # Popup commands are temporary zoomed panes.
 
@@ -35,22 +35,25 @@ next_workspace = ["prefix+)", "cmd+shift+]", "alt+}"]
 # Cycle the sidebar's agent rows without opening the picker, or jump directly
 # to agents 1-9 with Alt+number. The alt+[ / alt+] bindings only work because
 # WezTerm sends them as CSI u (ESC [ 91;3u / ESC [ 93;3u) when herdr is
-# focused — the legacy ESC [ / ESC ] encodings would be swallowed as CSI/OSC
-# introducers, like the tab comment below explains.
+# focused. Herdr 0.9.3+ also disambiguates legacy ESC [ / ESC ] by timing,
+# but CSI u stays unambiguous when keys arrive in quick succession.
 previous_agent = ["prefix+p", "alt+["]
 next_agent = ["prefix+n", "alt+]"]
 focus_agent = "alt+1..9"
 
-# Windows map to Herdr tabs. Unlike tmux, Herdr cannot bind alt+[ / alt+]:
-# their legacy encodings (ESC [ and ESC ]) are the CSI and OSC introducers, so
-# Herdr's input parser consumes them and the binding never fires. Cmd works
-# instead, via the CSI u super encoding WezTerm sends (see wezterm.lua).
+# Windows map to Herdr tabs. tmux's M-[ / M-] are taken by agent cycling
+# above, so tabs use Cmd via the CSI u super encoding WezTerm sends (see
+# wezterm.lua).
 new_tab = "prefix+c"
 rename_tab = "prefix+shift+t"
 previous_tab = "cmd+["
 next_tab = "cmd+]"
 # Keep Herdr's default prefix+1..9 binding for direct tab switching.
 close_tab = "prefix+d"
+# tmux swaps windows with C-S-Left/Right, but WezTerm's defaults consume
+# those chords (ActivatePaneDirection), so reorder tabs with prefix+< / >.
+move_tab_previous = "prefix+<"
+move_tab_next = "prefix+>"
 
 # Panes: preserve tmux's prefix+hjkl, split aliases, zoom, and copy entry.
 focus_pane_left = "prefix+h"
@@ -66,6 +69,13 @@ zoom = "prefix+z"
 copy_mode = "prefix+enter"
 edit_scrollback = "prefix+shift+e"
 resize_mode = "prefix+ctrl+r"
+# tmux prefix+C-h/j/k/l: one-keystroke resize without entering resize mode.
+resize_pane_left = "prefix+ctrl+h"
+resize_pane_down = "prefix+ctrl+j"
+resize_pane_up = "prefix+ctrl+k"
+resize_pane_right = "prefix+ctrl+l"
+# tmux prefix+L: clear the screen and scrollback, keeping the prompt line.
+clear_pane = "prefix+shift+l"
 toggle_sidebar = "prefix+["
 
 # Seamless Ctrl-h/j/k/l across herdr panes and Vim/Neovim splits, via the
@@ -123,7 +133,7 @@ command = "$HOME/.config/herdr/bin/workspace-picker.sh"
 width = "60%"
 height = "50%"
 
-# tmux prefix+g: lazygit popup (temporary zoomed pane in Herdr 0.7.x).
+# tmux prefix+g: lazygit popup (type = "pane" is a temporary zoomed pane).
 [[keys.command]]
 key = "prefix+g"
 type = "pane"
