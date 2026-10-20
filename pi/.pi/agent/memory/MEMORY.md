@@ -88,6 +88,11 @@ verify dependency links and executable bytes after recovery.
 
 Pre-commit stashes tracked unstaged changes but leaves future untracked modules visible; full-project typechecks can therefore fail on a partial staged feature. Validate/hooks against an exact isolated staged-tree export rather than bypassing checks. If using `GIT_WORK_TREE` with a shared index, disable fsmonitor/untracked-cache for those commands and clear the index's fsmonitor state afterward: cached results from the alternate tree can otherwise hide real source edits from `status` and `add`.
 
+### Worktree registration ordering (added 2026-10-13)
+
+`git worktree list` can reorder linked records when a path moves. Verify the exact expected registration mapping by path/identity, not list position; test both relocation and rollback with multiple linked worktrees. A single-worktree fixture can miss this false-failure case.
+
+
 
 ## Pi and package maintenance (added 2026-10-04)
 
@@ -98,6 +103,17 @@ Pre-commit stashes tracked unstaged changes but leaves future untracked modules 
 - Canonical cross-harness skills belong in a tracked source directory; runtime
   directories should link to it. Keep package implementation detail in package
   docs/tests rather than duplicating it in global memory.
+
+### Extension lifetime vs process lifetime (added 2026-10-13)
+
+Pi re-imports extensions (fresh module state) on every session replacement
+(new/resume/fork, e.g. a hosted agent's rotation) and on `/reload`, emitting
+`session_shutdown` first. Process-scoped resources such as inherited fds belong
+on a `globalThis` `Symbol.for` singleton; close them only on `reason === "quit"`,
+and never reopen a closed fd number because the OS may have reassigned it.
+Gate "user-facing" side effects (desktop notifications) on `ctx.mode === "tui"`:
+RPC-hosted agents report `hasUI=true`, and in-process subagents run as `print`.
+
 
 ## Shared-document prose (added 2026-10-04)
 
